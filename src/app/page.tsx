@@ -1,4 +1,4 @@
-import TimetableApp from '@/components/TimetableApp'
+import TimetableApp from '@/features/timetable/TimetableApp'
 
 export default function Home() {
   return (
