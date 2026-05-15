@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 import { NextResponse } from 'next/server'
@@ -7,13 +8,58 @@ import { normalizeConstraintsWithDevstral } from '@/features/timetable/ai/devstr
 import { buildDevstralRequestPreview, buildSolverInput } from '@/features/timetable/ai/normalize'
 import type { TimetableSolveResult } from '@/features/timetable/ai/types'
 
-const PYTHON_BIN = process.env.TIMETABLE_PYTHON_BIN || 'python3'
-const PYTHON_RUNNER = path.join(process.cwd(), 'python', 'timetable_solver', 'runner.py')
+const REPO_ROOT = process.cwd()
+const PYTHON_RUNNER = path.join(REPO_ROOT, 'python', 'timetable_solver', 'runner.py')
+
+function getLocalVenvCandidates() {
+  return [
+    path.join(REPO_ROOT, ['.venv', 'bin', 'python'].join(path.sep)),
+    path.join(REPO_ROOT, ['.venv', 'Scripts', 'python.exe'].join(path.sep)),
+  ]
+}
+
+function resolvePythonBin() {
+  if (process.env.TIMETABLE_PYTHON_BIN) {
+    return process.env.TIMETABLE_PYTHON_BIN
+  }
+
+  for (const candidate of getLocalVenvCandidates()) {
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  }
+
+  return process.platform === 'win32' ? 'python' : existsSync('/usr/bin/python3') ? 'python3' : 'python'
+}
+
+function resolveRunnerCommand(pythonBin: string) {
+  if (process.env.TIMETABLE_PYTHON_RUNNER_DIR) {
+    const bundledRunner = process.platform === 'win32'
+      ? path.join(process.env.TIMETABLE_PYTHON_RUNNER_DIR, 'runner.exe')
+      : path.join(process.env.TIMETABLE_PYTHON_RUNNER_DIR, 'runner')
+
+    if (existsSync(bundledRunner)) {
+      return {
+        command: bundledRunner,
+        args: [],
+        cwd: process.env.TIMETABLE_PYTHON_RUNNER_DIR,
+      }
+    }
+  }
+
+  return {
+    command: pythonBin,
+    args: [PYTHON_RUNNER],
+    cwd: path.join(REPO_ROOT, 'python', 'timetable_solver'),
+  }
+}
 
 function runPythonSolver(input: Record<string, unknown>): Promise<TimetableSolveResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON_BIN, [PYTHON_RUNNER], {
-      cwd: path.join(process.cwd(), 'python', 'timetable_solver'),
+    const pythonBin = resolvePythonBin()
+    const runner = resolveRunnerCommand(pythonBin)
+    const child = spawn(runner.command, runner.args, {
+      cwd: runner.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -68,9 +114,9 @@ export async function POST(request: Request) {
     const result = await runPythonSolver(solverInput)
 
     return NextResponse.json({
-      ...result,
-      normalizedConstraints,
-      modelRequestPreview,
+      status: result.status,
+      message: result.message,
+      cells: result.cells,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Không thể tạo thời khóa biểu.'
