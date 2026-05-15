@@ -11,9 +11,9 @@ export const days = [
 ] as const
 
 export const sessions = [
-  { id: 'morning', label: 'Sáng', icon: Sunrise },
-  { id: 'afternoon', label: 'Chiều', icon: Sun },
-  { id: 'night', label: 'Tối', icon: Moon },
+  { id: 'morning', label: 'Sáng', icon: '🌤️', periodIcon: Sunrise },
+  { id: 'afternoon', label: 'Chiều', icon: '☀️', periodIcon: Sun },
+  { id: 'night', label: 'Tối', icon: '🌙', periodIcon: Moon },
 ] as const
 
 export const defaultPeriods = {

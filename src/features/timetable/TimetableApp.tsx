@@ -19,7 +19,6 @@ import {
   Sun,
   Trash2,
   User,
-  Zap,
 } from 'lucide-react'
 
 import { generateTimetableWithAI } from './ai/client'
@@ -89,25 +88,32 @@ function DayTile({ selected, title, subtitle, onClick }) {
   )
 }
 
-function SessionTile({ selected, icon: Icon, title, onClick }) {
+function SessionTile({ selected, icon, title, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group flex items-center justify-center gap-2.5 rounded-md px-4 py-3 transition-all duration-200 ${
+      className={`group flex flex-col items-center justify-center gap-2 rounded-md px-4 py-4 transition-all duration-200 ${
         selected
           ? 'bg-[#4DB848] text-[#0a0a0a]'
           : 'border border-white/[0.06] bg-[#141414] text-white hover:border-white/[0.12] hover:bg-white/[0.04]'
       }`}
     >
-      <Icon size={18} className={selected ? 'text-[#0a0a0a]' : 'text-white/50'} strokeWidth={1.5} />
+      <span
+        className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
+          selected
+            ? 'border-[#0a0a0a]/10 bg-[#0a0a0a]/10 text-[#0a0a0a]'
+            : 'border-white/[0.08] bg-white/[0.03] text-[#4DB848] group-hover:bg-white/[0.06]'
+        }`}
+      >
+        <span className="text-xl">{icon}</span>
+      </span>
       <span className={`text-sm font-semibold ${selected ? 'text-[#0a0a0a]' : 'text-white'}`}>{title}</span>
     </button>
   )
 }
 
 function PeriodControl({ session, value, onChange }) {
-  const Icon = session.icon
   const [rawInput, setRawInput] = useState(String(value))
   const [isInvalid, setIsInvalid] = useState(false)
 
@@ -171,8 +177,8 @@ function PeriodControl({ session, value, onChange }) {
     <div className={`${panelClass} p-4`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2.5">
-          <span className={`${iconShellClass} shrink-0`}>
-            <Icon size={16} strokeWidth={1.5} />
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-[#4DB848] transition">
+            <span className="text-xl">{session.icon}</span>
           </span>
           <div>
             <p className="text-sm font-semibold text-white">{session.label}</p>
@@ -596,13 +602,6 @@ export default function App() {
                 <p className="mt-4 max-w-2xl text-sm text-white/40">
                   Tích vào các lựa chọn bạn muốn sử dụng. Bỏ tích những mục không cần.
                 </p>
-              </div>
-              <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>
-                <p className="font-medium text-white">Giao diện</p>
-                <div className="mt-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-widest text-white/50">
-                  <Zap size={14} strokeWidth={1.5} className="text-[#4DB848]" />
-                  <span>Xanh</span>
-                </div>
               </div>
             </header>
 
