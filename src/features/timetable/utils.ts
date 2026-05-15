@@ -11,3 +11,5 @@ export const sortAlphabetically = (items: string[]) =>
   [...items].sort((first, second) => first.localeCompare(second, 'vi', { numeric: true, sensitivity: 'base' }))
 
 export const getCellKey = (dayId: string, sessionId: string, period: number) => `${dayId}-${sessionId}-${period}`
+
+export const getAssignmentSlotKey = (teacher: string, className: string, slotId: string) => `${teacher}__${className}__${slotId}`

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ArrowLeft,
   BookOpen,
@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 
 import { generateTimetableWithAI } from './ai/client'
+import type { TimetableSolveResult } from './ai/types'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -114,27 +115,19 @@ function SessionTile({ selected, icon, title, onClick }) {
 }
 
 function PeriodControl({ session, value, onChange }) {
-  const [rawInput, setRawInput] = useState(String(value))
-  const [isInvalid, setIsInvalid] = useState(false)
-
-  // Sync rawInput when parent value changes externally (e.g. +/- buttons)
-  const prevValue = useRef(value)
-  useEffect(() => {
-    if (value !== prevValue.current) {
-      setRawInput(String(value))
-      setIsInvalid(false)
-      prevValue.current = value
-    }
-  }, [value])
+  const [rawInput, setRawInput] = useState<string | null>(null)
 
   const clampValue = (nextValue) => Math.min(12, Math.max(1, nextValue))
+  const displayValue = rawInput ?? String(value)
+  const parsedRawValue = rawInput === null || rawInput === '' ? null : Number(rawInput)
+  const isInvalid =
+    rawInput !== null &&
+    (rawInput === '' || Number.isNaN(parsedRawValue) || parsedRawValue < 1 || parsedRawValue > 12 || !Number.isInteger(parsedRawValue))
 
   const commitValue = (nextValue) => {
     const cleanValue = Number.isNaN(nextValue) ? value : clampValue(nextValue)
     onChange(session.id, cleanValue)
-    setRawInput(String(cleanValue))
-    setIsInvalid(false)
-    prevValue.current = cleanValue
+    setRawInput(null)
   }
 
   const handleInputChange = (event) => {
@@ -142,25 +135,26 @@ function PeriodControl({ session, value, onChange }) {
     setRawInput(raw)
 
     if (raw === '') {
-      setIsInvalid(true)
       return
     }
 
     const num = Number(raw)
-    if (Number.isNaN(num) || num < 1 || num > 12 || !Number.isInteger(num)) {
-      setIsInvalid(true)
-    } else {
-      setIsInvalid(false)
+    if (!Number.isNaN(num) && num >= 1 && num <= 12 && Number.isInteger(num)) {
       onChange(session.id, num)
     }
   }
 
   const handleBlur = () => {
-    if (rawInput === '' || isInvalid) {
-      commitValue(value)
-    } else {
-      commitValue(Number(rawInput))
+    if (rawInput === null) {
+      return
     }
+
+    if (isInvalid) {
+      setRawInput(null)
+      return
+    }
+
+    commitValue(Number(rawInput))
   }
 
   const handleKeyDown = (event) => {
@@ -170,8 +164,10 @@ function PeriodControl({ session, value, onChange }) {
     }
   }
 
-  // Sync raw input when parent value changes (e.g. via +/- buttons)
-  const displayValue = rawInput
+  const handleStep = (delta) => {
+    const baseValue = rawInput !== null && !isInvalid && rawInput !== '' ? Number(rawInput) : value
+    commitValue(baseValue + delta)
+  }
 
   return (
     <div className={`${panelClass} p-4`}>
@@ -189,7 +185,7 @@ function PeriodControl({ session, value, onChange }) {
         <div className={`${panelMutedClass} flex items-center gap-2 p-1.5`}>
           <button
             type="button"
-            onClick={() => commitValue(value - 1)}
+            onClick={() => handleStep(-1)}
             className="flex h-8 w-8 items-center justify-center rounded border border-white/[0.08] bg-transparent text-white/50 transition hover:bg-white/[0.04]"
             aria-label={`Giảm số tiết buổi ${session.label}`}
           >
@@ -215,7 +211,7 @@ function PeriodControl({ session, value, onChange }) {
           />
           <button
             type="button"
-            onClick={() => commitValue(value + 1)}
+            onClick={() => handleStep(1)}
             className="flex h-8 w-8 items-center justify-center rounded border border-white/[0.08] bg-transparent text-white/50 transition hover:bg-white/[0.04]"
             aria-label={`Tăng số tiết buổi ${session.label}`}
           >
@@ -247,76 +243,7 @@ function InfoField({ icon: Icon, label, placeholder, value, onChange }) {
   )
 }
 
-function AiMarkdown({ content }) {
-  const lines = content.split('\n')
-  const elements = []
-  let i = 0
-
-  while (i < lines.length) {
-    const line = lines[i]
-
-    if (line.startsWith('### ')) {
-      elements.push(<h3 key={i} className="mb-2 mt-4 text-base font-semibold text-white">{line.slice(4)}</h3>)
-    } else if (line.startsWith('## ')) {
-      elements.push(<h2 key={i} className="mb-2 mt-5 text-lg font-semibold text-white">{line.slice(3)}</h2>)
-    } else if (line.startsWith('# ')) {
-      elements.push(<h1 key={i} className="mb-3 mt-6 text-xl font-semibold text-white">{line.slice(2)}</h1>)
-    } else if (line.startsWith('|')) {
-      const tableLines = []
-      while (i < lines.length && lines[i].startsWith('|')) {
-        tableLines.push(lines[i])
-        i++
-      }
-      const [header, separator, ...rows] = tableLines
-      if (header) {
-        const headers = header.split('|').filter((c) => c.trim())
-        elements.push(
-          <div key={`table-${i}`} className="my-3 overflow-x-auto rounded-md border border-white/[0.06] bg-[#141414]">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  {headers.map((h, idx) => (
-                    <th key={idx} className="border-b border-white/[0.06] bg-white/[0.02] px-3 py-2 text-left text-xs font-medium text-white/70">
-                      {h.trim()}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, rowIdx) => (
-                  <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-[#0a0a0a]' : ''}>
-                    {row.split('|').filter((c) => c.trim() !== undefined && c !== '').map((cell, cellIdx) => (
-                      <td key={cellIdx} className="border-b border-white/[0.04] px-3 py-2 text-sm text-white/60">
-                        {cell.trim()}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      }
-      continue
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      elements.push(
-        <li key={i} className="ml-4 list-disc text-white/60">
-          {line.slice(2).replace(/\*\*(.*?)\*\*/g, '$1')}
-        </li>
-      )
-    } else if (line.trim() === '') {
-      elements.push(<br key={i} />)
-    } else {
-      const formatted = line.replace(/\*\*(.*?)\*\*/g, (_, m) => m)
-      elements.push(<p key={i} className="my-1 text-sm leading-6 text-white/60">{formatted}</p>)
-    }
-    i++
-  }
-
-  return <div>{elements}</div>
-}
-
-export default function App() {
+export default function App({ onBackToLanding }) {
   const [page, setPage] = useState('select')
   const [selectedDays, setSelectedDays] = useState(['monday', 'wednesday', 'friday'])
   const [selectedSessions, setSelectedSessions] = useState(['morning'])
@@ -332,9 +259,9 @@ export default function App() {
   const [assignmentList, setAssignmentList] = useState([])
   const [constraintDraft, setConstraintDraft] = useState({ type: 'required', text: '' })
   const [constraintList, setConstraintList] = useState([])
-  const [aiResult, setAiResult] = useState(null)
+  const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError] = useState(null)
+  const [aiError, setAiError] = useState<string | null>(null)
 
   const sortedTeacherList = useMemo(() => sortAlphabetically(teacherList), [teacherList])
   const sortedSubjectList = useMemo(() => sortAlphabetically(subjectList), [subjectList])
@@ -414,6 +341,11 @@ export default function App() {
       }
     })
   }, [deletedPeriods, selectedSpreadsheetDays, timetableRows])
+
+  const solvedCellMap = useMemo(
+    () => new Map(aiResult?.cells.map((cell) => [cell.slotId, cell]) ?? []),
+    [aiResult],
+  )
 
   const canContinue = selectedDays.length > 0 && selectedSessions.length > 0
 
@@ -550,7 +482,7 @@ export default function App() {
       })
       setAiResult(result)
     } catch (err) {
-      setAiError(err.message)
+      setAiError(err instanceof Error ? err.message : 'Không thể tạo thời khóa biểu.')
     } finally {
       setAiLoading(false)
     }
@@ -573,8 +505,9 @@ export default function App() {
             <div className={navBarClass}>
               <button
                 type="button"
-                disabled
-                className={`${navBackClass} ${navDisabledClass}`}
+                onClick={onBackToLanding}
+                className={`${navBackClass} ${!onBackToLanding ? navDisabledClass : ''}`}
+                disabled={!onBackToLanding}
               >
                 <ArrowLeft size={14} strokeWidth={1.5} />
                 Quay lại
@@ -1778,8 +1711,19 @@ export default function App() {
                                     return (
                                       <td key={cellKey} className="border-b border-r border-white/[0.04] p-2">
                                         {!isDeleted ? (
-                                            <div className="flex h-7 w-full items-center justify-center rounded border border-white/[0.06] bg-[#141414] px-2 text-xs font-medium text-white/50">
-                                            {row.period}
+                                          <div className="min-h-12 rounded border border-white/[0.06] bg-[#141414] p-2 text-xs text-white/50">
+                                            {solvedCellMap.get(cellKey)?.entries.length ? (
+                                              <div className="space-y-1.5">
+                                                {solvedCellMap.get(cellKey)?.entries.map((entry) => (
+                                                  <div key={entry.assignmentKey} className="grid grid-cols-[1fr_1fr] gap-1 rounded border border-white/[0.04] bg-[#0a0a0a] p-1.5">
+                                                    <span className="truncate font-medium text-white">{entry.subject}</span>
+                                                    <span className="truncate text-white/50">{entry.teacher}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <span className="flex h-7 items-center justify-center text-white/25">{row.period}</span>
+                                            )}
                                           </div>
                                         ) : null}
                                       </td>
@@ -1922,8 +1866,51 @@ export default function App() {
                         )}
 
                         {aiResult && !aiLoading && (
-                          <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4 text-white">
-                            <AiMarkdown content={aiResult} />
+                          <div className="space-y-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4 text-white">
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
+                              <div>
+                                <p className="text-sm font-semibold text-white">{aiResult.message}</p>
+                                <p className="mt-1 text-xs text-white/35">
+                                  Trạng thái: {aiResult.status === 'solved' ? 'Đã xếp được lịch' : aiResult.status === 'infeasible' ? 'Không khả thi' : 'Có lỗi'}
+                                </p>
+                              </div>
+                              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${aiResult.status === 'solved' ? 'border-[#4DB848]/25 bg-[#4DB848]/10 text-[#4DB848]' : aiResult.status === 'infeasible' ? 'border-amber-500/25 bg-amber-500/10 text-amber-300' : 'border-red-500/25 bg-red-500/10 text-red-300'}`}>
+                                {aiResult.status === 'solved' ? 'Solved' : aiResult.status === 'infeasible' ? 'Infeasible' : 'Error'}
+                              </span>
+                            </div>
+
+                            {aiResult.solverStats && (
+                              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Wall time</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.wallTimeSeconds.toFixed(3)}s</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Objective</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.objectiveValue ?? '—'}</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Best bound</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.bestBound ?? '—'}</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Conflicts</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.numConflicts}</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Branches</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.numBranches}</p></div>
+                              </div>
+                            )}
+
+                            {aiResult.diagnostics.length ? (
+                              <div className="space-y-2">
+                                {aiResult.diagnostics.map((diagnostic, index) => (
+                                  <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-sm text-white/55">
+                                    {diagnostic}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-white/45">Không có chẩn đoán bổ sung.</p>
+                            )}
+
+                            <div className="grid gap-4 xl:grid-cols-2">
+                              <div className={`${panelMutedClass} p-3`}>
+                                <p className="text-xs font-medium text-white/70">Normalized constraints</p>
+                                <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(aiResult.normalizedConstraints, null, 2)}</pre>
+                              </div>
+                              <div className={`${panelMutedClass} p-3`}>
+                                <p className="text-xs font-medium text-white/70">Request preview gửi model</p>
+                                <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(aiResult.modelRequestPreview, null, 2)}</pre>
+                              </div>
+                            </div>
                           </div>
                         )}
                       </section>

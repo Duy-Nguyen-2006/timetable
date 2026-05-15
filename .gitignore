@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+.env*
+!.env.example
+*.log
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.claude/
+db/*.db

@@ -40,9 +40,9 @@ export function buildTimetablePayload(input: any) {
 export function buildTimetablePrompts(input: any) {
   const summarizedInput = buildTimetablePayload(input)
 
-  const systemPrompt = 'Dựa vào những sự kiện sau, hãy viết code để tạo thời khóa biểu và chạy trong môi trường này: (Nội dung được tổng hợp, bao gồm những buổi học, ràng buộc xếp lịch, phân công chuyên môn). Yêu cầu: Code bằng ortools, nếu code chạy có kết quả hợp lệ, trả kết quả cho người dùng là thời khóa biểu được xếp, nếu không có, trả về: Không thể xếp thời khóa biểu hợp lệ.'
+  const systemPrompt = 'Bạn nhận dữ liệu thời khóa biểu đã được cấu trúc. Nhiệm vụ của bạn là diễn giải hoặc chuẩn hóa ràng buộc bằng tiếng Việt ngắn gọn khi cần. Không sinh mã nguồn, không giả định đang thực thi solver, không trả markdown dài dòng.'
 
-  const userPrompt = `Hãy xếp thời khóa biểu từ dữ liệu JSON sau. Trả về kết quả cuối cùng bằng tiếng Việt, ưu tiên bảng markdown rõ ràng. Nếu không thể xếp hợp lệ, chỉ trả về đúng câu: Không thể xếp thời khóa biểu hợp lệ.\n\n${JSON.stringify(summarizedInput, null, 2)}`
+  const userPrompt = `Hãy đọc dữ liệu JSON sau và diễn giải ngắn gọn các ràng buộc hoặc điểm cần chú ý nếu được yêu cầu. Dữ liệu solve chính sẽ được xử lý nội bộ.\n\n${JSON.stringify(summarizedInput, null, 2)}`
 
   return { systemPrompt, userPrompt }
 }

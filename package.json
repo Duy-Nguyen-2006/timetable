@@ -10,7 +10,8 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "python:solver": "TIMETABLE_PYTHON_BIN=$(pwd)/.venv/bin/python .venv/bin/python python/timetable_solver/runner.py"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

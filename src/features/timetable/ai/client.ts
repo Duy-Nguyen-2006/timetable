@@ -1,4 +1,6 @@
-export async function generateTimetableWithAI(payload: any) {
+import type { TimetableSolveResult } from './types'
+
+export async function generateTimetableWithAI(payload: any): Promise<TimetableSolveResult> {
   const response = await fetch('/api/generate-timetable', {
     method: 'POST',
     headers: {
@@ -7,11 +9,11 @@ export async function generateTimetableWithAI(payload: any) {
     body: JSON.stringify(payload),
   })
 
+  const data = await response.json().catch(() => null)
+
   if (!response.ok) {
-    const data = await response.json().catch(() => null)
     throw new Error(data?.error ?? `API error ${response.status}`)
   }
 
-  const data = await response.json()
-  return data.result ?? 'Không có kết quả.'
+  return data as TimetableSolveResult
 }

@@ -1,48 +1,77 @@
+import { spawn } from 'node:child_process'
+import path from 'node:path'
+
 import { NextResponse } from 'next/server'
 
-import { buildTimetablePrompts } from '@/features/timetable/ai/prompt'
+import { normalizeConstraintsWithDevstral } from '@/features/timetable/ai/devstral'
+import { buildDevstralRequestPreview, buildSolverInput } from '@/features/timetable/ai/normalize'
+import type { TimetableSolveResult } from '@/features/timetable/ai/types'
 
-const API_BASE_URL = process.env.LOWPRIZO_API_BASE_URL || 'https://api.lowprizo.com'
-const API_KEY = process.env.LOWPRIZO_API_KEY
-const API_MODEL = 'gpt-5.2'
+const PYTHON_BIN = process.env.TIMETABLE_PYTHON_BIN || 'python3'
+const PYTHON_RUNNER = path.join(process.cwd(), 'python', 'timetable_solver', 'runner.py')
 
-export async function POST(request: Request) {
-  if (!API_KEY) {
-    return NextResponse.json(
-      { error: 'Thiếu API key. Hãy cấu hình LOWPRIZO_API_KEY trong .env.local.' },
-      { status: 500 },
-    )
-  }
-
-  try {
-    const payload = await request.json()
-    const { systemPrompt, userPrompt } = buildTimetablePrompts(payload)
-
-    const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${API_KEY}`,
-        'x-api-key': API_KEY,
-      },
-      body: JSON.stringify({
-        model: API_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.1,
-      }),
-      cache: 'no-store',
+function runPythonSolver(input: Record<string, unknown>): Promise<TimetableSolveResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, [PYTHON_RUNNER], {
+      cwd: path.join(process.cwd(), 'python', 'timetable_solver'),
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      return NextResponse.json({ error: `API error ${response.status}: ${errorText}` }, { status: response.status })
+    let stdout = ''
+    let stderr = ''
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+    })
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+    })
+
+    child.on('error', (error) => {
+      reject(error)
+    })
+
+    child.on('close', (code) => {
+      if (!stdout.trim()) {
+        reject(new Error(stderr || `Python runner exited with code ${code}`))
+        return
+      }
+
+      try {
+        const parsed = JSON.parse(stdout) as TimetableSolveResult
+        resolve(parsed)
+      } catch (error) {
+        reject(new Error(`Invalid Python runner JSON: ${error instanceof Error ? error.message : 'unknown error'}\n${stdout}\n${stderr}`))
+      }
+    })
+
+    child.stdin.write(JSON.stringify(input))
+    child.stdin.end()
+  })
+}
+
+export async function POST(request: Request) {
+  try {
+    const input = await request.json()
+    const modelRequestPreview = buildDevstralRequestPreview(input)
+    const normalizedConstraints = await normalizeConstraintsWithDevstral(modelRequestPreview)
+    const solverInput = buildSolverInput(input)
+    solverInput.constraints = {
+      ...solverInput.constraints,
+      hard: normalizedConstraints.hard,
+      soft: normalizedConstraints.soft,
+      rawText: solverInput.constraints.rawText,
+      unparsed: normalizedConstraints.unparsed,
     }
 
-    const data = await response.json()
-    return NextResponse.json({ result: data.choices?.[0]?.message?.content ?? 'Không có kết quả.' })
+    const result = await runPythonSolver(solverInput)
+
+    return NextResponse.json({
+      ...result,
+      normalizedConstraints,
+      modelRequestPreview,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Không thể tạo thời khóa biểu.'
     return NextResponse.json({ error: message }, { status: 500 })
