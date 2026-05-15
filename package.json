@@ -138,7 +138,7 @@
         "nsis",
         "portable"
       ],
-      "artifactName": "${productName}-${version}-${target}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }
 }
