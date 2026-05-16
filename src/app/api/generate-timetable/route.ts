@@ -99,9 +99,10 @@ function runPythonSolver(input: Record<string, unknown>): Promise<TimetableSolve
 
 export async function POST(request: Request) {
   try {
+    const apiKey = request.headers.get('x-lowprizo-api-key') || undefined
     const input = await request.json()
     const modelRequestPreview = buildDevstralRequestPreview(input)
-    const normalizedConstraints = await normalizeConstraintsWithDevstral(modelRequestPreview)
+    const normalizedConstraints = await normalizeConstraintsWithDevstral(modelRequestPreview, apiKey)
     const solverInput = buildSolverInput(input)
     solverInput.constraints = {
       ...solverInput.constraints,

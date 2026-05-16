@@ -1,7 +1,6 @@
 import type { ModelRequestPreview, NormalizedConstraintResult } from './types'
 
 const API_BASE_URL = process.env.LOWPRIZO_API_BASE_URL || 'https://api.lowprizo.com'
-const API_KEY = process.env.LOWPRIZO_API_KEY
 
 function fallbackNormalize(preview: ModelRequestPreview): NormalizedConstraintResult {
   const content = preview.messages.find((message) => message.role === 'user')?.content
@@ -69,19 +68,30 @@ function fallbackNormalize(preview: ModelRequestPreview): NormalizedConstraintRe
   return { hard, soft, unparsed }
 }
 
-export async function normalizeConstraintsWithDevstral(preview: ModelRequestPreview): Promise<NormalizedConstraintResult> {
-  if (!API_KEY) {
+export async function normalizeConstraintsWithDevstral(
+  preview: ModelRequestPreview,
+  apiKey?: string,
+  model?: string,
+): Promise<NormalizedConstraintResult> {
+  const effectiveApiKey = apiKey || process.env.LOWPRIZO_API_KEY
+
+  if (!effectiveApiKey) {
     return fallbackNormalize(preview)
   }
+
+  const effectiveModel = model || preview.model || 'devstral-latest'
 
   const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`,
-      'x-api-key': API_KEY,
+      Authorization: `Bearer ${effectiveApiKey}`,
+      'x-api-key': effectiveApiKey,
     },
-    body: JSON.stringify(preview),
+    body: JSON.stringify({
+      ...preview,
+      model: effectiveModel,
+    }),
     cache: 'no-store',
   })
 

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 
 import { generateTimetableWithAI } from './ai/client'
+import { useApiKeyStore } from './ai/api-key-store'
 import type { TimetableSolveResult } from './ai/types'
 import {
   classPresetGroups,
@@ -244,6 +245,7 @@ function InfoField({ icon: Icon, label, placeholder, value, onChange }) {
 }
 
 export default function App({ onBackToLanding }) {
+  const { apiKey } = useApiKeyStore()
   const [page, setPage] = useState('select')
   const [selectedDays, setSelectedDays] = useState(['monday', 'wednesday', 'friday'])
   const [selectedSessions, setSelectedSessions] = useState(['morning'])
@@ -479,7 +481,7 @@ export default function App({ onBackToLanding }) {
         deletedPeriods,
         assignments: assignmentList,
         constraints: constraintList,
-      })
+      }, apiKey ?? undefined)
       setAiResult(result)
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Không thể tạo thời khóa biểu.')
