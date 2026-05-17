@@ -1,6 +1,6 @@
 {
   "name": "nextjs_tailwind_shadcn_ts",
-  "version": "0.2.0",
+  "version": "0.3.2",
   "private": true,
   "main": "electron/main.mjs",
   "scripts": {
@@ -127,7 +127,9 @@
       }
     ],
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      ".next/standalone/**/*",
+      ".next/static/**/*"
     ],
     "nsis": {
       "oneClick": false,

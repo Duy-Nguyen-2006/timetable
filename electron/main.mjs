@@ -12,6 +12,10 @@ function getAppRoot() {
 }
 
 function getStandaloneRoot() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'app.asar.unpacked', '.next', 'standalone')
+  }
+
   return path.join(getAppRoot(), '.next', 'standalone')
 }
 
@@ -20,6 +24,9 @@ function getPythonBin() {
 
   const bundledExe = path.join(process.resourcesPath, 'python', 'runner.exe')
   if (fs.existsSync(bundledExe)) return bundledExe
+
+  const bundledRunner = path.join(process.resourcesPath, 'python', 'runner')
+  if (fs.existsSync(bundledRunner)) return bundledRunner
 
   const devVenv = path.join(getAppRoot(), '.venv', 'Scripts', 'python.exe')
   if (fs.existsSync(devVenv)) return devVenv
