@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   BookOpen,
@@ -47,6 +47,48 @@ import {
 } from './constants'
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
 
+const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
+
+function loadStoredLowprizoApiKey() {
+  if (typeof window === 'undefined') return ''
+
+  try {
+    return localStorage.getItem(LOWPRIZO_API_KEY_STORAGE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function saveStoredLowprizoApiKey(apiKey: string) {
+  try {
+    if (apiKey) {
+      localStorage.setItem(LOWPRIZO_API_KEY_STORAGE_KEY, apiKey)
+    } else {
+      localStorage.removeItem(LOWPRIZO_API_KEY_STORAGE_KEY)
+    }
+  } catch {}
+}
+
+type AssignmentItem = {
+  key: string
+  teacher: string
+  subject: string
+  className: string
+  weeklyPeriods: string
+}
+
+type ConstraintItem = {
+  id: string
+  type: keyof typeof constraintTypes
+  text: string
+}
+
+type BulkAssignmentError = {
+  line: number
+  rawLine: string
+  parts?: string[]
+  segmentIndex: number
+}
 
 function SelectField({ icon: Icon, label, placeholder, value, options, onChange }) {
   return (
@@ -123,7 +165,12 @@ function PeriodControl({ session, value, onChange }) {
   const parsedRawValue = rawInput === null || rawInput === '' ? null : Number(rawInput)
   const isInvalid =
     rawInput !== null &&
-    (rawInput === '' || Number.isNaN(parsedRawValue) || parsedRawValue < 1 || parsedRawValue > 12 || !Number.isInteger(parsedRawValue))
+    (rawInput === '' ||
+      parsedRawValue === null ||
+      Number.isNaN(parsedRawValue) ||
+      parsedRawValue < 1 ||
+      parsedRawValue > 12 ||
+      !Number.isInteger(parsedRawValue))
 
   const commitValue = (nextValue) => {
     const cleanValue = Number.isNaN(nextValue) ? value : clampValue(nextValue)
@@ -252,18 +299,32 @@ export default function App({ onBackToLanding }) {
   const [periods, setPeriods] = useState(defaultPeriods)
   const [deletedPeriods, setDeletedPeriods] = useState({})
   const [teacherInput, setTeacherInput] = useState('')
-  const [teacherList, setTeacherList] = useState([])
+  const [teacherImportMode, setTeacherImportMode] = useState('update')
+  const teacherInputRef = useRef<(HTMLInputElement & HTMLTextAreaElement) | null>(null)
+  const [teacherList, setTeacherList] = useState<string[]>([])
   const [subjectInput, setSubjectInput] = useState('')
-  const [subjectList, setSubjectList] = useState([])
+  const [subjectList, setSubjectList] = useState<string[]>([])
   const [classInput, setClassInput] = useState('')
-  const [classList, setClassList] = useState([])
+  const [classList, setClassList] = useState<string[]>([])
   const [assignmentDraft, setAssignmentDraft] = useState({ teacher: '', subject: '', className: '', weeklyPeriods: '' })
-  const [assignmentList, setAssignmentList] = useState([])
-  const [constraintDraft, setConstraintDraft] = useState({ type: 'required', text: '' })
-  const [constraintList, setConstraintList] = useState([])
+  const [assignmentImportMode, setAssignmentImportMode] = useState('update')
+  const [bulkAssignmentText, setBulkAssignmentText] = useState('')
+  const [bulkAssignmentErrors, setBulkAssignmentErrors] = useState<BulkAssignmentError[]>([])
+  const [assignmentList, setAssignmentList] = useState<AssignmentItem[]>([])
+  const [constraintDraft, setConstraintDraft] = useState<{ type: keyof typeof constraintTypes; text: string }>({ type: 'required', text: '' })
+  const [constraintList, setConstraintList] = useState<ConstraintItem[]>([])
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [lowprizoApiKey, setLowprizoApiKey] = useState('')
+
+  useEffect(() => {
+    setLowprizoApiKey(loadStoredLowprizoApiKey())
+  }, [])
+
+  useEffect(() => {
+    saveStoredLowprizoApiKey(lowprizoApiKey.trim())
+  }, [lowprizoApiKey])
 
   const sortedTeacherList = useMemo(() => sortAlphabetically(teacherList), [teacherList])
   const sortedSubjectList = useMemo(() => sortAlphabetically(subjectList), [subjectList])
@@ -349,6 +410,33 @@ export default function App({ onBackToLanding }) {
     [aiResult],
   )
 
+  const resultClassColumns = useMemo(() => {
+    const defaultClassOrder = ['6A', '6B', '7A', '7B', '8A', '8B', '9A', '9B']
+    const knownClasses = defaultClassOrder.filter((className) => classList.includes(className))
+    const customClasses = sortedClassList.filter((className) => !defaultClassOrder.includes(className))
+    return [...knownClasses, ...customClasses]
+  }, [classList, sortedClassList])
+
+  const resultSessionGroups = useMemo(
+    () => selectedSessionData.map((session) => {
+      const sessionRows = selectedSpreadsheetDays
+        .map((day) => {
+          const periodsInDay = summaryTimetableRows.filter((row) => row.sessionId === session.id && !deletedPeriods[getCellKey(day.id, row.sessionId, row.period)])
+          return {
+            day,
+            rows: periodsInDay.map((row, index) => ({ ...row, firstInDay: index === 0, dayPeriodCount: periodsInDay.length })),
+          }
+        })
+        .filter((group) => group.rows.length > 0)
+
+      return {
+        ...session,
+        rows: sessionRows.flatMap((group) => group.rows.map((row) => ({ ...row, day: group.day }))),
+      }
+    }).filter((session) => session.rows.length > 0),
+    [deletedPeriods, selectedSessionData, selectedSpreadsheetDays, summaryTimetableRows],
+  )
+
   const canContinue = selectedDays.length > 0 && selectedSessions.length > 0
 
   const toggleItem = (id, setter) => {
@@ -373,10 +461,21 @@ export default function App({ onBackToLanding }) {
   }
 
   const importTeacher = () => {
-    const name = teacherInput.trim()
-    if (!name) return
+    const teacherInputElement = document.getElementById('teacher-input') as HTMLInputElement | HTMLTextAreaElement | null
+    const inputValue = teacherInputRef.current?.value ?? teacherInputElement?.value ?? teacherInput
+    const names = inputValue
+      .split(teacherImportMode === 'bulk' ? /\r?\n/ : /\n/)
+      .map((name) => name.trim())
+      .filter(Boolean)
+    if (!names.length) return
 
-    setTeacherList((current) => (current.includes(name) ? current : [...current, name]))
+    setTeacherList((current) => {
+      const next = [...current]
+      names.forEach((name) => {
+        if (!next.includes(name)) next.push(name)
+      })
+      return next
+    })
     setTeacherInput('')
   }
 
@@ -384,7 +483,7 @@ export default function App({ onBackToLanding }) {
     setTeacherList((current) => current.filter((teacher) => teacher !== name))
   }
 
-  const importSubject = (presetValue) => {
+  const importSubject = (presetValue?: string) => {
     const name = normalizeSubjectName(presetValue ?? subjectInput)
     if (!name) return
 
@@ -426,6 +525,75 @@ export default function App({ onBackToLanding }) {
       })
       return next
     })
+  }
+
+
+  const parseBulkAssignments = (text: string): { parsed: AssignmentItem[]; errors: BulkAssignmentError[] } => {
+    const parsed: AssignmentItem[] = []
+    const errors: BulkAssignmentError[] = []
+
+    text.split(/\r?\n/).forEach((rawLine, index) => {
+      if (!rawLine.trim()) return
+
+      const parts = rawLine.split('-').map((part) => part.trim())
+      if (parts.length !== 4) {
+        errors.push({ line: index + 1, rawLine, segmentIndex: -1 })
+        return
+      }
+
+      const [teacher, subject, className, weeklyPeriods] = parts
+      const checks = [
+        { value: teacher, valid: Boolean(teacher) },
+        { value: subject, valid: Boolean(subject) },
+        { value: className, valid: Boolean(className) },
+        { value: weeklyPeriods, valid: /^\d+$/.test(weeklyPeriods) && Number(weeklyPeriods) > 0 },
+      ]
+      const badIndex = checks.findIndex((check) => !check.valid)
+      if (badIndex !== -1) {
+        errors.push({ line: index + 1, rawLine, parts, segmentIndex: badIndex })
+        return
+      }
+
+      parsed.push({
+        key: makeAssignmentKey(teacher, subject, className, weeklyPeriods),
+        teacher,
+        subject,
+        className,
+        weeklyPeriods,
+      })
+    })
+
+    return { parsed, errors }
+  }
+
+  const renderBulkAssignmentErrorLine = (error: BulkAssignmentError) => {
+    if (!error.parts || error.segmentIndex === -1) {
+      return <span className="text-red-300 underline decoration-red-400 decoration-2 underline-offset-2">{error.rawLine}</span>
+    }
+
+    return error.parts.map((part, index) => (
+      <Fragment key={`${error.line}-${index}`}>
+        {index > 0 ? <span className="text-white/30">-</span> : null}
+        <span className={index === error.segmentIndex ? 'text-red-300 underline decoration-red-400 decoration-2 underline-offset-2' : 'text-white/60'}>
+          {part || 'trống'}
+        </span>
+      </Fragment>
+    ))
+  }
+
+  const importBulkAssignments = () => {
+    const { parsed, errors } = parseBulkAssignments(bulkAssignmentText)
+    setBulkAssignmentErrors(errors)
+    if (!parsed.length || errors.length) return
+
+    setAssignmentList((current) => {
+      const next = [...current]
+      parsed.forEach((assignment) => {
+        if (!next.some((existing) => existing.key === assignment.key)) next.push(assignment)
+      })
+      return next
+    })
+    setBulkAssignmentText('')
   }
 
   const importAssignment = () => {
@@ -470,11 +638,19 @@ export default function App({ onBackToLanding }) {
   }
 
   const handleGenerate = async () => {
+    const apiKey = lowprizoApiKey.trim()
+    if (!apiKey) {
+      setAiError('Vui lòng nhập Lowprizo API key trước khi xếp lịch.')
+      setAiResult(null)
+      return
+    }
+
     setAiLoading(true)
     setAiError(null)
     setAiResult(null)
     try {
       const result = await generateTimetableWithAI({
+        apiKey,
         days: selectedSpreadsheetDays,
         sessions: selectedSessionData,
         periodCounts: periods,
@@ -893,21 +1069,58 @@ export default function App({ onBackToLanding }) {
                   </div>
                 </div>
 
+                <div className="mb-4 grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'bulk', label: 'Bulk Update', color: '#6699FF' },
+                    { id: 'update', label: 'Update', color: '#FFCC00' },
+                  ].map((option) => {
+                    const isActive = teacherImportMode === option.id
+
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setTeacherImportMode(option.id)}
+                        className={`rounded px-3 py-2 text-sm font-medium transition ${isActive ? 'text-black' : 'border border-white/[0.08] text-white/60 hover:text-white'}`}
+                        style={{ backgroundColor: isActive ? option.color : 'transparent' }}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
                 <label className="block">
                   <span className="mb-2 block text-xs font-medium text-white/50">Nhập tên giáo viên</span>
-                  <input
-                    type="text"
-                    value={teacherInput}
-                    onChange={(event) => setTeacherInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        importTeacher()
-                      }
-                    }}
-                    placeholder="Ví dụ: Nguyễn Văn A"
-                    className={inputClass}
-                  />
+                  {teacherImportMode === 'bulk' ? (
+                    <textarea
+                      id="teacher-input"
+                      ref={teacherInputRef}
+                      value={teacherInput}
+                      onChange={(event) => setTeacherInput(event.target.value)}
+                      onInput={(event) => setTeacherInput(event.currentTarget.value)}
+                      placeholder={`Nguyễn Văn A\nTrần Thị B\nLê Văn C`}
+                      rows={6}
+                      className={`${inputClass} min-h-36 resize-y`}
+                    />
+                  ) : (
+                    <input
+                      id="teacher-input"
+                      ref={teacherInputRef}
+                      type="text"
+                      value={teacherInput}
+                      onChange={(event) => setTeacherInput(event.target.value)}
+                      onInput={(event) => setTeacherInput(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          importTeacher()
+                        }
+                      }}
+                      placeholder="Ví dụ: Nguyễn Văn A"
+                      className={inputClass}
+                    />
+                  )}
                 </label>
 
                 <button
@@ -1324,23 +1537,72 @@ export default function App({ onBackToLanding }) {
                           </div>
                       </div>
 
-                        <div className="grid gap-3">
-                          <SelectField
-                            icon={User}
-                            label="Giáo viên"
-                            placeholder="Chọn giáo viên đã nhập"
-                            value={assignmentDraft.teacher}
-                            options={sortedTeacherList}
-                            onChange={(value) => setAssignmentDraft((current) => ({ ...current, teacher: value }))}
-                          />
-                          <SelectField
-                            icon={BookOpen}
-                            label="Môn học"
-                            placeholder="Chọn môn học đã nhập"
-                            value={assignmentDraft.subject}
-                            options={sortedSubjectList}
-                            onChange={(value) => setAssignmentDraft((current) => ({ ...current, subject: value }))}
-                          />
+                        <div className="mb-4 grid grid-cols-2 gap-2">
+                          {[
+                            { id: 'bulk', label: 'Bulk Update', color: '#6699FF' },
+                            { id: 'update', label: 'Update', color: '#FFCC00' },
+                          ].map((option) => {
+                            const isActive = assignmentImportMode === option.id
+
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => setAssignmentImportMode(option.id)}
+                                className={`rounded px-3 py-2 text-sm font-medium transition ${isActive ? 'text-black' : 'border border-white/[0.08] text-white/60 hover:text-white'}`}
+                                style={{ backgroundColor: isActive ? option.color : 'transparent' }}
+                              >
+                                {option.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        {assignmentImportMode === 'bulk' ? (
+                          <div>
+                            <label className="block">
+                              <span className="mb-2 block text-xs font-medium text-white/50">Teacher-Subject-Class-Number</span>
+                              <textarea
+                                value={bulkAssignmentText}
+                                onChange={(event) => {
+                                  setBulkAssignmentText(event.target.value)
+                                  setBulkAssignmentErrors([])
+                                }}
+                                placeholder="Huy-Toán-8A-4"
+                                rows={7}
+                                className={`${inputClass} min-h-40 resize-y ${bulkAssignmentErrors.length ? 'border-red-400/60 decoration-red-400' : ''}`}
+                              />
+                            </label>
+
+                            {bulkAssignmentErrors.length ? (
+                              <div className="mt-3 space-y-2 rounded border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">
+                                <p>Sai format. Đúng: Teacher-Subject-Class-Number.</p>
+                                {bulkAssignmentErrors.map((error) => (
+                                  <p key={error.line}>
+                                    Dòng {error.line}: {renderBulkAssignmentErrorLine(error)}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="grid gap-3">
+                            <SelectField
+                              icon={User}
+                              label="Giáo viên"
+                              placeholder="Chọn giáo viên đã nhập"
+                              value={assignmentDraft.teacher}
+                              options={sortedTeacherList}
+                              onChange={(value) => setAssignmentDraft((current) => ({ ...current, teacher: value }))}
+                            />
+                            <SelectField
+                              icon={BookOpen}
+                              label="Môn học"
+                              placeholder="Chọn môn học đã nhập"
+                              value={assignmentDraft.subject}
+                              options={sortedSubjectList}
+                              onChange={(value) => setAssignmentDraft((current) => ({ ...current, subject: value }))}
+                            />
                             <SelectField
                               icon={Hash}
                               label="Lớp"
@@ -1367,11 +1629,17 @@ export default function App({ onBackToLanding }) {
                               />
                             </label>
                           </div>
-  
-                        <button type="button" onClick={importAssignment} disabled={!assignmentDraft.teacher || !assignmentDraft.subject || !assignmentDraft.className || !assignmentDraft.weeklyPeriods.trim()} className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}>
-                        <Plus size={14} strokeWidth={1.5} />
-                        Thêm phân công
-                      </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={assignmentImportMode === 'bulk' ? importBulkAssignments : importAssignment}
+                          disabled={assignmentImportMode === 'bulk' ? !bulkAssignmentText.trim() : !assignmentDraft.teacher || !assignmentDraft.subject || !assignmentDraft.className || !assignmentDraft.weeklyPeriods.trim()}
+                          className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
+                        >
+                          <Plus size={14} strokeWidth={1.5} />
+                          {assignmentImportMode === 'bulk' ? 'Import' : 'Thêm phân công'}
+                        </button>
                     </section>
 
                     <aside className={`${panelClass} p-4`}>
@@ -1599,7 +1867,7 @@ export default function App({ onBackToLanding }) {
                     <button
                       type="button"
                       onClick={handleGenerate}
-                      disabled={aiLoading}
+                      disabled={aiLoading || !lowprizoApiKey.trim()}
                       className={`${navNextClass} disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {aiLoading ? (
@@ -1652,90 +1920,140 @@ export default function App({ onBackToLanding }) {
                           <CalendarDays size={16} strokeWidth={1.5} />
                         </span>
                         <div>
-                          <h2 className="text-sm font-semibold text-white">Bảng thời khóa biểu</h2>
-                            <p className="text-xs text-white/40">Chỉ hiển thị những ô tiết đã chọn ở trang chỉnh thời khóa biểu.</p>
+                          <h2 className="text-sm font-semibold text-white">Bảng thời khóa biểu mẫu</h2>
+                          <p className="text-xs text-white/40">Chỉ hiển thị những ô tiết đã chọn ở trang chỉnh thời khóa biểu.</p>
                         </div>
                       </div>
 
-                      <div className="mb-4 grid gap-3 md:grid-cols-3">
-                        {selectedSessionData.map((session) => {
-                          const sessionTotal = selectedSpreadsheetDays.reduce(
-                            (total, day) =>
-                              total +
-                              Array.from({ length: periods[session.id] ?? defaultPeriods[session.id] }, (_, index) => index + 1).filter(
-                                (period) => !deletedPeriods[getCellKey(day.id, session.id, period)],
-                              ).length,
-                            0,
-                          )
-
-                          return (
-                            <div key={session.id} className={`${panelMutedClass} p-4`}>
-                              <p className="text-[11px] font-medium uppercase tracking-widest text-white/50">{session.label}</p>
-                              <p className="mt-2 text-2xl font-semibold text-white">{sessionTotal}</p>
-                              <p className="text-xs text-white/30">ô tiết trong thời khóa biểu</p>
-                            </div>
-                          )
-                        })}
+                      <div className="mb-4 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] px-4 py-3 text-sm text-white/45">
+                        AI sẽ xử lý phần xếp lịch trong nền và chỉ trả ra kết quả cuối cùng ở bảng bên dưới.
                       </div>
 
-                      <div className="overflow-auto rounded-md border border-white/[0.06] bg-[#141414] text-white">
-                        <table className="min-w-[900px] w-full border-separate border-spacing-0 table-fixed text-left text-sm">
-                          <thead>
-                            <tr>
-                                <th className="sticky left-0 top-0 z-20 h-10 w-24 border-b border-r border-white/[0.06] bg-[#141414] px-3 text-[11px] font-semibold uppercase tracking-widest text-white/90">
-                                  Buổi
-                                </th>
-                                <th className="sticky left-24 top-0 z-20 h-10 w-16 border-b border-r border-white/[0.06] bg-[#141414] px-2 text-center text-[11px] font-semibold uppercase tracking-widest text-white/90">
-                                  Tiết
-                                </th>
-                                {selectedSpreadsheetDays.map((day) => (
-                                <th key={day.id} className="sticky top-0 z-10 h-12 border-b border-r border-white/[0.06] bg-[#141414] px-3 text-center text-sm font-semibold text-white">
-                                  {day.tableLabel}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                              {summaryTimetableRows.map((row) => (
-                                <tr key={row.id} className="h-10">
-                                  {row.firstInSession ? (
-                                    <td rowSpan={row.sessionPeriodCount} className="sticky left-0 z-10 w-24 border-b border-r border-white/[0.06] bg-[#141414] px-3 text-center align-middle">
-                                      <span className="text-xs font-semibold text-white">{row.sessionLabel}</span>
-                                    </td>
-                                  ) : null}
-                                  <td className="sticky left-24 z-10 w-16 border-b border-r border-white/[0.06] bg-[#141414] px-2 text-center align-middle">
-                                    <span className="text-xs font-semibold text-white">{row.period}</span>
-                                  </td>
-                                  {selectedSpreadsheetDays.map((day) => {
-                                  const cellKey = getCellKey(day.id, row.sessionId, row.period)
-                                  const isDeleted = deletedPeriods[cellKey]
+                      <label className="mb-4 block rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4">
+                        <span className="mb-2 block text-xs font-medium text-white/50">Lowprizo API key</span>
+                        <input
+                          type="password"
+                          value={lowprizoApiKey}
+                          onChange={(event) => setLowprizoApiKey(event.target.value)}
+                          placeholder="lpr_..."
+                          autoComplete="off"
+                          className={inputClass}
+                        />
+                        <span className="mt-2 block text-xs text-white/35">Key này dùng để gọi api.lowprizo.com và được lưu trên máy này.</span>
+                      </label>
 
-                                    return (
-                                      <td key={cellKey} className="border-b border-r border-white/[0.04] p-2">
-                                        {!isDeleted ? (
-                                          <div className="min-h-12 rounded border border-white/[0.06] bg-[#141414] p-2 text-xs text-white/50">
-                                            {solvedCellMap.get(cellKey)?.entries.length ? (
-                                              <div className="space-y-1.5">
-                                                {solvedCellMap.get(cellKey)?.entries.map((entry) => (
-                                                  <div key={entry.assignmentKey} className="grid grid-cols-[1fr_1fr] gap-1 rounded border border-white/[0.04] bg-[#0a0a0a] p-1.5">
-                                                    <span className="truncate font-medium text-white">{entry.subject}</span>
-                                                    <span className="truncate text-white/50">{entry.teacher}</span>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            ) : (
-                                              <span className="flex h-7 items-center justify-center text-white/25">{row.period}</span>
-                                            )}
-                                          </div>
-                                        ) : null}
-                                      </td>
-                                    )
-                                })}
+                      {aiLoading && (
+                        <div className="mb-4 flex items-center justify-center gap-3 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-sm text-white/30">
+                          <Loader2 size={18} className="animate-spin" strokeWidth={1.5} />
+                          <span>Đang xếp thời khóa biểu, vui lòng chờ...</span>
+                        </div>
+                      )}
+
+                      {aiError && !aiLoading && (
+                        <div className="mb-4 rounded-md border border-[#4DB848]/20 bg-[#4DB848]/[0.03] p-4">
+                          <p className="font-medium text-white">Chưa thể tạo thời khóa biểu.</p>
+                          <p className="mt-2 text-sm text-white/50">{aiError}</p>
+                          <button
+                            type="button"
+                            onClick={handleGenerate}
+                            className={ghostButtonClass + ' mt-3'}
+                          >
+                            <RotateCcw size={14} strokeWidth={1.5} />
+                            Thử lại
+                          </button>
+                        </div>
+                      )}
+
+                      {aiResult && !aiLoading && (
+                        <div className="mb-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4">
+                          <p className="text-sm font-semibold text-white">{aiResult.status === 'solved' ? 'Đã xếp xong thời khóa biểu.' : aiResult.status === 'infeasible' ? 'Chưa tìm được thời khóa biểu phù hợp với các ràng buộc hiện tại.' : 'Đã xảy ra lỗi khi xếp thời khóa biểu.'}</p>
+                          <p className="mt-1 text-xs text-white/40">{aiResult.status === 'solved' ? 'Kết quả cuối cùng theo giáo viên và môn học' : aiResult.message}</p>
+                        </div>
+                      )}
+
+                      <div className="mb-4 flex items-center gap-2.5">
+                        <span className={iconShellClass}>
+                          <Sparkles size={16} strokeWidth={1.5} />
+                        </span>
+                        <div>
+                          <h2 className="text-sm font-semibold text-white">Thời khóa biểu đã xếp</h2>
+                          <p className="text-xs text-white/40">Kết quả cuối cùng theo giáo viên và môn học</p>
+                        </div>
+                      </div>
+
+                      {aiResult?.status === 'solved' ? (
+                        <div className="overflow-auto rounded-md border border-white/[0.12] bg-white text-black">
+                          <table className="min-w-[1500px] w-full border-collapse text-[11px] font-normal leading-4 text-black [font-family:Arial,Helvetica,sans-serif]">
+                            <thead>
+                              <tr>
+                                <th className="w-20 border border-black bg-white px-2 py-1 text-center font-semibold">Thứ</th>
+                                <th className="w-12 border border-black bg-white px-2 py-1 text-center font-semibold">Tiết</th>
+                                {resultClassColumns.map((className) => (
+                                  <th key={`${className}-subject-head`} className="w-20 border border-black bg-white px-2 py-1 text-center font-semibold">
+                                    {className}
+                                  </th>
+                                ))}
+                                {resultClassColumns.map((className) => (
+                                  <th key={`${className}-teacher-head`} className="w-20 border border-black bg-white px-2 py-1 text-center font-semibold">
+                                    GV Dạy
+                                  </th>
+                                ))}
                               </tr>
-                            ))}
-                          </tbody>
+                            </thead>
+                            <tbody>
+                              {resultSessionGroups.map((sessionGroup, sessionIndex) => (
+                                <Fragment key={sessionGroup.id}>
+                                  {sessionIndex > 0 && (
+                                    <tr>
+                                      <td colSpan={2 + resultClassColumns.length * 2} className="border border-black bg-white px-2 py-1 text-center text-sm font-bold uppercase tracking-wide">
+                                        THỜI KHÓA BIỂU BUỔI {sessionGroup.label.toUpperCase()}
+                                      </td>
+                                    </tr>
+                                  )}
+                                  {sessionGroup.rows.map((row) => (
+                                    <tr key={`${sessionGroup.id}-${row.day.id}-${row.period}`}>
+                                      {row.firstInDay ? (
+                                        <td rowSpan={row.dayPeriodCount} className="border border-black bg-white px-2 py-1 text-center align-middle font-semibold">
+                                          {row.day.tableLabel}
+                                        </td>
+                                      ) : null}
+                                      <td className="border border-black bg-white px-2 py-1 text-center align-middle">
+                                        {row.period}
+                                      </td>
+                                      {resultClassColumns.map((className) => {
+                                        const cellKey = getCellKey(row.day.id, row.sessionId, row.period)
+                                        const entry = solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
+
+                                        return (
+                                          <td key={`${cellKey}-${className}-subject`} className="border border-black bg-white px-2 py-1 text-left align-middle">
+                                            {entry?.subject ?? ''}
+                                          </td>
+                                        )
+                                      })}
+                                      {resultClassColumns.map((className) => {
+                                        const cellKey = getCellKey(row.day.id, row.sessionId, row.period)
+                                        const entry = solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
+
+                                        return (
+                                          <td key={`${cellKey}-${className}-teacher`} className="border border-black bg-white px-2 py-1 text-left align-middle">
+                                            {entry?.teacher ?? ''}
+                                          </td>
+                                        )
+                                      })}
+                                    </tr>
+                                  ))}
+                                </Fragment>
+                              ))}
+                            </tbody>
                           </table>
                         </div>
+                      ) : !aiLoading && !aiError ? (
+                        <div className="rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm text-white/30">
+                          Nhấn Xếp lịch để tạo bảng kết quả cuối.
+                        </div>
+                      ) : null}
+
+
                       </section>
 
                       <section className={`${panelClass} p-4`}>
@@ -1891,7 +2209,7 @@ export default function App({ onBackToLanding }) {
                               </div>
                             )}
 
-                            {aiResult.diagnostics.length ? (
+                            {aiResult.diagnostics?.length ? (
                               <div className="space-y-2">
                                 {aiResult.diagnostics.map((diagnostic, index) => (
                                   <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-sm text-white/55">

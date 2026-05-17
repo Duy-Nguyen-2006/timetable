@@ -1,5 +1,5 @@
 import { buildTimetablePayload } from './prompt'
-import type { ModelRequestPreview } from './types'
+import type { ModelRequestPreview, NormalizedHardConstraint, NormalizedSoftConstraint, UnparsedConstraint } from './types'
 
 export function buildSolverInput(input: any) {
   const payload = buildTimetablePayload(input)
@@ -38,9 +38,10 @@ export function buildSolverInput(input: any) {
     slots,
     assignments,
     constraints: {
-      hard: [],
-      soft: [],
+      hard: [] as NormalizedHardConstraint[],
+      soft: [] as NormalizedSoftConstraint[],
       rawText: rawConstraints,
+      unparsed: [] as UnparsedConstraint[],
     },
     solverConfig: {
       maxTimeSeconds: 20,

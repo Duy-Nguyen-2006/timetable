@@ -42,7 +42,6 @@ jobs:
       - name: Build Next app
         run: npm run build
         env:
-          LOWPRIZO_API_KEY: ${{ secrets.LOWPRIZO_API_KEY }}
           LOWPRIZO_API_BASE_URL: ${{ secrets.LOWPRIZO_API_BASE_URL }}
 
       - name: Build Electron artifacts

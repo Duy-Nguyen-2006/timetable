@@ -99,8 +99,13 @@ function runPythonSolver(input: Record<string, unknown>): Promise<TimetableSolve
 
 export async function POST(request: Request) {
   try {
-    const apiKey = request.headers.get('x-lowprizo-api-key') || undefined
     const input = await request.json()
+    const apiKeyFromBody = typeof input?.apiKey === 'string' ? input.apiKey.trim() : ''
+    const apiKey = apiKeyFromBody || request.headers.get('x-lowprizo-api-key')?.trim() || ''
+    if (!apiKey) {
+      return NextResponse.json({ error: 'Vui lòng nhập Lowprizo API key.' }, { status: 400 })
+    }
+
     const modelRequestPreview = buildDevstralRequestPreview(input)
     const normalizedConstraints = await normalizeConstraintsWithDevstral(modelRequestPreview, apiKey)
     const solverInput = buildSolverInput(input)
@@ -117,7 +122,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       status: result.status,
       message: result.message,
+      diagnostics: result.diagnostics ?? [],
       cells: result.cells,
+      normalizedConstraints,
+      solverStats: result.solverStats ?? null,
+      modelRequestPreview,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Không thể tạo thời khóa biểu.'

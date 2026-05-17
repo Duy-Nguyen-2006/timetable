@@ -70,23 +70,20 @@ function fallbackNormalize(preview: ModelRequestPreview): NormalizedConstraintRe
 
 export async function normalizeConstraintsWithDevstral(
   preview: ModelRequestPreview,
-  apiKey?: string,
-  model?: string,
+  apiKey: string,
 ): Promise<NormalizedConstraintResult> {
-  const effectiveApiKey = apiKey || process.env.LOWPRIZO_API_KEY
-
-  if (!effectiveApiKey) {
+  if (!apiKey) {
     return fallbackNormalize(preview)
   }
 
-  const effectiveModel = model || preview.model || 'devstral-latest'
+  const effectiveModel = preview.model || 'devstral-latest'
 
   const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${effectiveApiKey}`,
-      'x-api-key': effectiveApiKey,
+      Authorization: `Bearer ${apiKey}`,
+      'x-api-key': apiKey,
     },
     body: JSON.stringify({
       ...preview,
