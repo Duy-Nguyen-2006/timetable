@@ -1,9 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import ZAI from "z-ai-web-dev-sdk";
+
+// ─── Python path resolver (bundled or system) ──────────────
+function getPythonPath(): string {
+  // 1. Check for bundled Python next to the app
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    // route.ts is at .next/standalone/src/app/api/timetable/solve/route.js
+    // App root is 6 levels up from route.js
+    const appRoot = dirname(dirname(dirname(dirname(dirname(dirname(__filename))))));
+
+    if (process.platform === "win32") {
+      const bundledWin = join(appRoot, "python", "python.exe");
+      if (existsSync(bundledWin)) return bundledWin;
+    } else {
+      const bundledLinux = join(appRoot, "python", "bin", "python3");
+      if (existsSync(bundledLinux)) return bundledLinux;
+    }
+  } catch {
+    // Ignore path resolution errors
+  }
+
+  // 2. Check environment variable
+  const envPython = process.env.TACK_PYTHON_PATH;
+  if (envPython && existsSync(envPython)) return envPython;
+
+  // 3. Fall back to system Python
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+const pythonPath = getPythonPath();
 
 // ─── Types ───────────────────────────────────────────────────
 type InputAssignment = {
@@ -285,7 +316,7 @@ function executePythonCode(
     const scriptPath = join(workDir, "solver.py");
     writeFileSync(scriptPath, code, "utf-8");
 
-    const child = spawn("python3", ["-u", scriptPath], {
+    const child = spawn(pythonPath, ["-u", scriptPath], {
       cwd: workDir,
       stdio: ["pipe", "pipe", "pipe"],
       timeout: SOLVER_TIMEOUT_MS,
