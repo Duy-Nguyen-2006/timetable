@@ -85,11 +85,12 @@ export const useApiKeyStore = create<ApiKeyState>((set, get) => ({
     set({ isLoadingPolicy: true, policyError: null })
 
     try {
-      const response = await fetch('https://api.lowprizo.com/api/model-policy', {
+      const response = await fetch('/api/model-policy', {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'x-api-key': apiKey,
+          'x-lowprizo-api-key': apiKey,
         },
       })
 

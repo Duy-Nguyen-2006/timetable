@@ -40,11 +40,12 @@ export default function ApiKeyScreen({ onSuccess }: ApiKeyScreenProps) {
     setIsValidating(true)
 
     try {
-      const result = await fetch('https://api.lowprizo.com/api/model-policy', {
+      const result = await fetch('/api/model-policy', {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${trimmedKey}`,
           'x-api-key': trimmedKey,
+          'x-lowprizo-api-key': trimmedKey,
         },
       })
 
