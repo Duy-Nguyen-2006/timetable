@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import ZAI from "z-ai-web-dev-sdk";
@@ -59,6 +59,9 @@ type TimetableResult = {
   infeasibilityAnalysis: InfeasibilityAnalysis | null;
 };
 
+const MAX_CODE_RETRIES = 2;
+const SOLVER_TIMEOUT_MS = 60000;
+
 // ─── Step 1: Build problem description for AI ────────────────
 function buildProblemDescription(input: {
   selectedDays: string[];
@@ -72,21 +75,18 @@ function buildProblemDescription(input: {
   constraints: InputConstraint[];
 }) {
   const dayLabels: Record<string, string> = {
-    mon: "Thứ 2",
-    tue: "Thứ 3",
-    wed: "Thứ 4",
-    thu: "Thứ 5",
-    fri: "Thứ 6",
-    sat: "Thứ 7",
-    sun: "Chủ nhật",
+    mon: "Thứ 2", tue: "Thứ 3", wed: "Thứ 4",
+    thu: "Thứ 5", fri: "Thứ 6", sat: "Thứ 7", sun: "Chủ nhật",
   };
   const sessionLabels: Record<string, string> = {
-    morning: "Sáng",
-    afternoon: "Chiều",
-    evening: "Tối",
+    morning: "Sáng", afternoon: "Chiều", evening: "Tối",
   };
 
-  const slots: { slotId: string; dayId: string; dayLabel: string; sessionId: string; sessionLabel: string; period: number }[] = [];
+  const slots: {
+    slotId: string; dayId: string; dayLabel: string;
+    sessionId: string; sessionLabel: string; period: number;
+  }[] = [];
+
   for (const dayId of input.selectedDays) {
     for (const sessionId of input.selectedSessions) {
       const maxP = input.periodsPerSession[sessionId] || 0;
@@ -94,8 +94,7 @@ function buildProblemDescription(input: {
         const slotId = `${dayId}-${sessionId}-${p}`;
         if (!input.disabledSlots.includes(slotId)) {
           slots.push({
-            slotId,
-            dayId,
+            slotId, dayId,
             dayLabel: dayLabels[dayId] || dayId,
             sessionId,
             sessionLabel: sessionLabels[sessionId] || sessionId,
@@ -106,60 +105,152 @@ function buildProblemDescription(input: {
     }
   }
 
-  return { slots, assignments: input.assignments, constraints: input.constraints, teachers: input.teachers, subjects: input.subjects, classes: input.classes };
+  return {
+    slots,
+    assignments: input.assignments,
+    constraints: input.constraints,
+    teachers: input.teachers,
+    subjects: input.subjects,
+    classes: input.classes,
+    totalSlotsAvailable: slots.length,
+    totalPeriodsNeeded: input.assignments.reduce(
+      (sum, a) => sum + parseInt(a.weeklyPeriods, 10), 0
+    ),
+  };
 }
 
-// ─── Step 2: AI generates OR-Tools Python code ───────────────
-async function generateOrtoolsCode(problem: ReturnType<typeof buildProblemDescription>): Promise<string> {
+// ─── Step 2: AI defines the problem (constraint analysis) ───
+async function aiDefineProblem(
+  problem: ReturnType<typeof buildProblemDescription>
+): Promise<string> {
+  const zai = await ZAI.create();
+
+  const systemPrompt = `You are an expert scheduling problem analyst. Given a school timetable scheduling problem, your job is to ANALYZE and DEFINE the problem structure — NOT solve it.
+
+Analyze the constraints and describe:
+1. What types of constraints exist (identify them freely — do NOT use a fixed list)
+2. Which entities (teachers, classes, subjects, slots) each constraint involves
+3. How each constraint should be modeled (hard constraint = model.Add, soft constraint = add to objective)
+4. Any potential conflicts between constraints
+5. Whether the problem appears feasible given the slot count vs. periods needed
+
+Be thorough. Identify constraint patterns from the natural language text. You have complete freedom to define constraint types — there is no fixed template.
+
+Common patterns you might encounter (but you are NOT limited to these):
+- Teacher unavailability (specific time/day/session)
+- Subject preferred time slots
+- Max periods per teacher per day
+- No double-booking for teacher or class
+- Subject spacing (don't put same subject consecutively)
+- Min/max periods for a class per day
+- Teacher preferences for specific days
+- Room/resource constraints
+- Any other pattern the user describes
+
+Return your analysis as clear, structured text in Vietnamese.`;
+
+  const userPrompt = `Phân tích bài toán xếp thời khóa biểu sau:
+
+Số slot khả dụng: ${problem.totalSlotsAvailable}
+Tổng tiết cần xếp: ${problem.totalPeriodsNeeded}
+Giáo viên: ${problem.teachers.join(", ")}
+Lớp: ${problem.classes.join(", ")}
+Môn: ${problem.subjects.join(", ")}
+
+Phân công:
+${JSON.stringify(problem.assignments, null, 2)}
+
+Ràng buộc:
+${JSON.stringify(problem.constraints, null, 2)}
+
+Slot khả dụng:
+${JSON.stringify(problem.slots, null, 2)}
+
+Hãy phân tích và định nghĩa bài toán.`;
+
+  const completion = await zai.chat.completions.create({
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    thinking: { type: "disabled" },
+  });
+
+  return completion.choices[0]?.message?.content || "";
+}
+
+// ─── Step 3: AI generates OR-Tools Python code ───────────────
+async function generateOrtoolsCode(
+  problem: ReturnType<typeof buildProblemDescription>,
+  problemAnalysis: string,
+  previousError?: string,
+  previousCode?: string
+): Promise<string> {
   const zai = await ZAI.create();
 
   const systemPrompt = `You are an expert OR-Tools CP-SAT constraint programming engineer specializing in school timetable scheduling.
 
-Your task: Given a complete scheduling problem description in JSON, write a COMPLETE, SELF-CONTAINED Python script that:
+Your task: Given a scheduling problem description AND a detailed problem analysis, write a COMPLETE, SELF-CONTAINED Python script that:
 1. Reads the problem JSON from stdin
-2. Builds a CP-SAT model with boolean decision variables x[assignment_id, slot_id] 
+2. Builds a CP-SAT model with boolean decision variables x[assignment_id, slot_id]
 3. Adds ALL necessary constraints including:
    - Each assignment must have exactly its required number of weekly periods
    - No teacher teaches two different classes at the same time slot
    - No class has two different subjects at the same time slot
-   - ALL user-defined constraints (both required/hard and preferred/soft)
-4. For hard constraints: use model.Add() - these MUST be satisfied
-5. For soft constraints: add to objective function with model.Maximize() or model.Minimize()
-6. Solves the model and outputs JSON to stdout with this exact format:
+   - ALL user-defined constraints — dynamically interpret each one from its text
+4. For hard constraints (type="required"): use model.Add() — these MUST be satisfied
+5. For soft constraints (type="preferred"): add to objective function with weighted penalties
+6. Solves the model and outputs JSON to stdout with this EXACT format:
    {"status": "solved"|"infeasible"|"error", "message": "...", "cells": [{"slotId":"...", "dayId":"...", "sessionId":"...", "period": N, "entries": [{"assignmentKey":"...", "subject":"...", "teacher":"...", "className":"..."}]}]}
 
 CRITICAL RULES:
 - You must dynamically interpret EACH constraint text and write appropriate OR-Tools code for it
-- Do NOT hardcode constraint types - read each constraint.text and write code that handles it
-- Common constraint patterns to recognize:
-  * "Giáo viên X không dạy [buổi/ngày/slot Y]" → forbid variables for that teacher at those slots
-  * "Môn X nên xếp buổi sáng/chiều" → soft constraint maximizing placement in preferred session
-  * "Lớp X không học quá N tiết môn Y/tuần" → limit sum of variables
-  * "Giáo viên X dạy tối đa N tiết/ngày" → daily cap per teacher
-  * "Môn X không xếp 2 tiết liên tiếp cho lớp Y" → consecutive slot restriction
-  * "Giáo viên X chỉ dạy thứ Y" → restrict to specific day slots
-  * Any other pattern: interpret naturally and write appropriate constraint code
+- Do NOT hardcode constraint types — read each constraint.text, understand it naturally, and write code
+- The problem analysis below tells you what constraint types were identified — USE IT to guide your code
 - For infeasible results, also include: "infeasibilityHints": ["hint1", "hint2"]
 - The assignment key format is: "teacher|subject|className|weeklyPeriods"
-- Output ONLY valid JSON to stdout, nothing else
+- Output ONLY valid JSON to stdout, nothing else — no debug prints, no warnings
 - Use json.dumps(result, ensure_ascii=False) for output
-- Set solver parameters: max_time_in_seconds=30, num_workers=4
-- Import only: json, sys, ortools.sat.python.cp_model
-- The script MUST be complete and runnable as-is`;
+- Set solver parameters: max_time_in_seconds=60, num_workers=4
+- Import only: json, sys, and from ortools.sat.python.cp_model import CpModel, CpSolver
+- The script MUST be complete and runnable as-is
+- Wrap all output in try/except to ensure JSON is always output even on errors
+- DO NOT use any print() statements except the final JSON output`;
 
-  const userPrompt = `Here is the scheduling problem:
+  let userPrompt = `Here is the scheduling problem:
 
 ${JSON.stringify(problem, null, 2)}
 
+Problem Analysis:
+${problemAnalysis}
+
 Write the complete Python OR-Tools CP-SAT solver script. Remember:
-- Dynamically interpret each constraint.text and generate appropriate OR-Tools code
+- Dynamically interpret each constraint.text based on the problem analysis
 - Hard constraints (type="required") MUST be satisfied (use model.Add)
-- Soft constraints (type="preferred") should be optimized (add to objective with model.Maximize or model.Minimize)
+- Soft constraints (type="preferred") should be optimized (add to objective with weighted penalties)
 - Output ONLY the Python code, no markdown, no explanation`;
+
+  if (previousError && previousCode) {
+    userPrompt = `The previous Python code you generated had an execution error. Fix it.
+
+PREVIOUS CODE:
+${previousCode}
+
+ERROR:
+${previousError}
+
+PROBLEM DATA (for reference):
+${JSON.stringify(problem, null, 2)}
+
+PROBLEM ANALYSIS (for reference):
+${problemAnalysis}
+
+Fix the code and output ONLY the corrected Python script. No markdown, no explanation.`;
+  }
 
   const completion = await zai.chat.completions.create({
     messages: [
-      { role: "assistant", content: systemPrompt },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
     thinking: { type: "disabled" },
@@ -173,11 +264,20 @@ Write the complete Python OR-Tools CP-SAT solver script. Remember:
     code = codeBlockMatch[1].trim();
   }
 
+  // Remove any leading non-code text (before first import or comment)
+  const firstImportIdx = code.search(/^(import |from |#|""")/m);
+  if (firstImportIdx > 0) {
+    code = code.substring(firstImportIdx);
+  }
+
   return code;
 }
 
-// ─── Step 3: Execute Python code ─────────────────────────────
-function executePythonCode(code: string, problemJson: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+// ─── Step 4: Execute Python code with retry ─────────────────
+function executePythonCode(
+  code: string,
+  problemJson: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const workDir = join(tmpdir(), `tack-solve-${Date.now()}`);
     mkdirSync(workDir, { recursive: true });
@@ -185,10 +285,10 @@ function executePythonCode(code: string, problemJson: string): Promise<{ stdout:
     const scriptPath = join(workDir, "solver.py");
     writeFileSync(scriptPath, code, "utf-8");
 
-    const child = spawn("python3", [scriptPath], {
+    const child = spawn("python3", ["-u", scriptPath], {
       cwd: workDir,
       stdio: ["pipe", "pipe", "pipe"],
-      timeout: 45000,
+      timeout: SOLVER_TIMEOUT_MS,
     });
 
     let stdout = "";
@@ -225,7 +325,7 @@ function cleanup(dir: string) {
   }
 }
 
-// ─── Step 4: AI verifies the result ──────────────────────────
+// ─── Step 5: AI verifies the result ──────────────────────────
 async function verifyResult(
   problem: ReturnType<typeof buildProblemDescription>,
   result: { status: string; cells: SolveCell[]; message: string }
@@ -247,22 +347,29 @@ Return a JSON object with this exact schema:
   "checks": [{"name": "check name", "passed": boolean, "detail": "explanation"}],
   "hardViolations": [{"constraint": "constraint text", "detail": "violation detail"}],
   "softViolations": [{"constraint": "constraint text", "detail": "violation detail"}]
-}`;
+}
+
+Be thorough. Check EACH constraint text against the actual schedule. Return ONLY valid JSON.`;
 
   const userPrompt = `Original problem constraints:
 ${JSON.stringify(problem.constraints, null, 2)}
 
-Assignments:
-${JSON.stringify(problem.assignments, null, 2)}
+Assignments (required periods):
+${JSON.stringify(problem.assignments.map(a => ({
+  assignment: `${a.teacher} - ${a.subject} - ${a.className}`,
+  requiredPeriods: parseInt(a.weeklyPeriods, 10)
+})), null, 2)}
 
-Solver result:
-${JSON.stringify(result, null, 2)}
+Available slots: ${problem.slots.length}
+
+Solver result cells:
+${JSON.stringify(result.cells, null, 2)}
 
 Verify the result and return the JSON verification report.`;
 
   const completion = await zai.chat.completions.create({
     messages: [
-      { role: "assistant", content: systemPrompt },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
     thinking: { type: "disabled" },
@@ -271,16 +378,23 @@ Verify the result and return the JSON verification report.`;
   const text = completion.choices[0]?.message?.content || "";
 
   try {
-    // Try to extract JSON from the response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as VerificationResult;
+      const parsed = JSON.parse(jsonMatch[0]) as VerificationResult;
+      // Validate structure
+      if (
+        typeof parsed.passed === "boolean" &&
+        Array.isArray(parsed.checks) &&
+        Array.isArray(parsed.hardViolations) &&
+        Array.isArray(parsed.softViolations)
+      ) {
+        return parsed;
+      }
     }
   } catch {
-    // Fallback
+    // Fallback to programmatic verification
   }
 
-  // Fallback: basic programmatic verification
   return programmaticVerify(problem, result.cells);
 }
 
@@ -317,7 +431,11 @@ function programmaticVerify(
       });
     }
   }
-  checks.push({ name: "Số tiết/tuần", passed: periodsOk, detail: periodsOk ? "Tất cả phân công đủ số tiết" : "Có phân công thiếu/thừa tiết" });
+  checks.push({
+    name: "Số tiết/tuần",
+    passed: periodsOk,
+    detail: periodsOk ? "Tất cả phân công đủ số tiết" : "Có phân công thiếu/thừa tiết",
+  });
 
   // Check 2: No teacher conflict
   let teacherOk = true;
@@ -333,10 +451,17 @@ function programmaticVerify(
     if (unique.size < teachers.length) {
       teacherOk = false;
       const dupes = teachers.filter((t, i) => teachers.indexOf(t) !== i);
-      hardViolations.push({ constraint: "Không trùng giáo viên", detail: `Slot ${slot}: giáo viên ${[...new Set(dupes)].join(", ")} dạy trùng` });
+      hardViolations.push({
+        constraint: "Không trùng giáo viên",
+        detail: `Slot ${slot}: giáo viên ${[...new Set(dupes)].join(", ")} dạy trùng`,
+      });
     }
   }
-  checks.push({ name: "Trùng giáo viên", passed: teacherOk, detail: teacherOk ? "Không có xung đột" : "Có giáo viên dạy trùng slot" });
+  checks.push({
+    name: "Trùng giáo viên",
+    passed: teacherOk,
+    detail: teacherOk ? "Không có xung đột" : "Có giáo viên dạy trùng slot",
+  });
 
   // Check 3: No class conflict
   let classOk = true;
@@ -352,16 +477,23 @@ function programmaticVerify(
     if (unique.size < cls.length) {
       classOk = false;
       const dupes = cls.filter((c, i) => cls.indexOf(c) !== i);
-      hardViolations.push({ constraint: "Không trùng lớp", detail: `Slot ${slot}: lớp ${[...new Set(dupes)].join(", ")} học trùng` });
+      hardViolations.push({
+        constraint: "Không trùng lớp",
+        detail: `Slot ${slot}: lớp ${[...new Set(dupes)].join(", ")} học trùng`,
+      });
     }
   }
-  checks.push({ name: "Trùng lớp", passed: classOk, detail: classOk ? "Không có xung đột" : "Có lớp học trùng slot" });
+  checks.push({
+    name: "Trùng lớp",
+    passed: classOk,
+    detail: classOk ? "Không có xung đột" : "Có lớp học trùng slot",
+  });
 
   const passed = periodsOk && teacherOk && classOk;
   return { passed, checks, hardViolations, softViolations };
 }
 
-// ─── Step 5: AI analyzes infeasibility ───────────────────────
+// ─── Step 6: AI analyzes infeasibility ───────────────────────
 async function analyzeInfeasibility(
   problem: ReturnType<typeof buildProblemDescription>,
   solverMessage: string,
@@ -369,39 +501,36 @@ async function analyzeInfeasibility(
 ): Promise<InfeasibilityAnalysis> {
   const zai = await ZAI.create();
 
-  const systemPrompt = `You are a timetable scheduling expert. Given a scheduling problem that was found to be infeasible, analyze why and provide actionable suggestions.
+  const systemPrompt = `You are a timetable scheduling expert. Given a scheduling problem that was found to be infeasible, analyze why and provide actionable suggestions in Vietnamese.
 
 Return a JSON object:
 {
-  "conflicts": ["description of conflict 1", "description of conflict 2", ...],
-  "suggestions": ["suggestion 1", "suggestion 2", ...]
+  "conflicts": ["mô tả xung đột 1", "mô tả xung đột 2", ...],
+  "suggestions": ["gợi ý khắc phục 1", "gợi ý khắc phục 2", ...]
 }`;
 
-  const userPrompt = `The following scheduling problem was infeasible:
+  const userPrompt = `Bài toán xếp thời khóa biểu sau KHÔNG CÓ NGHIỆM:
 
-Teachers: ${problem.teachers.join(", ")}
-Classes: ${problem.classes.join(", ")}
-Subjects: ${problem.subjects.join(", ")}
+Giáo viên: ${problem.teachers.join(", ")}
+Lớp: ${problem.classes.join(", ")}
+Môn: ${problem.subjects.join(", ")}
 
-Assignments:
+Phân công:
 ${JSON.stringify(problem.assignments, null, 2)}
 
-Constraints:
+Ràng buộc:
 ${JSON.stringify(problem.constraints, null, 2)}
 
-Available slots: ${problem.slots.length}
-Total periods needed: ${problem.assignments.reduce((sum, a) => sum + parseInt(a.weeklyPeriods, 10), 0)}
+Slot khả dụng: ${problem.totalSlotsAvailable}
+Tổng tiết cần: ${problem.totalPeriodsNeeded}
 
-Solver message: ${solverMessage}
+Thông điệp solver: ${solverMessage}
 
-Generated code output:
-${generatedCode.substring(0, 2000)}
-
-Analyze the conflicts and suggest fixes.`;
+Phân tích xung đột và đề xuất cách khắc phục.`;
 
   const completion = await zai.chat.completions.create({
     messages: [
-      { role: "assistant", content: systemPrompt },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
     thinking: { type: "disabled" },
@@ -427,18 +556,27 @@ Analyze the conflicts and suggest fixes.`;
   };
 }
 
-// ─── Step 6: AI generates brief report ───────────────────────
+// ─── Step 7: AI generates brief report ───────────────────────
 async function generateReport(
   problem: ReturnType<typeof buildProblemDescription>,
   result: { status: string; cells: SolveCell[]; verification: VerificationResult | null }
 ): Promise<string> {
   const zai = await ZAI.create();
 
+  const filledSlots = result.cells.filter((c) => c.entries.length > 0).length;
+  const hardV = result.verification?.hardViolations.length || 0;
+  const softV = result.verification?.softViolations.length || 0;
+
   const completion = await zai.chat.completions.create({
     messages: [
       {
-        role: "assistant",
-        content: "Bạn là trợ lý thời khóa biểu. Viết báo cáo ngắn gọn bằng tiếng Việt về kết quả xếp thời khóa biểu. Tối đa 3 câu.",
+        role: "system",
+        content: `Bạn là trợ lý thời khóa biểu thông minh. Viết báo cáo ngắn gọn bằng tiếng Việt về kết quả xếp thời khóa biểu. Tối đa 5 câu. Bao gồm:
+- Tổng quan kết quả (thành công/thất bại)
+- Số lượng entity (lớp, giáo viên, môn)
+- Tỷ lệ lấp đầy slot
+- Nếu có vi phạm, nêu cụ thể
+- Đề xuất ngắn nếu cần`,
       },
       {
         role: "user",
@@ -447,16 +585,72 @@ Số lớp: ${problem.classes.length}
 Số giáo viên: ${problem.teachers.length}
 Số môn: ${problem.subjects.length}
 Tổng phân công: ${problem.assignments.length}
-Tổng slot có lịch: ${result.cells.filter((c) => c.entries.length > 0).length}
+Tổng slot: ${problem.totalSlotsAvailable}
+Slot đã xếp: ${filledSlots}
+Tỷ lệ lấp: ${problem.totalSlotsAvailable > 0 ? ((filledSlots / problem.totalSlotsAvailable) * 100).toFixed(1) : 0}%
 Xác minh: ${result.verification?.passed ? "Đạt" : "Có vi phạm"}
-Vi phạm hard: ${result.verification?.hardViolations.length || 0}
-Vi phạm soft: ${result.verification?.softViolations.length || 0}`,
+Vi phạm hard: ${hardV}
+Vi phạm soft: ${softV}`,
       },
     ],
     thinking: { type: "disabled" },
   });
 
   return completion.choices[0]?.message?.content || "Đã tạo thời khóa biểu.";
+}
+
+// ─── Helper: Extract useful error from stderr ────────────────
+function extractPythonError(stderr: string): string {
+  // Get the last traceback lines (most relevant)
+  const lines = stderr.split("\n").filter((l) => l.trim());
+  // Find the last error line
+  const errorIdx = lines.reduce((last, line, i) => {
+    if (line.match(/^(Error|Traceback|  File|.*Error:)/)) return i;
+    return last;
+  }, -1);
+
+  if (errorIdx >= 0) {
+    // Return last 10 relevant lines
+    return lines.slice(Math.max(errorIdx, lines.length - 10)).join("\n");
+  }
+  return stderr.slice(-500);
+}
+
+// ─── Helper: Extract JSON from Python output ─────────────────
+function extractJsonFromOutput(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+
+  // Try direct parse first
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    // Continue to try extraction
+  }
+
+  // Find JSON object boundaries
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (trimmed[i] === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        const candidate = trimmed.substring(start, i + 1);
+        try {
+          JSON.parse(candidate);
+          return candidate;
+        } catch {
+          start = -1;
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 // ─── Main POST handler ───────────────────────────────────────
@@ -504,60 +698,140 @@ export async function POST(request: NextRequest) {
       constraints: constraints || [],
     });
 
-    // Step 2: AI generates OR-Tools code
-    let generatedCode: string;
+    // Step 2: AI defines the problem (analyze constraints)
+    let problemAnalysis: string;
     try {
-      generatedCode = await generateOrtoolsCode(problem);
+      problemAnalysis = await aiDefineProblem(problem);
     } catch (err) {
-      return NextResponse.json({
-        status: "error",
-        message: `AI không thể tạo code: ${err instanceof Error ? err.message : "Unknown error"}`,
-        cells: [],
-        verification: null,
-        generatedCode: null,
-        aiReport: null,
-        infeasibilityAnalysis: null,
-      } satisfies TimetableResult);
+      // If problem definition fails, continue without it
+      problemAnalysis = "Không thể phân tích bài toán. Sẽ tiến hành tạo code trực tiếp.";
     }
 
-    // Step 3: Execute the generated Python code
-    const problemJson = JSON.stringify({
-      slots: problem.slots,
-      assignments: problem.assignments.map((a, i) => ({
-        assignmentId: `${a.teacher}|${a.subject}|${a.className}|${a.weeklyPeriods}`,
-        teacher: a.teacher,
-        subject: a.subject,
-        className: a.className,
-        weeklyPeriods: parseInt(a.weeklyPeriods, 10),
-      })),
-      constraints: problem.constraints,
-      teachers: problem.teachers,
-      subjects: problem.subjects,
-      classes: problem.classes,
-    });
-
-    const execResult = await executePythonCode(generatedCode, problemJson);
-
-    // Parse solver output
+    // Step 3: AI generates OR-Tools code (with self-healing retry)
+    let generatedCode = "";
     let solverOutput: {
       status?: string;
       message?: string;
       cells?: SolveCell[];
       infeasibilityHints?: string[];
-    };
+    } | null = null;
 
-    try {
-      // Try to find JSON in stdout
-      const jsonStr = execResult.stdout.trim();
-      if (!jsonStr) {
-        throw new Error(execResult.stderr || `Solver exited with code ${execResult.exitCode}`);
+    for (let attempt = 0; attempt <= MAX_CODE_RETRIES; attempt++) {
+      // Generate code
+      try {
+        if (attempt === 0) {
+          generatedCode = await generateOrtoolsCode(problem, problemAnalysis);
+        } else {
+          // Retry: feed previous error back to AI
+          const lastStderr = solverOutput === null ? "Unknown error" : "Code execution failed";
+          generatedCode = await generateOrtoolsCode(
+            problem,
+            problemAnalysis,
+            lastStderr,
+            generatedCode
+          );
+        }
+      } catch (err) {
+        return NextResponse.json({
+          status: "error",
+          message: `AI không thể tạo code (lần thử ${attempt + 1}): ${err instanceof Error ? err.message : "Unknown error"}`,
+          cells: [],
+          verification: null,
+          generatedCode,
+          aiReport: null,
+          infeasibilityAnalysis: null,
+        } satisfies TimetableResult);
       }
-      solverOutput = JSON.parse(jsonStr);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Không thể parse kết quả solver";
+
+      // Execute the generated Python code
+      const problemJson = JSON.stringify({
+        slots: problem.slots,
+        assignments: problem.assignments.map((a) => ({
+          assignmentId: `${a.teacher}|${a.subject}|${a.className}|${a.weeklyPeriods}`,
+          teacher: a.teacher,
+          subject: a.subject,
+          className: a.className,
+          weeklyPeriods: parseInt(a.weeklyPeriods, 10),
+        })),
+        constraints: problem.constraints,
+        teachers: problem.teachers,
+        subjects: problem.subjects,
+        classes: problem.classes,
+      });
+
+      const execResult = await executePythonCode(generatedCode, problemJson);
+
+      // Try to parse solver output
+      const jsonStr = extractJsonFromOutput(execResult.stdout);
+
+      if (jsonStr) {
+        try {
+          solverOutput = JSON.parse(jsonStr);
+          // Successfully got valid JSON output — break out of retry loop
+          break;
+        } catch {
+          // JSON parse failed — will retry if attempts remain
+        }
+      }
+
+      // If we have stderr with an error and can retry
+      if (attempt < MAX_CODE_RETRIES && execResult.exitCode !== 0) {
+        const errorDetail = extractPythonError(execResult.stderr);
+        // Feed error back for next iteration
+        solverOutput = null;
+        // Update generatedCode with error info for the retry
+        const _lastError = errorDetail;
+        continue;
+      }
+
+      // No more retries — handle the error
+      if (!jsonStr) {
+        const errorMsg = execResult.stderr
+          ? extractPythonError(execResult.stderr)
+          : `Solver exited with code ${execResult.exitCode}`;
+
+        // Last retry attempt with error feedback
+        if (attempt < MAX_CODE_RETRIES) {
+          try {
+            generatedCode = await generateOrtoolsCode(
+              problem,
+              problemAnalysis,
+              errorMsg,
+              generatedCode
+            );
+
+            const retryResult = await executePythonCode(generatedCode, problemJson);
+            const retryJson = extractJsonFromOutput(retryResult.stdout);
+
+            if (retryJson) {
+              try {
+                solverOutput = JSON.parse(retryJson);
+                break;
+              } catch {
+                // Final attempt also failed
+              }
+            }
+          } catch {
+            // Retry generation failed
+          }
+        }
+
+        return NextResponse.json({
+          status: "error",
+          message: `Lỗi thực thi solver: ${errorMsg}`,
+          cells: [],
+          verification: null,
+          generatedCode,
+          aiReport: null,
+          infeasibilityAnalysis: null,
+        } satisfies TimetableResult);
+      }
+    }
+
+    if (!solverOutput) {
       return NextResponse.json({
         status: "error",
-        message: `Lỗi thực thi solver: ${errorMsg}`,
+        message: "Không thể nhận kết quả từ solver sau nhiều lần thử",
         cells: [],
         verification: null,
         generatedCode,
@@ -577,7 +851,7 @@ export async function POST(request: NextRequest) {
         solverMessage,
         generatedCode
       ).catch(() => ({
-        conflicts: solverOutput.infeasibilityHints || ["Bài toán không có nghiệm"],
+        conflicts: solverOutput?.infeasibilityHints || ["Bài toán không có nghiệm"],
         suggestions: ["Giảm ràng buộc bắt buộc", "Thêm slot thời gian", "Giảm số tiết/tuần"],
       }));
 

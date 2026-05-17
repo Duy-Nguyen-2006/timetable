@@ -133,7 +133,9 @@ export const wizardPages = [
 // Solve progress steps
 export const solveProgressSteps = [
   "Đang phân tích ràng buộc...",
+  "Đang định nghĩa bài toán...",
   "Đang tạo code OR-Tools...",
   "Đang giải bài toán...",
   "Đang xác minh kết quả...",
+  "Đang tạo báo cáo...",
 ];
