@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   BookOpen,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Circle,
   Code,
+  Download,
   Eye,
   EyeOff,
   Hash,
@@ -25,6 +26,7 @@ import {
   Trash2,
   User,
 } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
 import { generateTimetableWithAI } from './ai/client'
 import { useApiKeyStore } from './ai/api-key-store'
@@ -452,40 +454,32 @@ export default function App({ onBackToLanding }) {
   }, [resultClassColumns])
 
   const fixedResultTableSections = useMemo(() => {
-    const dayById = Object.fromEntries(days.map((day) => [day.id, day]))
-    const selectedDayById = Object.fromEntries(selectedSpreadsheetDays.map((day) => [day.id, day]))
-    const resolveDay = (dayId: string) => selectedDayById[dayId] ?? dayById[dayId] ?? days[0]
-    const resolveSession = (sessionId: string) =>
-      selectedSessionData.find((session) => session.id === sessionId) ?? sessions.find((session) => session.id === sessionId) ?? sessions[0]
+    return selectedSessionData.map((session, sectionIndex) => {
+      const sessionPeriodCount = periods[session.id] ?? defaultPeriods[session.id]
 
-    const makeRows = (sessionId: string, dayIds: string[], rowCounts: number[]) =>
-      dayIds.map((dayId, index) => {
-        const day = resolveDay(dayId)
-        const session = resolveSession(sessionId)
-
-        return {
-          key: `${sessionId}-${day.id}`,
-          label: day.tableLabel,
-          rows: Array.from({ length: rowCounts[index] }, (_, rowIndex) => ({
-            day,
-            session,
-            period: rowIndex + 1,
-          })),
+      const dayGroups = selectedSpreadsheetDays.map((day) => {
+        // Count active (non-deleted) periods for this day+session
+        const activeRows: { day: typeof day; session: typeof session; period: number }[] = []
+        for (let p = 1; p <= sessionPeriodCount; p++) {
+          const cellKey = getCellKey(day.id, session.id, p)
+          if (!deletedPeriods[cellKey]) {
+            activeRows.push({ day, session, period: p })
+          }
         }
-      })
+        return {
+          key: `${session.id}-${day.id}`,
+          label: day.tableLabel,
+          rows: activeRows,
+        }
+      }).filter((group) => group.rows.length > 0)
 
-    return [
-      {
-        key: 'upper',
-        rows: makeRows('morning', ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], [5, 4, 4, 4, 5]),
-      },
-      {
-        key: 'lower',
-        divider: `THỜI KHÓA BIỂU BUỔI ${(resolveSession('afternoon')?.label ?? 'CHIỀU').toUpperCase()}`,
-        rows: makeRows('afternoon', ['monday', 'wednesday', 'friday'], [3, 3, 3]),
-      },
-    ]
-  }, [selectedSessionData, selectedSpreadsheetDays])
+      return {
+        key: session.id,
+        ...(sectionIndex > 0 ? { divider: `THỜI KHÓA BIỂU BUỔI ${session.label.toUpperCase()}` } : {}),
+        rows: dayGroups,
+      }
+    })
+  }, [selectedSessionData, selectedSpreadsheetDays, periods, deletedPeriods])
 
   const canContinue = selectedDays.length > 0 && selectedSessions.length > 0
 
@@ -711,12 +705,68 @@ export default function App({ onBackToLanding }) {
       setAiResult(result)
     } catch (err) {
       setAiError(RESULT_NOT_FOUND_MESSAGE)
-    } finally {
-      setAiLoading(false)
+      } finally {
+        setAiLoading(false)
+      }
     }
-  }
 
-  const activePeriodCount = useMemo(
+    const handleDownloadExcel = useCallback(() => {
+      if (!aiResult || aiResult.status !== 'solved') return
+
+      const headerRow: string[] = ['Thứ', 'Tiết']
+      resultTableClassColumns.forEach((className, index) => {
+        headerRow.push(className || `Lớp ${index + 1}`)
+        headerRow.push('GV Dạy')
+      })
+
+      const rows: string[][] = [headerRow]
+
+      fixedResultTableSections.forEach((section, sectionIndex) => {
+        if (sectionIndex > 0 && section.divider) {
+          const dividerRow = [section.divider, ...Array(headerRow.length - 1).fill('')]
+          rows.push(dividerRow)
+        }
+
+        section.rows.forEach((group) => {
+          group.rows.forEach((row, rowIndex) => {
+            const cellKey = getCellKey(row.day.id, row.session.id, row.period)
+            const dataRow: string[] = []
+
+            if (rowIndex === 0) {
+              dataRow.push(group.label)
+            } else {
+              dataRow.push('')
+            }
+            dataRow.push(String(row.period))
+
+            resultTableClassColumns.forEach((className) => {
+              const entry = className
+                ? solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
+                : null
+              dataRow.push(entry?.subject ?? '')
+              dataRow.push(entry?.teacher ?? '')
+            })
+
+            rows.push(dataRow)
+          })
+        })
+      })
+
+      const ws = XLSX.utils.aoa_to_sheet(rows)
+
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 12 }, // Thứ
+        { wch: 6 },  // Tiết
+        ...resultTableClassColumns.flatMap(() => [{ wch: 18 }, { wch: 18 }]),
+      ]
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Thời khóa biểu')
+      XLSX.writeFile(wb, 'thoi-khoa-bieu.xlsx')
+    }, [aiResult, fixedResultTableSections, resultTableClassColumns, solvedCellMap])
+
+    const activePeriodCount = useMemo(
     () =>
       selectedSpreadsheetDays.reduce(
         (total, day) =>
@@ -2009,8 +2059,9 @@ export default function App({ onBackToLanding }) {
                         </div>
                       </div>
 
-                      {aiResult?.status === 'solved' ? (
-                        <div className="overflow-auto rounded-md border border-white/[0.12] bg-white text-black">
+                        {aiResult?.status === 'solved' ? (
+                          <>
+                          <div className="overflow-auto rounded-md border border-white/[0.12] bg-white text-black">
                           <table className="min-w-[1540px] w-full border-collapse border-2 border-black text-[11px] font-normal leading-4 text-black [font-family:Arial,Helvetica,sans-serif]">
                             <thead>
                               <tr>
@@ -2076,17 +2127,28 @@ export default function App({ onBackToLanding }) {
                                 </Fragment>
                               ))}
                             </tbody>
-                          </table>
-                        </div>
-                      ) : !aiLoading && !aiError ? (
+                            </table>
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={handleDownloadExcel}
+                                className="inline-flex items-center gap-2 rounded-md border border-white/[0.12] bg-[#4DB848]/10 px-4 py-2 text-sm font-medium text-[#4DB848] transition-colors hover:bg-[#4DB848]/20"
+                              >
+                                <Download size={16} strokeWidth={1.5} />
+                                Tải về Excel
+                              </button>
+                            </div>
+                          </>
+                          ) : !aiLoading && !aiError ? (
                         <div className="rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm text-white/30">
                           Nhấn Xếp lịch để tạo bảng kết quả cuối.
                         </div>
-                      ) : (aiResult && aiResult.status !== 'solved') || aiError ? (
-                        <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm font-semibold text-white">
-                          {RESULT_NOT_FOUND_MESSAGE}
-                        </div>
-                      ) : null}
+                        ) : aiResult || aiError ? (
+                          <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm font-semibold text-white">
+                            {RESULT_NOT_FOUND_MESSAGE}
+                          </div>
+                        ) : null}
 
 
                       </section>

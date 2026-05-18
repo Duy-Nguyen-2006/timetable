@@ -5,8 +5,7 @@ dist/
 build/
 release/
 python-dist/
-.env*
-!.env.example
+# !.env.example # Removed by Orchids to allow .env files
 *.log
 .DS_Store
 .venv/
@@ -16,3 +15,5 @@ __pycache__/
 db/*.db
 prisma/*.db
 tsconfig.tsbuildinfo
+node_modules
+.venv
