@@ -1,5 +1,4 @@
 import { buildTimetablePayload } from './prompt'
-import type { ModelRequestPreview, NormalizedHardConstraint, NormalizedSoftConstraint, UnparsedConstraint } from './types'
 
 export function buildSolverInput(input: any) {
   const payload = buildTimetablePayload(input)
@@ -27,22 +26,17 @@ export function buildSolverInput(input: any) {
   }))
 
   const rawConstraints = payload.rang_buoc_xep_lich.map((constraint: any, index: number) => ({
-    id: `constraint-${index + 1}`,
+    id: `c${index + 1}`,
     priority: constraint.loai === 'Bắt buộc' ? 'required' : 'preferred',
     text: constraint.noi_dung,
   }))
 
   return {
-    requestId: `req-${Date.now()}`,
-    version: 'v1',
     slots,
     assignments,
-    constraints: {
-      hard: [] as NormalizedHardConstraint[],
-      soft: [] as NormalizedSoftConstraint[],
-      rawText: rawConstraints,
-      unparsed: [] as UnparsedConstraint[],
-    },
+    aiCompiledConstraints: [] as any[],  // will be injected after AI compilation
+    unparsedConstraints: [] as any[],
+    rawConstraints,
     solverConfig: {
       maxTimeSeconds: 20,
       numWorkers: 8,
@@ -51,54 +45,19 @@ export function buildSolverInput(input: any) {
   }
 }
 
-export function buildDevstralRequestPreview(input: any): ModelRequestPreview {
-  const solverInput = buildSolverInput(input)
+/**
+ * Extract entity lists from solver input for AI compiler prompts
+ */
+export function extractEntities(solverInput: ReturnType<typeof buildSolverInput>) {
   const unique = (items: string[]) => [...new Set(items)]
+  const uniqueDayIds = unique(solverInput.slots.map((s: any) => s.dayId))
+  const uniqueSessionIds = unique(solverInput.slots.map((s: any) => s.sessionId))
 
   return {
-    model: 'devstral-latest',
-    temperature: 0,
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'timetable_constraint_parse',
-        schema: {
-          type: 'object',
-          properties: {
-            hard: { type: 'array' },
-            soft: { type: 'array' },
-            unparsed: { type: 'array' },
-          },
-          required: ['hard', 'soft', 'unparsed'],
-          additionalProperties: false,
-        },
-      },
-    },
-    messages: [
-      {
-        role: 'system',
-        content: 'Bạn là bộ phân tích ràng buộc thời khóa biểu. Chỉ trả JSON hợp lệ theo schema. Không giải bài toán, không sinh lịch, không thêm thực thể ngoài input.',
-      },
-      {
-        role: 'user',
-        content: {
-          teachers: unique(solverInput.assignments.map((assignment: any) => assignment.teacherLabel)),
-          subjects: unique(solverInput.assignments.map((assignment: any) => assignment.subjectLabel)),
-          classes: unique(solverInput.assignments.map((assignment: any) => assignment.classLabel)),
-          slots: solverInput.slots.map((slot: any) => ({
-            slotId: slot.slotId,
-            dayLabel: slot.dayLabel,
-            sessionLabel: slot.sessionLabel,
-            period: slot.period,
-          })),
-          constraints: solverInput.constraints.rawText,
-          instructions: [
-            'Chuẩn hóa constraint thành hard/soft.',
-            'Nếu text tham chiếu đúng 1 teacher/class/subject/slot thì map vào id tương ứng.',
-            'Nếu mơ hồ hoặc không map chắc chắn được, đưa vào unparsed và giải thích ngắn.',
-          ],
-        },
-      },
-    ],
+    teachers: unique(solverInput.assignments.map((a: any) => a.teacherLabel)),
+    subjects: unique(solverInput.assignments.map((a: any) => a.subjectLabel)),
+    classes: unique(solverInput.assignments.map((a: any) => a.classLabel)),
+    dayIds: uniqueDayIds,
+    sessionIds: uniqueSessionIds,
   }
 }

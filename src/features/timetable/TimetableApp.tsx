@@ -6,14 +6,19 @@ import {
   BookOpen,
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
   Circle,
+  Code,
+  Eye,
+  EyeOff,
   Hash,
   Loader2,
   Minus,
   Plus,
   RadioTower,
   RotateCcw,
+  AlertTriangle,
   ClipboardList,
   Sparkles,
   Sun,
@@ -317,6 +322,8 @@ export default function App({ onBackToLanding }) {
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [expandedConstraintIds, setExpandedConstraintIds] = useState<Set<string>>(new Set())
+  const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
   const [lowprizoApiKey, setLowprizoApiKey] = useState('')
 
   useEffect(() => {
@@ -2084,6 +2091,197 @@ export default function App({ onBackToLanding }) {
 
                       </section>
 
+                      {/* ========== AI Constraint Compilation Results ========== */}
+                      {aiResult && !aiLoading && (
+                        <>
+                          {/* a) How AI understood constraints */}
+                          {aiResult.compiledConstraints && aiResult.compiledConstraints.length > 0 && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <Code size={16} strokeWidth={1.5} />
+                                </span>
+                                <div>
+                                  <h2 className="text-sm font-semibold text-white">Cách AI hiểu ràng buộc của bạn</h2>
+                                  <p className="text-xs text-white/40">Các ràng buộc đã được biên dịch sang code OR-Tools</p>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {aiResult.compiledConstraints.map((c) => {
+                                  const isExpanded = expandedConstraintIds.has(c.id)
+                                  return (
+                                    <div key={c.id} className="rounded-md border border-white/[0.08] bg-[#0a0a0a] p-3">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm text-white/80">{c.description}</p>
+                                          <p className="mt-1 text-xs text-white/30 truncate">"{c.original}"</p>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${c.priority === 'hard' ? 'border-red-400/25 bg-red-400/10 text-red-300' : 'border-blue-400/25 bg-blue-400/10 text-blue-300'}`}>
+                                            {c.priority === 'hard' ? 'Bắt buộc' : 'Nên có'}
+                                          </span>
+                                          {c.priority === 'soft' && c.weight != null && (
+                                            <span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] text-white/40">
+                                              w={c.weight}
+                                            </span>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setExpandedConstraintIds((prev) => {
+                                                const next = new Set(prev)
+                                                if (next.has(c.id)) next.delete(c.id)
+                                                else next.add(c.id)
+                                                return next
+                                              })
+                                            }}
+                                            className="rounded p-1 text-white/30 hover:text-white/60 hover:bg-white/[0.04] transition-colors"
+                                            title={isExpanded ? 'Ẩn code' : 'Xem code'}
+                                          >
+                                            {isExpanded ? <EyeOff size={14} strokeWidth={1.5} /> : <Eye size={14} strokeWidth={1.5} />}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      {isExpanded && (
+                                        <pre className="mt-3 overflow-auto rounded border border-white/[0.06] bg-[#111] p-3 text-[11px] leading-5 text-green-300/70 font-mono">
+                                          {c.code}
+                                        </pre>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </section>
+                          )}
+
+                          {/* b) Unparsed constraints */}
+                          {aiResult.unparsedConstraints && aiResult.unparsedConstraints.length > 0 && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-amber-400" />
+                                </span>
+                                <div>
+                                  <h2 className="text-sm font-semibold text-white">Ràng buộc chưa hiểu được</h2>
+                                  <p className="text-xs text-white/40">AI không thể biên dịch các ràng buộc sau</p>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {aiResult.unparsedConstraints.map((u) => (
+                                  <div key={u.id} className="rounded-md border border-amber-400/15 bg-amber-400/[0.03] p-3">
+                                    <div className="flex items-start gap-2">
+                                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" strokeWidth={1.5} />
+                                      <div className="min-w-0">
+                                        <p className="text-sm text-white/70">"{u.original}"</p>
+                                        <p className="mt-1 text-xs text-white/35">{u.reason}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+
+                          {/* c) Detected violations (only when violations exist) */}
+                          {aiResult.violations && aiResult.violations.filter((v) => v.violated).length > 0 && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-red-400" />
+                                </span>
+                                <div>
+                                  <h2 className="text-sm font-semibold text-white">Vi phạm phát hiện</h2>
+                                  {aiResult.overallAssessment && (
+                                    <p className="text-xs text-white/40">{aiResult.overallAssessment}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {aiResult.violations.filter((v) => v.violated).map((v, idx) => (
+                                  <div key={`${v.constraintId}-${idx}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3">
+                                    <p className="text-sm text-white/80">"{v.original}"</p>
+                                    <p className="mt-1 text-xs text-red-300/70">{v.reason}</p>
+                                    {v.confidence > 0 && (
+                                      <span className="mt-1 inline-block rounded border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/30">
+                                        confidence: {(v.confidence * 100).toFixed(0)}%
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+
+                          {/* d) Infeasible reason (only when status='infeasible') */}
+                          {aiResult.status === 'infeasible' && aiResult.iisConstraintIds && aiResult.iisConstraintIds.length > 0 && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-amber-400" />
+                                </span>
+                                <div>
+                                  <h2 className="text-sm font-semibold text-white">Lý do không xếp được</h2>
+                                  <p className="text-xs text-white/40">Các ràng buộc sau xung đột nhau</p>
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-amber-400/15 bg-amber-400/[0.03] p-4">
+                                <div className="space-y-2">
+                                  {aiResult.compiledConstraints
+                                    ?.filter((c) => aiResult.iisConstraintIds?.includes(c.id))
+                                    .map((c) => (
+                                      <div key={c.id} className="rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5">
+                                        <p className="text-sm text-white/70">{c.description}</p>
+                                        <p className="mt-0.5 text-xs text-white/30">"{c.original}"</p>
+                                      </div>
+                                    ))}
+                                </div>
+                                <p className="mt-3 text-sm text-amber-300/70">
+                                  Các ràng buộc này xung đột nhau. Hãy bỏ hoặc nới lỏng một trong số đó.
+                                </p>
+                              </div>
+                            </section>
+                          )}
+
+                          {/* e) Technical errors (collapsible, only shown when there are errors) */}
+                          {((aiResult.executionErrors && aiResult.executionErrors.length > 0) ||
+                            (aiResult.validationErrors && aiResult.validationErrors.length > 0)) && (
+                            <section className={`${panelClass} p-4`}>
+                              <button
+                                type="button"
+                                onClick={() => setShowTechnicalErrors(!showTechnicalErrors)}
+                                className="mb-3 flex w-full items-center gap-2 text-left text-sm text-white/50 hover:text-white/70 transition-colors"
+                              >
+                                <ChevronDown
+                                  size={14}
+                                  className={`transition-transform ${showTechnicalErrors ? 'rotate-180' : ''}`}
+                                  strokeWidth={1.5}
+                                />
+                                <span>Lỗi kỹ thuật</span>
+                                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px]">
+                                  {(aiResult.executionErrors?.length || 0) + (aiResult.validationErrors?.length || 0)}
+                                </span>
+                              </button>
+                              {showTechnicalErrors && (
+                                <div className="space-y-2">
+                                  {aiResult.validationErrors?.map((e, idx) => (
+                                    <div key={`val-${e.constraintId}-${idx}`} className="rounded border border-red-400/15 bg-red-400/[0.03] p-2.5">
+                                      <p className="text-xs font-medium text-red-300/70">Validation Error — {e.constraintId}</p>
+                                      <p className="mt-0.5 text-xs text-white/40">{e.error}</p>
+                                    </div>
+                                  ))}
+                                  {aiResult.executionErrors?.map((e, idx) => (
+                                    <div key={`exec-${e.constraintId}-${idx}`} className="rounded border border-amber-400/15 bg-amber-400/[0.03] p-2.5">
+                                      <p className="text-xs font-medium text-amber-300/70">Execution Error — {e.constraintId}</p>
+                                      <p className="mt-0.5 text-xs text-white/40 font-mono">{e.error}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          )}
+                        </>
+                      )}
+
                       <section className={`${panelClass} p-4`}>
                         <div className="mb-4 flex items-center gap-2.5">
                           <span className={iconShellClass}>
@@ -2251,8 +2449,8 @@ export default function App({ onBackToLanding }) {
 
                             <div className="grid gap-4 xl:grid-cols-2">
                               <div className={`${panelMutedClass} p-3`}>
-                                <p className="text-xs font-medium text-white/70">Normalized constraints</p>
-                                <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(aiResult.normalizedConstraints, null, 2)}</pre>
+                                <p className="text-xs font-medium text-white/70">Compiled constraints</p>
+                                <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(aiResult.compiledConstraints, null, 2)}</pre>
                               </div>
                               <div className={`${panelMutedClass} p-3`}>
                                 <p className="text-xs font-medium text-white/70">Request preview gửi model</p>

@@ -13,6 +13,50 @@ export type TimetableSolveCell = {
   entries: TimetableSolveEntry[]
 }
 
+// ---------------------------------------------------------------------------
+// New AI-compiled constraint types
+// ---------------------------------------------------------------------------
+
+export type AICompiledConstraint = {
+  id: string
+  description: string   // short Vietnamese explanation
+  original: string      // user's original text
+  priority: 'hard' | 'soft'
+  weight?: number       // 1-10, required if priority='soft'
+  code: string          // Python OR-Tools code
+}
+
+export type AIUnparsedConstraint = {
+  id: string
+  original: string
+  reason: string
+}
+
+export type CompilerResult = {
+  constraints: AICompiledConstraint[]
+  unparsed: AIUnparsedConstraint[]
+}
+
+export type ConstraintViolation = {
+  constraintId: string
+  original: string
+  violated: boolean
+  reason: string
+  confidence: number
+}
+
+export type VerifierResult = {
+  violations: ConstraintViolation[]
+  overallAssessment: string
+}
+
+export type ExecutionError = { constraintId: string; error: string }
+export type ValidationError = { constraintId: string; error: string }
+
+// ---------------------------------------------------------------------------
+// Legacy types (kept for backward compatibility during migration)
+// ---------------------------------------------------------------------------
+
 export type NormalizedHardConstraint = {
   sourceConstraintId: string
   type: 'teacher_unavailable'
@@ -42,6 +86,10 @@ export type NormalizedConstraintResult = {
   unparsed: UnparsedConstraint[]
 }
 
+// ---------------------------------------------------------------------------
+// Common types
+// ---------------------------------------------------------------------------
+
 export type SolverStats = {
   wallTimeSeconds: number
   objectiveValue: number | null
@@ -60,12 +108,22 @@ export type ModelRequestPreview = {
   response_format?: Record<string, unknown>
 }
 
+// ---------------------------------------------------------------------------
+// Updated solve result type
+// ---------------------------------------------------------------------------
+
 export type TimetableSolveResult = {
   status: 'solved' | 'infeasible' | 'error'
   message: string
   diagnostics: string[]
   cells: TimetableSolveCell[]
-  normalizedConstraints: NormalizedConstraintResult
+  compiledConstraints: AICompiledConstraint[]
+  unparsedConstraints: AIUnparsedConstraint[]
+  executionErrors: ExecutionError[]
+  validationErrors: ValidationError[]
+  iisConstraintIds: string[]
+  violations: ConstraintViolation[]
+  overallAssessment: string | null
   solverStats: SolverStats | null
   modelRequestPreview: ModelRequestPreview | null
 }

@@ -20,7 +20,9 @@ def main():
             "message": "Python OR-Tools runner bị lỗi.",
             "diagnostics": [str(exc), traceback.format_exc()],
             "cells": [],
-            "normalizedConstraints": {"hard": [], "soft": [], "unparsed": []},
+            "iisConstraintIds": [],
+            "executionErrors": [],
+            "validationErrors": [],
             "solverStats": None,
         }, ensure_ascii=False))
         sys.exit(1)
