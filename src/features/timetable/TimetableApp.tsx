@@ -48,6 +48,7 @@ import {
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
 
 const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
+const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 
 function loadStoredLowprizoApiKey() {
   if (typeof window === 'undefined') return ''
@@ -437,6 +438,48 @@ export default function App({ onBackToLanding }) {
     [deletedPeriods, selectedSessionData, selectedSpreadsheetDays, summaryTimetableRows],
   )
 
+  const resultTableClassColumns = useMemo(() => {
+    const columns = resultClassColumns.slice(0, 8)
+    while (columns.length < 8) columns.push('')
+    return columns
+  }, [resultClassColumns])
+
+  const fixedResultTableSections = useMemo(() => {
+    const dayById = Object.fromEntries(days.map((day) => [day.id, day]))
+    const selectedDayById = Object.fromEntries(selectedSpreadsheetDays.map((day) => [day.id, day]))
+    const resolveDay = (dayId: string) => selectedDayById[dayId] ?? dayById[dayId] ?? days[0]
+    const resolveSession = (sessionId: string) =>
+      selectedSessionData.find((session) => session.id === sessionId) ?? sessions.find((session) => session.id === sessionId) ?? sessions[0]
+
+    const makeRows = (sessionId: string, dayIds: string[], rowCounts: number[]) =>
+      dayIds.map((dayId, index) => {
+        const day = resolveDay(dayId)
+        const session = resolveSession(sessionId)
+
+        return {
+          key: `${sessionId}-${day.id}`,
+          label: day.tableLabel,
+          rows: Array.from({ length: rowCounts[index] }, (_, rowIndex) => ({
+            day,
+            session,
+            period: rowIndex + 1,
+          })),
+        }
+      })
+
+    return [
+      {
+        key: 'upper',
+        rows: makeRows('morning', ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], [5, 4, 4, 4, 5]),
+      },
+      {
+        key: 'lower',
+        divider: `THỜI KHÓA BIỂU BUỔI ${(resolveSession('afternoon')?.label ?? 'CHIỀU').toUpperCase()}`,
+        rows: makeRows('afternoon', ['monday', 'wednesday', 'friday'], [3, 3, 3]),
+      },
+    ]
+  }, [selectedSessionData, selectedSpreadsheetDays])
+
   const canContinue = selectedDays.length > 0 && selectedSessions.length > 0
 
   const toggleItem = (id, setter) => {
@@ -660,7 +703,7 @@ export default function App({ onBackToLanding }) {
       }, apiKey ?? undefined)
       setAiResult(result)
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Không thể tạo thời khóa biểu.')
+      setAiError(RESULT_NOT_FOUND_MESSAGE)
     } finally {
       setAiLoading(false)
     }
@@ -1949,28 +1992,6 @@ export default function App({ onBackToLanding }) {
                         </div>
                       )}
 
-                      {aiError && !aiLoading && (
-                        <div className="mb-4 rounded-md border border-[#4DB848]/20 bg-[#4DB848]/[0.03] p-4">
-                          <p className="font-medium text-white">Chưa thể tạo thời khóa biểu.</p>
-                          <p className="mt-2 text-sm text-white/50">{aiError}</p>
-                          <button
-                            type="button"
-                            onClick={handleGenerate}
-                            className={ghostButtonClass + ' mt-3'}
-                          >
-                            <RotateCcw size={14} strokeWidth={1.5} />
-                            Thử lại
-                          </button>
-                        </div>
-                      )}
-
-                      {aiResult && !aiLoading && (
-                        <div className="mb-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4">
-                          <p className="text-sm font-semibold text-white">{aiResult.status === 'solved' ? 'Đã xếp xong thời khóa biểu.' : aiResult.status === 'infeasible' ? 'Chưa tìm được thời khóa biểu phù hợp với các ràng buộc hiện tại.' : 'Đã xảy ra lỗi khi xếp thời khóa biểu.'}</p>
-                          <p className="mt-1 text-xs text-white/40">{aiResult.status === 'solved' ? 'Kết quả cuối cùng theo giáo viên và môn học' : aiResult.message}</p>
-                        </div>
-                      )}
-
                       <div className="mb-4 flex items-center gap-2.5">
                         <span className={iconShellClass}>
                           <Sparkles size={16} strokeWidth={1.5} />
@@ -1983,64 +2004,67 @@ export default function App({ onBackToLanding }) {
 
                       {aiResult?.status === 'solved' ? (
                         <div className="overflow-auto rounded-md border border-white/[0.12] bg-white text-black">
-                          <table className="min-w-[1500px] w-full border-collapse text-[11px] font-normal leading-4 text-black [font-family:Arial,Helvetica,sans-serif]">
+                          <table className="min-w-[1540px] w-full border-collapse border-2 border-black text-[11px] font-normal leading-4 text-black [font-family:Arial,Helvetica,sans-serif]">
                             <thead>
                               <tr>
-                                <th className="w-20 border border-black bg-white px-2 py-1 text-center font-semibold">Thứ</th>
-                                <th className="w-12 border border-black bg-white px-2 py-1 text-center font-semibold">Tiết</th>
-                                {resultClassColumns.map((className) => (
-                                  <th key={`${className}-subject-head`} className="w-20 border border-black bg-white px-2 py-1 text-center font-semibold">
-                                    {className}
-                                  </th>
-                                ))}
-                                {resultClassColumns.map((className) => (
-                                  <th key={`${className}-teacher-head`} className="w-20 border border-black bg-white px-2 py-1 text-center font-semibold">
-                                    GV Dạy
-                                  </th>
+                                <th className="w-20 border-2 border-black bg-white px-2 py-1.5 text-center align-middle font-bold uppercase">Thứ</th>
+                                <th className="w-12 border-2 border-black bg-white px-2 py-1.5 text-center align-middle font-bold uppercase">Tiết</th>
+                                {resultTableClassColumns.map((className, index) => (
+                                  <Fragment key={`class-pair-head-${index}`}>
+                                    <th className="w-24 border-2 border-black bg-white px-2 py-1.5 text-center align-middle font-bold uppercase">
+                                      {className || `Lớp ${index + 1}`}
+                                    </th>
+                                    <th className="w-24 border-2 border-black bg-white px-2 py-1.5 text-center align-middle font-bold uppercase">
+                                      GV Dạy
+                                    </th>
+                                  </Fragment>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
-                              {resultSessionGroups.map((sessionGroup, sessionIndex) => (
-                                <Fragment key={sessionGroup.id}>
-                                  {sessionIndex > 0 && (
+                              {fixedResultTableSections.map((section, sectionIndex) => (
+                                <Fragment key={section.key}>
+                                  {sectionIndex > 0 && section.divider && (
                                     <tr>
-                                      <td colSpan={2 + resultClassColumns.length * 2} className="border border-black bg-white px-2 py-1 text-center text-sm font-bold uppercase tracking-wide">
-                                        THỜI KHÓA BIỂU BUỔI {sessionGroup.label.toUpperCase()}
+                                      <td colSpan={18} className="border-2 border-black bg-white px-2 py-2 text-center text-sm font-bold uppercase tracking-wide">
+                                        {section.divider}
                                       </td>
                                     </tr>
                                   )}
-                                  {sessionGroup.rows.map((row) => (
-                                    <tr key={`${sessionGroup.id}-${row.day.id}-${row.period}`}>
-                                      {row.firstInDay ? (
-                                        <td rowSpan={row.dayPeriodCount} className="border border-black bg-white px-2 py-1 text-center align-middle font-semibold">
-                                          {row.day.tableLabel}
-                                        </td>
-                                      ) : null}
-                                      <td className="border border-black bg-white px-2 py-1 text-center align-middle">
-                                        {row.period}
-                                      </td>
-                                      {resultClassColumns.map((className) => {
-                                        const cellKey = getCellKey(row.day.id, row.sessionId, row.period)
-                                        const entry = solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
+                                  {section.rows.map((group) => (
+                                    <Fragment key={group.key}>
+                                      {group.rows.map((row, rowIndex) => {
+                                        const cellKey = getCellKey(row.day.id, row.session.id, row.period)
+                                        const isLastGroupRow = rowIndex === group.rows.length - 1
 
                                         return (
-                                          <td key={`${cellKey}-${className}-subject`} className="border border-black bg-white px-2 py-1 text-left align-middle">
-                                            {entry?.subject ?? ''}
-                                          </td>
-                                        )
-                                      })}
-                                      {resultClassColumns.map((className) => {
-                                        const cellKey = getCellKey(row.day.id, row.sessionId, row.period)
-                                        const entry = solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
+                                          <tr key={`${group.key}-${row.period}`}>
+                                            {rowIndex === 0 ? (
+                                              <td rowSpan={group.rows.length} className="border-2 border-black bg-white px-2 py-1 text-center align-middle font-bold">
+                                                {group.label}
+                                              </td>
+                                            ) : null}
+                                            <td className={`border border-black bg-white px-2 py-1 text-center align-middle ${isLastGroupRow ? 'border-b-2' : ''}`}>
+                                              {row.period}
+                                            </td>
+                                            {resultTableClassColumns.map((className, classIndex) => {
+                                              const entry = className ? solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className) : null
 
-                                        return (
-                                          <td key={`${cellKey}-${className}-teacher`} className="border border-black bg-white px-2 py-1 text-left align-middle">
-                                            {entry?.teacher ?? ''}
-                                          </td>
+                                              return (
+                                                <Fragment key={`${cellKey}-${classIndex}-${className || 'blank'}`}>
+                                                  <td className={`border border-black bg-white px-2 py-1 text-left align-middle ${isLastGroupRow ? 'border-b-2' : ''}`}>
+                                                    {entry?.subject ?? ''}
+                                                  </td>
+                                                  <td className={`border border-black bg-white px-2 py-1 text-left align-middle ${isLastGroupRow ? 'border-b-2' : ''}`}>
+                                                    {entry?.teacher ?? ''}
+                                                  </td>
+                                                </Fragment>
+                                              )
+                                            })}
+                                          </tr>
                                         )
                                       })}
-                                    </tr>
+                                    </Fragment>
                                   ))}
                                 </Fragment>
                               ))}
@@ -2050,6 +2074,10 @@ export default function App({ onBackToLanding }) {
                       ) : !aiLoading && !aiError ? (
                         <div className="rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm text-white/30">
                           Nhấn Xếp lịch để tạo bảng kết quả cuối.
+                        </div>
+                      ) : (aiResult && aiResult.status !== 'solved') || aiError ? (
+                        <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm font-semibold text-white">
+                          {RESULT_NOT_FOUND_MESSAGE}
                         </div>
                       ) : null}
 
@@ -2151,7 +2179,7 @@ export default function App({ onBackToLanding }) {
                       </aside>
                     </div>
 
-                    {(aiLoading || aiResult || aiError) && (
+                    {false && (aiLoading || aiResult || aiError) && (
                       <section className={`${panelClass} mt-4 overflow-hidden p-4`}>
                         <div className="mb-4 flex items-center gap-2.5">
                           <span className={iconShellClass}>
