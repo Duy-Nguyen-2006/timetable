@@ -1,8 +1,11 @@
 import json
 import sys
 import traceback
+from pathlib import Path
 
-from solver import solve_timetable
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from timetable_solver.solver import solve_timetable
 
 
 def main():
