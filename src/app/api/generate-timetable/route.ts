@@ -142,21 +142,26 @@ export async function POST(request: Request) {
     // 4. Run solver
     const solverResult = await runPythonSolver(solverInput)
 
-    // 5. Stage 2: AI Verifier (only when solved)
+    // 5. Stage 2: AI Verifier (only when solved, with own timeout)
     let verifierResult: VerifierResult = {
       violations: [],
       overallAssessment: '',
     }
     if (solverResult.status === 'solved') {
-      verifierResult = await verifySolutionWithAI(
-        {
-          rawConstraints: solverInput.rawConstraints,
-          cells: solverResult.cells || [],
-          compiledConstraints: compileResult.constraints,
-          entities,
-        },
-        apiKey,
-      )
+      verifierResult = await Promise.race([
+        verifySolutionWithAI(
+          {
+            rawConstraints: solverInput.rawConstraints,
+            cells: solverResult.cells || [],
+            compiledConstraints: compileResult.constraints,
+            entities,
+          },
+          apiKey,
+        ),
+        new Promise<VerifierResult>((resolve) =>
+          setTimeout(() => resolve({ violations: [], overallAssessment: 'Verifier timeout.' }), 20_000)
+        ),
+      ])
     }
 
     // 6. Logging (server-side only)

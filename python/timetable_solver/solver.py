@@ -40,8 +40,9 @@ class _ProxyModel:
                 ct = attr(*args, **kwargs)
                 try:
                     ct.OnlyEnforceIf(self._assume)
-                except Exception:
-                    pass  # some constraint types don't support OnlyEnforceIf
+                except Exception as e:
+                    import sys
+                    print(f"[solver] Warning: OnlyEnforceIf failed for {name}: {e}", file=sys.stderr)
                 return ct
             return wrapped
         return attr  # NewBoolVar, NewIntVar, Maximize, Minimize → pass-through
@@ -53,12 +54,6 @@ class _ProxyModel:
 
 def _stats(solver, objective_terms):
     has_obj = bool(objective_terms)
-    status_optimal = None
-    try:
-        # Check if solver was run
-        status_optimal = solver.ResponseStatus() if hasattr(solver, 'ResponseStatus') else None
-    except Exception:
-        pass
 
     return {
         "wallTimeSeconds": solver.WallTime(),
@@ -121,6 +116,18 @@ def solve_timetable(problem):
 
     objective_terms = []
 
+    # === Precompute unique teacher/class groupings (compute once, not per slot) ===
+    unique_teacher_ids = {a["teacherId"] for a in assignments}
+    teacher_assigns_map = {
+        tid: [a for a in assignments if a["teacherId"] == tid]
+        for tid in unique_teacher_ids
+    }
+    unique_class_ids = {a["classId"] for a in assignments}
+    class_assigns_map = {
+        cid: [a for a in assignments if a["classId"] == cid]
+        for cid in unique_class_ids
+    }
+
     # === Base constraint 1: weekly_periods per assignment ===
     for a in assignments:
         model.Add(
@@ -130,18 +137,16 @@ def solve_timetable(problem):
 
     # === Base constraint 2: no-clash teacher ===
     for s in slots:
-        for teacher_id in {a["teacherId"] for a in assignments}:
-            teacher_assigns = [a for a in assignments if a["teacherId"] == teacher_id]
+        for teacher_id in unique_teacher_ids:
             model.Add(
-                sum(x[(a["assignmentId"], s["slotId"])] for a in teacher_assigns) <= 1
+                sum(x[(a["assignmentId"], s["slotId"])] for a in teacher_assigns_map[teacher_id]) <= 1
             )
 
     # === Base constraint 3: no-clash class ===
     for s in slots:
-        for class_id in {a["classId"] for a in assignments}:
-            class_assigns = [a for a in assignments if a["classId"] == class_id]
+        for class_id in unique_class_ids:
             model.Add(
-                sum(x[(a["assignmentId"], s["slotId"])] for a in class_assigns) <= 1
+                sum(x[(a["assignmentId"], s["slotId"])] for a in class_assigns_map[class_id]) <= 1
             )
 
     # === Apply AI-compiled constraints ===

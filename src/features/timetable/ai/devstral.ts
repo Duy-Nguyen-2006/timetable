@@ -10,6 +10,9 @@ import { buildCompilerPrompts, buildVerifierPrompts } from './prompt'
 const API_BASE_URL =
   process.env.LOWPRIZO_API_BASE_URL || 'https://api.lowprizo.com'
 
+// Timeout for AI API calls (ms)
+const AI_API_TIMEOUT_MS = 15_000
+
 // ---------------------------------------------------------------------------
 // Stage 1: AI Constraint Compiler
 // ---------------------------------------------------------------------------
@@ -25,6 +28,9 @@ export async function compileConstraintsWithAI(
   const effectiveModel = preview.model || 'devstral-latest'
 
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), AI_API_TIMEOUT_MS)
+
     const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -37,21 +43,35 @@ export async function compileConstraintsWithAI(
         model: effectiveModel,
       }),
       cache: 'no-store',
-    }).catch(() => null)
+      signal: controller.signal,
+    }).catch((err) => {
+      const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+      console.warn('[compiler] fetch failed:', isTimeout ? 'timeout' : err)
+      return null as Response | null
+    })
+
+    clearTimeout(timeoutId)
 
     if (!response?.ok) {
-      return _compilerFallback(preview, 'API request failed')
+      const status = response?.status
+      console.warn('[compiler] API request failed, status:', status)
+      return _compilerFallback(preview, `API request failed (status: ${status ?? 'no response'})`)
     }
 
-    const data = await response.json().catch(() => null)
+    const data = await response.json().catch((err) => {
+      console.warn('[compiler] JSON parse failed:', err)
+      return null
+    })
     const text = data?.choices?.[0]?.message?.content
     if (typeof text !== 'string') {
+      console.warn('[compiler] No content in AI response')
       return _compilerFallback(preview, 'No content in response')
     }
 
     // Try to parse the JSON response
     const parsed = _safeParseJSON(text)
     if (!parsed) {
+      console.warn('[compiler] Invalid JSON in AI response, raw length:', text.length)
       return _compilerFallback(preview, 'Invalid JSON in AI response')
     }
 
@@ -60,6 +80,7 @@ export async function compileConstraintsWithAI(
       !Array.isArray(parsed.constraints) ||
       !Array.isArray(parsed.unparsed)
     ) {
+      console.warn('[compiler] Invalid response shape from AI')
       return _compilerFallback(preview, 'Invalid response shape')
     }
 
@@ -87,16 +108,20 @@ export async function compileConstraintsWithAI(
         reason: String(u.reason || 'AI không thể biên dịch ràng buộc này.'),
       }))
 
+    console.log('[compiler] success:', constraints.length, 'compiled,', unparsed.length, 'unparsed')
     return { constraints, unparsed }
-  } catch {
-    return _compilerFallback(preview, 'Exception during compilation')
+  } catch (err) {
+    console.warn('[compiler] Exception during compilation:', err)
+    return _compilerFallback(preview, `Exception: ${err instanceof Error ? err.message : 'unknown'}`)
   }
 }
 
 function _compilerFallback(
   preview: ModelRequestPreview,
-  _reason: string,
+  reason: string,
 ): CompilerResult {
+  console.warn('[compiler fallback]', reason)
+
   // Extract raw constraints from the user message to build unparsed list
   const userMsg = preview.messages.find((m) => m.role === 'user')?.content
   let rawConstraints: Array<{ id: string; text: string }> = []
@@ -167,6 +192,9 @@ export async function verifySolutionWithAI(
     const preview = buildVerifierPrompts(args)
     const effectiveModel = preview.model || 'devstral-latest'
 
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), AI_API_TIMEOUT_MS)
+
     const response = await fetch(`${API_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: {
@@ -179,18 +207,31 @@ export async function verifySolutionWithAI(
         model: effectiveModel,
       }),
       cache: 'no-store',
-    }).catch(() => null)
+      signal: controller.signal,
+    }).catch((err) => {
+      const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+      console.warn('[verifier] fetch failed:', isTimeout ? 'timeout' : err)
+      return null as Response | null
+    })
+
+    clearTimeout(timeoutId)
 
     if (!response?.ok) {
+      const status = response?.status
+      console.warn('[verifier] API request failed, status:', status)
       return {
         violations: [],
         overallAssessment: 'Verifier không khả dụng.',
       }
     }
 
-    const data = await response.json().catch(() => null)
+    const data = await response.json().catch((err) => {
+      console.warn('[verifier] JSON parse failed:', err)
+      return null
+    })
     const text = data?.choices?.[0]?.message?.content
     if (typeof text !== 'string') {
+      console.warn('[verifier] No content in AI response')
       return {
         violations: [],
         overallAssessment: 'Verifier không khả dụng.',
@@ -199,6 +240,7 @@ export async function verifySolutionWithAI(
 
     const parsed = _safeParseJSON(text)
     if (!parsed || !Array.isArray(parsed.violations)) {
+      console.warn('[verifier] Invalid response from AI')
       return {
         violations: [],
         overallAssessment:
@@ -206,21 +248,22 @@ export async function verifySolutionWithAI(
       }
     }
 
-    return {
-      violations: parsed.violations
-        .filter((v: any) => v.constraintId && typeof v.violated === 'boolean')
-        .map((v: any) => ({
-          constraintId: String(v.constraintId),
-          original: String(v.original || ''),
-          violated: Boolean(v.violated),
-          reason: String(v.reason || ''),
-          confidence: Number(v.confidence ?? 0),
-        })),
-      overallAssessment: String(
-        parsed.overallAssessment || 'Kiểm tra hoàn tất.',
-      ),
-    }
-  } catch {
+    const violations = parsed.violations
+      .filter((v: any) => v.constraintId && typeof v.violated === 'boolean')
+      .map((v: any) => ({
+        constraintId: String(v.constraintId),
+        original: String(v.original || ''),
+        violated: Boolean(v.violated),
+        reason: String(v.reason || ''),
+        confidence: Number(v.confidence ?? 0),
+      }))
+
+    const overallAssessment = String(parsed.overallAssessment || 'Kiểm tra hoàn tất.')
+    console.log('[verifier] success:', violations.filter(v => v.violated).length, 'violations found')
+
+    return { violations, overallAssessment }
+  } catch (err) {
+    console.warn('[verifier] Exception:', err)
     return {
       violations: [],
       overallAssessment: 'Verifier không khả dụng.',

@@ -54,39 +54,6 @@ export type ExecutionError = { constraintId: string; error: string }
 export type ValidationError = { constraintId: string; error: string }
 
 // ---------------------------------------------------------------------------
-// Legacy types (kept for backward compatibility during migration)
-// ---------------------------------------------------------------------------
-
-export type NormalizedHardConstraint = {
-  sourceConstraintId: string
-  type: 'teacher_unavailable'
-  teacherId: string
-  slotIds: string[]
-  confidence?: number
-}
-
-export type NormalizedSoftConstraint = {
-  sourceConstraintId: string
-  type: 'prefer_subject_session'
-  subjectId: string
-  sessionIds: string[]
-  weight: number
-  confidence?: number
-}
-
-export type UnparsedConstraint = {
-  sourceConstraintId: string
-  text: string
-  reason: string
-}
-
-export type NormalizedConstraintResult = {
-  hard: NormalizedHardConstraint[]
-  soft: NormalizedSoftConstraint[]
-  unparsed: UnparsedConstraint[]
-}
-
-// ---------------------------------------------------------------------------
 // Common types
 // ---------------------------------------------------------------------------
 

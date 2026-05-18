@@ -2091,6 +2091,21 @@ export default function App({ onBackToLanding }) {
 
                       </section>
 
+                      {/* ========== AI Overall Assessment ========== */}
+                      {aiResult && !aiLoading && aiResult.overallAssessment && (
+                        <section className={`${panelClass} p-4`}>
+                          <div className="flex items-center gap-2.5">
+                            <span className={iconShellClass}>
+                              <Check size={16} strokeWidth={1.5} className="text-[#4DB848]" />
+                            </span>
+                            <div>
+                              <h2 className="text-sm font-semibold text-white">Đánh giá tổng quan</h2>
+                              <p className="text-xs text-white/40">{aiResult.overallAssessment}</p>
+                            </div>
+                          </div>
+                        </section>
+                      )}
+
                       {/* ========== AI Constraint Compilation Results ========== */}
                       {aiResult && !aiLoading && (
                         <>

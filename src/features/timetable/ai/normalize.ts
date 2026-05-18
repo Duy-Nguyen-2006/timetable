@@ -14,16 +14,39 @@ export function buildSolverInput(input: any) {
     })),
   )
 
-  const assignments = payload.phan_cong_chuyen_mon.map((assignment: any, index: number) => ({
-    assignmentId: `${assignment.giao_vien}__${assignment.mon_hoc}__${assignment.lop}__${assignment.so_tiet_moi_tuan}__${index}`,
-    teacherId: assignment.giao_vien,
-    teacherLabel: assignment.giao_vien,
-    subjectId: assignment.mon_hoc,
-    subjectLabel: assignment.mon_hoc,
-    classId: assignment.lop,
-    classLabel: assignment.lop,
-    weeklyPeriods: Number(assignment.so_tiet_moi_tuan),
-  }))
+  // Build unique teacher/subject/class IDs using index to avoid collisions
+  // when multiple teachers share the same name
+  const teacherLabelToId = new Map<string, string>()
+  const subjectLabelToId = new Map<string, string>()
+  const classLabelToId = new Map<string, string>()
+
+  const assignments = payload.phan_cong_chuyen_mon.map((assignment: any, index: number) => {
+    const teacherLabel = assignment.giao_vien
+    const subjectLabel = assignment.mon_hoc
+    const classLabel = assignment.lop
+
+    // Assign unique IDs: first occurrence gets simple label, subsequent get indexed
+    if (!teacherLabelToId.has(teacherLabel)) {
+      teacherLabelToId.set(teacherLabel, `T${teacherLabelToId.size + 1}`)
+    }
+    if (!subjectLabelToId.has(subjectLabel)) {
+      subjectLabelToId.set(subjectLabel, `S${subjectLabelToId.size + 1}`)
+    }
+    if (!classLabelToId.has(classLabel)) {
+      classLabelToId.set(classLabel, `C${classLabelToId.size + 1}`)
+    }
+
+    return {
+      assignmentId: `${assignment.giao_vien}__${assignment.mon_hoc}__${assignment.lop}__${assignment.so_tiet_moi_tuan}__${index}`,
+      teacherId: teacherLabelToId.get(teacherLabel)!,
+      teacherLabel,
+      subjectId: subjectLabelToId.get(subjectLabel)!,
+      subjectLabel,
+      classId: classLabelToId.get(classLabel)!,
+      classLabel,
+      weeklyPeriods: Number(assignment.so_tiet_moi_tuan),
+    }
+  })
 
   const rawConstraints = payload.rang_buoc_xep_lich.map((constraint: any, index: number) => ({
     id: `c${index + 1}`,

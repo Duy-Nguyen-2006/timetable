@@ -75,6 +75,9 @@ def validate_code(code: str) -> tuple[bool, str | None]:
     except SyntaxError as e:
         return False, f"SyntaxError: {e}"
 
+    # Track names that have been assigned (Store context) so Load can reference them
+    assigned_names: set[str] = set()
+
     for node in ast.walk(tree):
         node_type = type(node)
 
@@ -93,12 +96,22 @@ def validate_code(code: str) -> tuple[bool, str | None]:
             # Reject dunder names (starting with _)
             if node.id.startswith("_"):
                 return False, f"Dunder/private name: {node.id}"
-            # Allow names in ALLOWED_NAMES and names in Store context (local variables)
-            if node.id not in ALLOWED_NAMES and not isinstance(node.ctx, ast.Store):
-                # Allow if it's a Name being assigned to (local variable)
-                # For Load context, it must be in ALLOWED_NAMES or already assigned
-                # Simple approach: allow all non-dunder names for now
-                pass
+            # Track names in Store context (local variable assignments)
+            if isinstance(node.ctx, ast.Store):
+                assigned_names.add(node.id)
+            # In Load context, name must be in ALLOWED_NAMES or previously assigned
+            elif isinstance(node.ctx, ast.Load):
+                if node.id not in ALLOWED_NAMES and node.id not in assigned_names:
+                    return False, f"Undefined name in Load context: {node.id}"
+
+        # 3b. Track lambda/comprehension parameter names as "assigned"
+        if isinstance(node, ast.Lambda):
+            for arg in node.args.args:
+                assigned_names.add(arg.arg)
+        if isinstance(node, ast.comprehension):
+            # comprehension target variable (e.g., `a` in `for a in assignments`)
+            if isinstance(node.target, ast.Name):
+                assigned_names.add(node.target.id)
 
         # 4. Check ast.Attribute
         if isinstance(node, ast.Attribute):

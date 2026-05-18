@@ -177,7 +177,7 @@ Output:
   "description":"Toán 9A cần ít nhất 1 cặp tiết liên tiếp",
   "original":"Toán 9A phải có 1 cặp tiết liên tiếp trong tuần",
   "priority":"hard",
-  "code":"c6_assigns = [a for a in assignments if a['subjectLabel']=='Toán' and a['classLabel']=='9A']\\nc6_groups = {}\\nfor s in slots:\\n    c6_groups.setdefault((s['dayId'], s['sessionId']), []).append(s)\\nc6_pairs = []\\nfor k, group in c6_groups.items():\\n    g = sorted(group, key=lambda s: s['period'])\\n    for i in range(len(g)-1):\\n        if g[i+1]['period'] == g[i]['period']+1:\\n            c6_pairs.append((g[i]['slotId'], g[i+1]['slotId']))\\nc6_pair_vars = []\\nfor sid1, sid2 in c6_pairs:\\n    p = model.NewBoolVar('c6_pair_'+sid1+'_'+sid2)\\n    for a in c6_assigns:\\n        model.Add(x[(a['assignmentId'], sid1)] >= p)\\n        model.Add(x[(a['assignmentId'], sid2)] >= p)\\n    c6_pair_vars.append(p)\\nif c6_pair_vars:\\n    model.Add(sum(c6_pair_vars) >= 1)"
+  "code":"c6_assigns = [a for a in assignments if a['subjectLabel']=='Toán' and a['classLabel']=='9A']\\nc6_groups = {}\\nfor s in slots:\\n    c6_groups.setdefault((s['dayId'], s['sessionId']), []).append(s)\\nc6_pairs = []\\nfor k, group in c6_groups.items():\\n    g = sorted(group, key=lambda s: s['period'])\\n    for i in range(len(g)-1):\\n        if g[i+1]['period'] == g[i]['period']+1:\\n            c6_pairs.append((g[i]['slotId'], g[i+1]['slotId']))\\nc6_pair_vars = []\\nfor sid1, sid2 in c6_pairs:\\n    p = model.NewBoolVar('c6_pair_'+sid1+'_'+sid2)\\n    for a in c6_assigns:\\n        model.Add(p <= x[(a['assignmentId'], sid1)])\\n        model.Add(p <= x[(a['assignmentId'], sid2)])\\n    c6_pair_vars.append(p)\\nif c6_pair_vars:\\n    model.Add(sum(c6_pair_vars) >= 1)"
 }
 
 ### Example 7: hard, forbid slots
@@ -295,7 +295,43 @@ Nhiệm vụ: kiểm tra từng ràng buộc gốc xem có bị vi phạm bởi 
 - Chỉ flag confidence >= 0.7
 - Nếu không chắc, KHÔNG flag (better silent than wrong)
 - overallAssessment 1-2 câu tiếng Việt
-- Chỉ trả JSON, không markdown`
+- Chỉ trả JSON, không markdown
+
+[FEW-SHOT EXAMPLES]
+### Example 1: violation detected
+Input constraints: ["Cô Lan không dạy thứ Bảy"]
+Cells: Cô Lan có tiết tại slot saturday-morning-2 (Toán, 9A)
+Output:
+{
+  "violations": [
+    {
+      "constraintId": "c1",
+      "original": "Cô Lan không dạy thứ Bảy",
+      "violated": true,
+      "reason": "Phát hiện cô Lan dạy slot saturday-morning-2 (Toán, 9A)",
+      "confidence": 0.95
+    }
+  ],
+  "overallAssessment": "1 vi phạm phát hiện được. Ràng buộc 'Cô Lan không dạy thứ Bảy' bị vi phạm."
+}
+
+### Example 2: no violation
+Input constraints: ["Toán nên xếp buổi sáng"]
+Cells: Toán 9A xếp tại monday-morning-1
+Output:
+{
+  "violations": [],
+  "overallAssessment": "Tất cả ràng buộc đều được thỏa mãn. Toán đã được xếp buổi sáng."
+}
+
+### Example 3: soft constraint not met (not a violation)
+Input constraints: ["Toán nên xếp buổi sáng" (soft/preferred)]
+Cells: Toán 9A xếp tại monday-afternoon-1 (không có buổi sáng còn trống)
+Output:
+{
+  "violations": [],
+  "overallAssessment": "Soft constraint 'Toán nên xếp buổi sáng' không được đáp ứng do không còn slot sáng trống, nhưng không tính là vi phạm."
+}`
 
 export function buildVerifierPrompts(args: {
   rawConstraints: Array<{ id: string; text: string; priority: string }>
