@@ -90,9 +90,9 @@ export async function normalizeConstraintsWithDevstral(
       model: effectiveModel,
     }),
     cache: 'no-store',
-  })
+  }).catch(() => null)
 
-  if (!response.ok) {
+  if (!response?.ok) {
     return fallbackNormalize(preview)
   }
 
