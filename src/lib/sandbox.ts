@@ -96,3 +96,110 @@ export function runCodeInSandbox(code: string, payload: unknown): Promise<Sandbo
     child.stdin.end()
   })
 }
+
+export type CompiledConstraint = {
+  id: string
+  code: string
+  priority: 'hard' | 'soft'
+}
+
+export type SolverProblem = {
+  slots: Array<{
+    slotId: string
+    dayId: string
+    dayLabel: string
+    sessionId: string
+    sessionLabel: string
+    period: number
+  }>
+  assignments: Array<{
+    assignmentId: string
+    teacherId: string
+    teacherLabel: string
+    classId: string
+    classLabel: string
+    subjectId: string
+    subjectLabel: string
+    weeklyPeriods: number
+  }>
+  aiCompiledConstraints: CompiledConstraint[]
+  solverConfig: {
+    maxTimeSeconds: number
+    numWorkers: number
+    randomSeed: number
+  }
+}
+
+export type SolverDirectResult =
+  | { success: true; data: SolverDirectOutput }
+  | { success: false; error: string }
+
+export type SolverDirectOutput = {
+  status: 'solved' | 'infeasible' | 'error'
+  message: string
+  diagnostics: string[]
+  cells: import('@/features/timetable/ai/types').TimetableSolveCell[]
+  iisConstraintIds: string[]
+  executionErrors: Array<{ constraintId: string; error: string }>
+  validationErrors: Array<{ constraintId: string; error: string }>
+  solverStats: {
+    wallTimeSeconds: number
+    objectiveValue: number | null
+    bestBound: number | null
+    numConflicts: number
+    numBranches: number
+  } | null
+}
+
+export function runSolverDirect(problem: SolverProblem): Promise<SolverDirectResult> {
+  return new Promise((resolve) => {
+    const runnerPath = path.join(process.cwd(), 'python', 'timetable_solver', 'runner.py')
+    if (!existsSync(runnerPath)) {
+      resolve({ success: false, error: `runner.py not found at ${runnerPath}` })
+      return
+    }
+
+    const pythonBin = resolvePythonBin()
+    const child = spawn(pythonBin, [runnerPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+
+    const timeoutMs = Math.max((problem.solverConfig.maxTimeSeconds + 15) * 1000, 60_000)
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGKILL')
+      resolve({ success: false, error: `Solver timed out after ${timeoutMs / 1000}s` })
+    }, timeoutMs)
+
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+
+    child.on('error', (error: Error) => {
+      clearTimeout(timeoutId)
+      resolve({ success: false, error: error.message })
+    })
+
+    child.on('close', () => {
+      clearTimeout(timeoutId)
+      if (timedOut) return
+      const output = stdout.trim()
+      if (!output) {
+        resolve({ success: false, error: `No output from solver.\nstderr: ${stderr}` })
+        return
+      }
+      try {
+        const parsed = JSON.parse(output) as SolverDirectOutput
+        resolve({ success: true, data: parsed })
+      } catch {
+        resolve({ success: false, error: `Invalid JSON from solver: ${output.slice(0, 200)}\nstderr: ${stderr}` })
+      }
+    })
+
+    child.stdin.write(JSON.stringify(problem))
+    child.stdin.end()
+  })
+}

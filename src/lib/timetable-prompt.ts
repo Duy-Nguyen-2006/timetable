@@ -114,3 +114,115 @@ export function buildInputPayload(input: {
 
   return { slots, assignments: builtAssignments, hardConstraints, softConstraints }
 }
+
+export const CONSTRAINT_COMPILER_PROMPT = `Bạn là AI biên dịch ràng buộc thời khóa biểu thành Python code snippets cho OR-Tools CP-SAT.
+
+[NAMESPACE SẴN CÓ TRONG SNIPPET]:
+- model: CpModel (với hard constraints, model là _ProxyModel — tự động apply OnlyEnforceIf)
+- x: dict[(assignmentId, slotId)] = BoolVar
+- assignments: list[dict] với keys: assignmentId, teacherLabel, classLabel, subjectLabel, weeklyPeriods
+- slots: list[dict] với keys: slotId, dayId, dayLabel, sessionId, period (1-indexed)
+- objective_terms: list (soft constraints thêm vào đây)
+
+[MAPPING NGÀY — BẮT BUỘC CHÍNH XÁC]:
+- "thứ 2" / "Thứ Hai" → dayId "monday"
+- "thứ 3" / "Thứ Ba" → dayId "tuesday"
+- "thứ 4" / "Thứ Tư" → dayId "wednesday"
+- "thứ 5" / "Thứ Năm" → dayId "thursday"
+- "thứ 6" / "Thứ Sáu" → dayId "friday"
+- "tiết N" → period == N (period là 1-indexed)
+
+[QUY TẮC VIẾT SNIPPET]:
+1. KHÔNG import, KHÔNG print, KHÔNG sys, KHÔNG sửa x/assignments/slots
+2. KHÔNG dùng f-string (bị cấm). Dùng ghép chuỗi: 'prefix_' + a['assignmentId'] thay vì f'prefix_{a["assignmentId"]}'
+3. Hard constraint: model.Add(x[(aId, sId)] == 0) để cấm, hoặc model.Add(sum(...) <= N)
+4. Soft constraint: objective_terms.append(x[(aId, sId)] * weight) cho mỗi slot ưu tiên
+5. Nếu cần BoolVar mới: model.NewBoolVar('name_' + a['assignmentId'] + '_' + s['slotId'])
+6. Chỉ dùng model.Add, model.AddBoolOr, model.AddBoolAnd, model.NewBoolVar, model.AddAtMostOne
+
+[VÍ DỤ HARD — "Sơn không dạy thứ 2"]:
+for a in assignments:
+    if a['teacherLabel'] == 'Sơn':
+        for s in slots:
+            if s['dayId'] == 'monday':
+                model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
+
+[VÍ DỤ HARD — "Hương không dạy tiết 1"]:
+for a in assignments:
+    if a['teacherLabel'] == 'Hương':
+        for s in slots:
+            if s['period'] == 1:
+                model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
+
+[VÍ DỤ SOFT — "Toán nên xếp tiết 1-2" (weight 3)]:
+for a in assignments:
+    if a['subjectLabel'] == 'Toán':
+        for s in slots:
+            if s['period'] <= 2:
+                objective_terms.append(x[(a['assignmentId'], s['slotId'])] * 3)
+
+[OUTPUT] JSON array thuần, KHÔNG markdown, KHÔNG giải thích:
+[
+  {
+    "id": "hc_1",
+    "original": "text gốc",
+    "description": "mô tả ngắn tiếng Việt",
+    "priority": "hard",
+    "code": "python code, dùng \\n cho newline, \\' cho dấu nháy đơn"
+  },
+  {
+    "id": "sc_1",
+    "original": "text gốc",
+    "description": "mô tả ngắn",
+    "priority": "soft",
+    "weight": 3,
+    "code": "python code"
+  }
+]`
+
+export function buildCompilerUserMessage(payload: InputPayload): string {
+  const teachers = [...new Set(payload.assignments.map(a => a.teacherLabel))]
+  const subjects = [...new Set(payload.assignments.map(a => a.subjectLabel))]
+  const classes = [...new Set(payload.assignments.map(a => a.classLabel))]
+  const days = [...new Map(payload.slots.map(s => [s.dayId, { dayId: s.dayId, dayLabel: s.dayLabel }])).values()]
+  const sessions = [...new Map(payload.slots.map(s => [s.sessionId, { sessionId: s.sessionId, sessionLabel: s.sessionLabel }])).values()]
+  const periods = [...new Set(payload.slots.map(s => s.period))].sort((a, b) => a - b)
+
+  return JSON.stringify({
+    hardConstraints: payload.hardConstraints,
+    softConstraints: payload.softConstraints,
+    context: { teachers, subjects, classes, days, sessions, periods },
+  })
+}
+
+export function toSolverProblem(
+  payload: InputPayload,
+  constraints: Array<{ id: string; code: string; priority: 'hard' | 'soft' }>,
+): import('./sandbox').SolverProblem {
+  return {
+    slots: payload.slots.map(s => ({
+      slotId: s.id,
+      dayId: s.dayId,
+      dayLabel: s.dayLabel,
+      sessionId: s.sessionId,
+      sessionLabel: s.sessionLabel,
+      period: s.period,
+    })),
+    assignments: payload.assignments.map(a => ({
+      assignmentId: a.id,
+      teacherId: a.teacherId,
+      teacherLabel: a.teacherLabel,
+      classId: a.classId,
+      classLabel: a.classLabel,
+      subjectId: a.subjectId,
+      subjectLabel: a.subjectLabel,
+      weeklyPeriods: a.weeklyPeriods,
+    })),
+    aiCompiledConstraints: constraints.map(c => ({
+      id: c.id,
+      code: c.code,
+      priority: c.priority,
+    })),
+    solverConfig: { maxTimeSeconds: 30, numWorkers: 8, randomSeed: 1 },
+  }
+}

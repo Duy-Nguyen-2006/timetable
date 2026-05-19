@@ -7,70 +7,8 @@ import type {
 } from '@/features/timetable/ai/types'
 import { db } from '@/lib/db'
 import { chatCompletion, detectModel } from '@/lib/llm-client'
-import { runCodeInSandbox } from '@/lib/sandbox'
-import { buildInputPayload, SYSTEM_PROMPT, type InputPayload } from '@/lib/timetable-prompt'
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-/** Max outer iterations (coder → sandbox → judge → feedback) */
-const MAX_AGENT_ITERATIONS = 5
-/** Max retries for runtime/sandbox errors within a single iteration */
-const MAX_CODE_FIX_RETRIES = 5
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function extractCode(text: string): { code: string; isValid: boolean } {
-  const match = text.match(/```(?:python)?\s*\n([\s\S]*?)\n```/)
-  const code = match ? match[1].trim() : text.trim()
-
-  // Detect if model output raw JSON instead of Python code
-  if (code.startsWith('{') || code.startsWith('[')) {
-    return { code, isValid: false }
-  }
-  // Detect if it's clearly not Python (e.g., starts with ```json)
-  if (text.match(/```json/)) {
-    return { code, isValid: false }
-  }
-
-  return { code, isValid: true }
-}
-
-function transformCells(
-  rawCells: Array<{ assignmentId: string; slotId: string }>,
-  payload: InputPayload,
-): TimetableSolveCell[] {
-  const slotMap = new Map(payload.slots.map(s => [s.id, s]))
-  const assignmentMap = new Map(payload.assignments.map(a => [a.id, a]))
-
-  const bySlot = new Map<string, TimetableSolveCell>()
-  for (const cell of rawCells) {
-    const slot = slotMap.get(cell.slotId)
-    const assignment = assignmentMap.get(cell.assignmentId)
-    if (!slot || !assignment) continue
-
-    if (!bySlot.has(cell.slotId)) {
-      bySlot.set(cell.slotId, {
-        slotId: slot.id,
-        dayId: slot.dayId,
-        sessionId: slot.sessionId,
-        period: slot.period,
-        entries: [],
-      })
-    }
-    bySlot.get(cell.slotId)!.entries.push({
-      assignmentKey: assignment.id,
-      subject: assignment.subjectLabel,
-      teacher: assignment.teacherLabel,
-      className: assignment.classLabel,
-    })
-  }
-
-  return [...bySlot.values()]
-}
+import { runSolverDirect } from '@/lib/sandbox'
+import { buildInputPayload, CONSTRAINT_COMPILER_PROMPT, buildCompilerUserMessage, toSolverProblem, type InputPayload } from '@/lib/timetable-prompt'
 
 // ---------------------------------------------------------------------------
 // Judge prompt
@@ -281,6 +219,102 @@ export async function POST(request: Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Constraint Compiler
+// ---------------------------------------------------------------------------
+
+function parseCompiledConstraints(text: string): Array<{
+  id: string
+  original: string
+  description: string
+  priority: 'hard' | 'soft'
+  weight?: number
+  code: string
+}> | null {
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) return parsed
+  } catch {
+    const match = text.match(/\[[\s\S]*\]/)
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0])
+        if (Array.isArray(parsed)) return parsed
+      } catch { /* fall through */ }
+    }
+  }
+  return null
+}
+
+async function compileConstraints(
+  payload: InputPayload,
+  apiKey: string,
+  model: string,
+): Promise<Array<{ id: string; original: string; description: string; priority: 'hard' | 'soft'; weight?: number; code: string }>> {
+  if (payload.hardConstraints.length === 0 && payload.softConstraints.length === 0) {
+    return []
+  }
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: CONSTRAINT_COMPILER_PROMPT },
+    { role: 'user', content: buildCompilerUserMessage(payload) },
+  ]
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const responseText = await chatCompletion(messages, apiKey, model)
+    const constraints = parseCompiledConstraints(responseText)
+    if (constraints && constraints.length > 0) return constraints
+    messages.push({ role: 'assistant', content: responseText })
+    messages.push({
+      role: 'user',
+      content: 'Output phải là JSON array. Trả lại JSON array thuần, không có markdown hay giải thích.',
+    })
+  }
+  return []
+}
+
+async function recompileConstraints(
+  payload: InputPayload,
+  currentConstraints: Array<{ id: string; original: string; description: string; priority: 'hard' | 'soft'; weight?: number; code: string }>,
+  failedIds: string[],
+  errors: string,
+  apiKey: string,
+  model: string,
+): Promise<Array<{ id: string; original: string; description: string; priority: 'hard' | 'soft'; weight?: number; code: string }>> {
+  if (failedIds.length === 0) return currentConstraints
+
+  const failedConstraints = currentConstraints.filter(c => failedIds.includes(c.id))
+  const okConstraints = currentConstraints.filter(c => !failedIds.includes(c.id))
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: CONSTRAINT_COMPILER_PROMPT },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        task: 'Sửa các constraint sau bị lỗi. Giữ nguyên id. Chỉ trả JSON array cho các constraint cần sửa.',
+        errors,
+        constraintsToFix: failedConstraints,
+        context: JSON.parse(buildCompilerUserMessage(payload)).context,
+      }),
+    },
+  ]
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const responseText = await chatCompletion(messages, apiKey, model)
+    const fixed = parseCompiledConstraints(responseText)
+    if (fixed && fixed.length > 0) {
+      const fixedMap = new Map(fixed.map(c => [c.id, c]))
+      return [
+        ...okConstraints,
+        ...failedConstraints.map(c => fixedMap.get(c.id) ?? c),
+      ]
+    }
+    messages.push({ role: 'assistant', content: responseText })
+    messages.push({ role: 'user', content: 'Trả JSON array thuần.' })
+  }
+  return currentConstraints
+}
+
+// ---------------------------------------------------------------------------
 // Agentic Loop
 // ---------------------------------------------------------------------------
 
@@ -290,152 +324,132 @@ async function runAgenticLoop(
   model: string,
   emit?: (event: AgentEvent) => void,
 ): Promise<TimetableSolveResult> {
-  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: JSON.stringify(payload) },
-  ]
+  const MAX_ATTEMPTS = 4
 
-  let lastError: string | null = null
+  emit?.({ type: 'status', message: 'Đang biên dịch ràng buộc...', iteration: 1, maxIterations: MAX_ATTEMPTS })
+
+  let compiledConstraints = await compileConstraints(payload, apiKey, model)
+
   let bestResult: TimetableSolveResult | null = null
   let bestViolationCount = Infinity
 
-  for (let iteration = 0; iteration < MAX_AGENT_ITERATIONS; iteration++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     emit?.({
       type: 'status',
-      message: iteration === 0
-        ? 'Đang tạo thời khóa biểu...'
-        : `Đang sửa lỗi và tạo lại... (lần ${iteration + 1}/${MAX_AGENT_ITERATIONS})`,
-      iteration: iteration + 1,
-      maxIterations: MAX_AGENT_ITERATIONS,
+      message: attempt === 0 ? 'Đang tạo thời khóa biểu...' : `Đang thử lại... (${attempt + 1}/${MAX_ATTEMPTS})`,
+      iteration: attempt + 1,
+      maxIterations: MAX_ATTEMPTS,
     })
 
-    // --- Phase 1: Coder generates code ---
-    let sandboxData: {
-      status: string
-      cells: Array<{ assignmentId: string; slotId: string }>
-      objective: number | null
-      iisConstraintIds: string[]
-      errorMessage: string | null
-    } | null = null
+    const solverProblem = toSolverProblem(payload, compiledConstraints)
+    const solverResult = await runSolverDirect(solverProblem)
 
-    // Inner loop: fix runtime errors
-    for (let fix = 0; fix < MAX_CODE_FIX_RETRIES; fix++) {
-      const responseText = await chatCompletion(messages, apiKey, model)
-      const extracted = extractCode(responseText)
-      messages.push({ role: 'assistant', content: responseText })
-
-      // If model output JSON instead of Python code, ask again
-      if (!extracted.isValid) {
-        lastError = 'Model output JSON trực tiếp thay vì Python code'
-        emit?.({ type: 'code_fix', attempt: fix + 1, error: lastError })
-        messages.push({
-          role: 'user',
-          content: `BẠN PHẢI VIẾT CODE PYTHON sử dụng ortools CP-SAT solver. KHÔNG được output JSON trực tiếp. Hãy viết code Python hoàn chỉnh với import, model, variables, constraints, solve, và print JSON result. Chỉ output code Python trong block \`\`\`python.`,
-        })
-        continue
-      }
-
-      const result = await runCodeInSandbox(extracted.code, payload)
-
-      if (!result.success) {
-        lastError = result.error
-        emit?.({ type: 'code_fix', attempt: fix + 1, error: result.error })
-        messages.push({
-          role: 'user',
-          content: `Lỗi runtime khi chạy code:\n${result.error}\n\nHãy sửa code và thử lại. Chỉ output code Python.`,
-        })
-        continue
-      }
-
-      if (result.data.status === 'error') {
-        lastError = result.data.errorMessage ?? 'Unknown solver error'
-        emit?.({ type: 'code_fix', attempt: fix + 1, error: lastError })
-        messages.push({
-          role: 'user',
-          content: `Solver báo lỗi: ${lastError}\n\nHãy sửa code và thử lại.`,
-        })
-        continue
-      }
-
-      // Code ran successfully
-      sandboxData = result.data
-      break
-    }
-
-    // If sandbox never succeeded in this iteration
-    if (!sandboxData) {
-      continue
-    }
-
-    // Handle infeasible — feed back to coder to fix constraint implementation
-    if (sandboxData.status === 'infeasible') {
-      const iisInfo = sandboxData.iisConstraintIds?.length
-        ? `IIS constraints gây mâu thuẫn: ${sandboxData.iisConstraintIds.join(', ')}`
-        : 'Không xác định được constraint nào gây mâu thuẫn.'
-
-      emit?.({ type: 'code_fix', attempt: 0, error: `Solver báo infeasible. ${iisInfo}` })
-
-      messages.push({
-        role: 'user',
-        content: `Solver báo INFEASIBLE (không tìm được lời giải). ${iisInfo}\n\nĐây có thể là do code constraint bị viết sai, KHÔNG PHẢI do ràng buộc thực sự mâu thuẫn. Hãy kiểm tra lại:\n1. Mapping ngày: thứ 2 = monday, thứ 3 = tuesday, thứ 4 = wednesday, thứ 5 = thursday, thứ 6 = friday\n2. Constraint có bị quá chặt không (ví dụ: dùng == thay vì <=)\n3. Có nhầm lẫn giữa slot period và day không\n\nViết lại code Python OR-Tools với constraints đúng. Chỉ output code Python.`,
-      })
-      continue
-    }
-
-    // --- Phase 2: Transform result ---
-    const cells = transformCells(sandboxData.cells ?? [], payload)
-
-    // --- Phase 3: Judge evaluates ---
-    emit?.({
-      type: 'status',
-      message: 'Đang kiểm tra ràng buộc...',
-      iteration: iteration + 1,
-      maxIterations: MAX_AGENT_ITERATIONS,
-    })
-
-    const judgeMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: JUDGE_SYSTEM_PROMPT },
-      { role: 'user', content: buildJudgeUserPrompt(payload, cells) },
-    ]
-
-    const judgeResponseText = await chatCompletion(judgeMessages, apiKey, model)
-    const verdict = parseJudgeResponse(judgeResponseText)
-
-    // If judge response is unparseable, accept the result
-    if (!verdict) {
-      console.warn('[agent] Judge response unparseable, accepting result')
-      const result: TimetableSolveResult = {
-        status: 'solved',
-        message: '',
-        diagnostics: ['Judge response không parse được — chấp nhận kết quả.'],
-        cells,
+    if (!solverResult.success) {
+      if (attempt < MAX_ATTEMPTS - 1) continue
+      return {
+        status: 'error',
+        message: `Lỗi khi chạy solver: ${solverResult.error}`,
+        diagnostics: [],
+        cells: [],
         compiledConstraints: [],
         unparsedConstraints: [],
         executionErrors: [],
         validationErrors: [],
         iisConstraintIds: [],
         violations: [],
-        overallAssessment: 'Judge không phản hồi hợp lệ.',
-        solverStats: sandboxData.objective != null ? {
-          wallTimeSeconds: 0,
-          objectiveValue: sandboxData.objective,
-          bestBound: null,
-          numConflicts: 0,
-          numBranches: 0,
-        } : null,
+        overallAssessment: null,
+        solverStats: null,
         modelRequestPreview: null,
       }
-      return result
     }
 
-    emit?.({
-      type: 'judge_result',
-      violations: verdict.violations,
-      allSatisfied: verdict.allSatisfied,
-      assessment: verdict.overallAssessment,
-    })
+    const data = solverResult.data
 
-    // Track best result (fewest violations)
+    // Handle execution errors in constraint snippets
+    if (data.executionErrors && data.executionErrors.length > 0) {
+      const errorIds = data.executionErrors.map(e => e.constraintId)
+      const errorSummary = data.executionErrors.map(e => `[${e.constraintId}] ${e.error}`).join('\n')
+      emit?.({ type: 'code_fix', attempt: attempt + 1, error: `Lỗi constraint code: ${errorSummary}` })
+      if (attempt < MAX_ATTEMPTS - 1) {
+        compiledConstraints = await recompileConstraints(payload, compiledConstraints, errorIds, errorSummary, apiKey, model)
+        continue
+      }
+    }
+
+    // Handle infeasible
+    if (data.status === 'infeasible') {
+      const iisIds = data.iisConstraintIds ?? []
+      const iisInfo = iisIds.length > 0
+        ? `Constraints gây mâu thuẫn: ${iisIds.join(', ')}`
+        : 'Không xác định được constraint nào gây mâu thuẫn — có thể base constraints quá chặt với lịch này.'
+
+      emit?.({ type: 'code_fix', attempt: attempt + 1, error: `Solver INFEASIBLE. ${iisInfo}` })
+
+      if (attempt < MAX_ATTEMPTS - 1 && iisIds.length > 0) {
+        const errorSummary = `Infeasible vì constraint quá chặt: ${iisIds.join(', ')}`
+        compiledConstraints = await recompileConstraints(payload, compiledConstraints, iisIds, errorSummary, apiKey, model)
+        continue
+      }
+
+      return {
+        status: 'infeasible',
+        message: 'Không thể tạo thời khóa biểu với các ràng buộc hiện tại.',
+        diagnostics: [iisInfo],
+        cells: [],
+        compiledConstraints: compiledConstraints.map(c => ({
+          id: c.id,
+          description: c.description,
+          original: c.original,
+          priority: c.priority,
+          weight: c.weight,
+          code: c.code,
+        })),
+        unparsedConstraints: [],
+        executionErrors: data.executionErrors ?? [],
+        validationErrors: data.validationErrors ?? [],
+        iisConstraintIds: iisIds,
+        violations: [],
+        overallAssessment: null,
+        solverStats: data.solverStats,
+        modelRequestPreview: null,
+      }
+    }
+
+    if (data.status !== 'solved') continue
+
+    const cells = data.cells
+
+    // Judge evaluation
+    emit?.({ type: 'status', message: 'Đang kiểm tra ràng buộc...', iteration: attempt + 1, maxIterations: MAX_ATTEMPTS })
+
+    const judgeMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: JUDGE_SYSTEM_PROMPT },
+      { role: 'user', content: buildJudgeUserPrompt(payload, cells) },
+    ]
+    const judgeResponseText = await chatCompletion(judgeMessages, apiKey, model)
+    const verdict = parseJudgeResponse(judgeResponseText)
+
+    if (!verdict) {
+      console.warn('[agent] Judge unparseable, accepting result')
+      return {
+        status: 'solved',
+        message: '',
+        diagnostics: ['Judge không phản hồi hợp lệ — chấp nhận kết quả.'],
+        cells,
+        compiledConstraints: compiledConstraints.map(c => ({ id: c.id, description: c.description, original: c.original, priority: c.priority, weight: c.weight, code: c.code })),
+        unparsedConstraints: [],
+        executionErrors: [],
+        validationErrors: [],
+        iisConstraintIds: [],
+        violations: [],
+        overallAssessment: null,
+        solverStats: data.solverStats,
+        modelRequestPreview: null,
+      }
+    }
+
+    emit?.({ type: 'judge_result', violations: verdict.violations, allSatisfied: verdict.allSatisfied, assessment: verdict.overallAssessment })
+
     if (verdict.violations.length < bestViolationCount) {
       bestViolationCount = verdict.violations.length
       bestResult = {
@@ -443,76 +457,44 @@ async function runAgenticLoop(
         message: '',
         diagnostics: [],
         cells,
-        compiledConstraints: [],
+        compiledConstraints: compiledConstraints.map(c => ({ id: c.id, description: c.description, original: c.original, priority: c.priority, weight: c.weight, code: c.code })),
         unparsedConstraints: [],
         executionErrors: [],
         validationErrors: [],
         iisConstraintIds: [],
         violations: verdict.violations,
         overallAssessment: verdict.overallAssessment,
-        solverStats: sandboxData.objective != null ? {
-          wallTimeSeconds: 0,
-          objectiveValue: sandboxData.objective,
-          bestBound: null,
-          numConflicts: 0,
-          numBranches: 0,
-        } : null,
+        solverStats: data.solverStats,
         modelRequestPreview: null,
       }
     }
 
-    // --- Phase 4: All satisfied → done! ---
     if (verdict.allSatisfied && verdict.violations.length === 0) {
-      console.log('[agent] All constraints satisfied at iteration', iteration + 1)
-      const result: TimetableSolveResult = {
-        status: 'solved',
-        message: '',
-        diagnostics: [`Hoàn thành sau ${iteration + 1} lần thử.`],
-        cells,
-        compiledConstraints: [],
-        unparsedConstraints: [],
-        executionErrors: [],
-        validationErrors: [],
-        iisConstraintIds: [],
-        violations: [],
-        overallAssessment: verdict.overallAssessment,
-        solverStats: sandboxData.objective != null ? {
-          wallTimeSeconds: 0,
-          objectiveValue: sandboxData.objective,
-          bestBound: null,
-          numConflicts: 0,
-          numBranches: 0,
-        } : null,
-        modelRequestPreview: null,
-      }
-      return result
+      console.log('[agent] All constraints satisfied at attempt', attempt + 1)
+      bestResult!.diagnostics = [`Hoàn thành sau ${attempt + 1} lần thử.`]
+      return bestResult!
     }
 
-    // --- Phase 5: Feed violations back to Coder ---
-    const violationFeedback = verdict.violations.map((v, i) =>
-      `${i + 1}. [${v.constraintId}] "${v.original}" — VI PHẠM: ${v.reason}`
-    ).join('\n')
-
-    // Build day mapping reminder from payload slots
-    const dayMapping = [...new Set(payload.slots.map(s => `${s.dayLabel} = dayId "${s.dayId}"`))].join(', ')
-
-    messages.push({
-      role: 'user',
-      content: `Kết quả thời khóa biểu bị vi phạm các ràng buộc sau:\n\n${violationFeedback}\n\nĐánh giá tổng: ${verdict.overallAssessment}\n\n[NHẮC LẠI MAPPING NGÀY]: ${dayMapping}\n[NHẮC LẠI]: "thứ 2" = monday, "thứ 3" = tuesday, "thứ 4" = wednesday, "thứ 5" = thursday, "thứ 6" = friday\n\nHãy viết lại code Python OR-Tools để sửa các vi phạm trên. Đảm bảo TẤT CẢ ràng buộc được thỏa mãn. Đặc biệt chú ý mapping ngày chính xác. Chỉ output code Python.`,
-    })
+    // Fix constraints based on judge violations
+    if (attempt < MAX_ATTEMPTS - 1 && verdict.violations.length > 0) {
+      const violatedIds = verdict.violations.map(v => v.constraintId).filter(id => id.startsWith('hc_') || id.startsWith('sc_'))
+      if (violatedIds.length > 0) {
+        const errorSummary = verdict.violations
+          .map(v => `[${v.constraintId}] "${v.original}" bị vi phạm: ${v.reason}`)
+          .join('\n')
+        compiledConstraints = await recompileConstraints(payload, compiledConstraints, violatedIds, errorSummary, apiKey, model)
+      }
+    }
   }
 
-  // Exhausted all iterations — return best result
   if (bestResult) {
-    bestResult.message = `Đã thử ${MAX_AGENT_ITERATIONS} lần nhưng vẫn còn ${bestViolationCount} vi phạm. Trả kết quả tốt nhất.`
-    bestResult.diagnostics = [`Kết quả tốt nhất sau ${MAX_AGENT_ITERATIONS} iterations.`]
+    bestResult.message = `Còn ${bestViolationCount} vi phạm sau ${MAX_ATTEMPTS} lần thử. Kết quả tốt nhất.`
     return bestResult
   }
 
-  // No result at all
   return {
     status: 'error',
-    message: `Không thể tạo thời khóa biểu sau ${MAX_AGENT_ITERATIONS} lần thử. Lỗi cuối: ${lastError}`,
+    message: `Không thể tạo thời khóa biểu sau ${MAX_ATTEMPTS} lần thử.`,
     diagnostics: [],
     cells: [],
     compiledConstraints: [],
