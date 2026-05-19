@@ -670,16 +670,20 @@ export default function App({ onBackToLanding }) {
   }
 
   const importConstraint = () => {
-    const text = constraintDraft.text.trim()
-    if (!text) return
+    const lines = constraintDraft.text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+    if (!lines.length) return
 
-    const nextConstraint = {
-      id: `${Date.now()}-${text}`,
+    const now = Date.now()
+    const newItems = lines.map((text, i) => ({
+      id: `${now}-${i}-${text}`,
       type: constraintDraft.type,
       text,
-    }
+    }))
 
-    setConstraintList((current) => [...current, nextConstraint])
+    setConstraintList((current) => [...current, ...newItems])
     setConstraintDraft((current) => ({ ...current, text: '' }))
   }
 
@@ -1890,7 +1894,7 @@ export default function App({ onBackToLanding }) {
                         Nhập constraints cho thời khóa biểu
                       </h1>
                       <p className="mt-4 max-w-3xl text-sm text-white/40">
-                        Chọn loại ràng buộc trước, nhập nội dung, rồi bấm Import để append vào bảng constraints.
+                        Chọn loại ràng buộc, nhập mỗi ràng buộc một dòng, rồi bấm Import để thêm tất cả vào bảng.
                       </p>
                     </div>
                     <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>
@@ -1951,8 +1955,8 @@ export default function App({ onBackToLanding }) {
                               event.preventDefault()
                               importConstraint()
                             }}
-                            placeholder="Ví dụ: Giáo viên Long không dạy tiết 1 sáng thứ 2"
-                            rows={4}
+                            placeholder={"Ví dụ:\nSơn không dạy thứ 2\nHương không dạy tiết 1\n(mỗi dòng là một ràng buộc)"}
+                            rows={5}
                             className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
                           />
                       </label>
@@ -2006,7 +2010,7 @@ export default function App({ onBackToLanding }) {
                           })
                         ) : (
                           <div className={`${panelMutedClass} p-4 text-sm text-white/30`}>
-                            Chưa có ràng buộc nào. Chọn Bắt buộc hoặc Nên có, nhập nội dung rồi bấm Import.
+                            Chưa có ràng buộc nào. Chọn loại, nhập mỗi ràng buộc một dòng rồi bấm Import.
                           </div>
                         )}
                       </div>

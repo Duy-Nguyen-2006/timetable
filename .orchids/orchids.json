@@ -1,8 +1,0 @@
-{
-  "projectId": "f083fb72-2ee1-48c1-8ad0-aed47a7bcda1",
-  "createdAt": 1779130034047,
-  "startupCommands": [
-    "bun install; bunx prisma generate; bunx prisma db push; bun run dev"
-  ],
-  "templateId": "any"
-}
