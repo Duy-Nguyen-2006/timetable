@@ -31,19 +31,25 @@ Khi constraint nói "thứ 2" → kiểm tra dayId "monday", KHÔNG PHẢI "tues
 
 [NHIỆM VỤ]
 Kiểm tra TỪNG ràng buộc một cách kỹ lưỡng:
-- Liệt kê từng constraint
+- Liệt kê từng constraint (cả hard lẫn soft)
 - Tìm evidence cụ thể trong cells (trích dẫn slot, teacher, subject, class)
-- Phán xét violated hay không
+- Phán xét violated / met hay không
 
 [QUY TẮC]
-- Hard constraint bị vi phạm → violated: true
-- Soft constraint không đạt → violated: false (chỉ note trong reason)
+- Hard constraint bị vi phạm → violated: true, confidence >= 0.8
+- Soft constraint KHÔNG đạt tối ưu → violated: false, ghi rõ lý do, xung đột với constraint nào
+- Soft constraint đạt hoàn toàn → không cần đưa vào output
 - Phải trích dẫn evidence cụ thể (slot nào, teacher nào, class nào)
-- Confidence >= 0.8 mới flag violated
 - Kiểm tra CẢ base constraints ngầm định:
   * Mỗi assignment có đúng weeklyPeriods slot
   * Giáo viên không trùng giờ
   * Lớp không trùng giờ
+- allSatisfied: true khi TẤT CẢ hard constraints thỏa mãn (soft có thể không đạt tối ưu)
+
+[PHÂN TÍCH XUNG ĐỘT]
+Với mỗi vi phạm hoặc soft constraint không đạt:
+- conflictsWith: tên constraint cụ thể gây xung đột (ví dụ: "Sơn không dạy thứ 2" hoặc "base: teacher clash")
+- suggestion: gợi ý ngắn gọn để giải quyết (ví dụ: "Bỏ hoặc nới lỏng ràng buộc X", "Tăng số slot buổi sáng")
 
 [OUTPUT - JSON thuần, không markdown]
 {
@@ -52,11 +58,22 @@ Kiểm tra TỪNG ràng buộc một cách kỹ lưỡng:
       "constraintId": "hc_1",
       "original": "text ràng buộc gốc",
       "violated": true,
-      "reason": "Evidence cụ thể...",
-      "confidence": 0.95
+      "reason": "Evidence cụ thể: Sơn dạy Toán lớp 6A vào monday-morning-tiết1",
+      "confidence": 0.95,
+      "conflictsWith": "tên constraint xung đột nếu có",
+      "suggestion": "Gợi ý giải quyết"
+    },
+    {
+      "constraintId": "sc_1",
+      "original": "Toán nên xếp tiết 1-2",
+      "violated": false,
+      "reason": "Sơn dạy Toán tiết 3-4 ngày thứ 3 vì tiết 1-2 bị chặn bởi ràng buộc khác",
+      "confidence": 0.9,
+      "conflictsWith": "Sơn không dạy thứ 2 (hc_1) giảm số slot tiết 1-2 khả dụng",
+      "suggestion": "Bỏ ràng buộc 'Sơn không dạy thứ 2' hoặc tăng số ngày học"
     }
   ],
-  "allSatisfied": true/false,
+  "allSatisfied": true,
   "overallAssessment": "Tóm tắt 1-2 câu tiếng Việt"
 }`
 
@@ -89,37 +106,29 @@ function buildJudgeUserPrompt(
 }
 
 type JudgeVerdict = {
-  violations: ConstraintViolation[]
-  allSatisfied: boolean
+  violations: ConstraintViolation[]    // all violations: violated=true (hard) + violated=false (soft unmet)
+  hardViolationCount: number           // count of violated=true only (for retry logic)
+  allSatisfied: boolean                // true when all hard constraints satisfied
   overallAssessment: string
 }
 
 function parseJudgeResponse(text: string): JudgeVerdict | null {
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed && typeof parsed.allSatisfied === 'boolean') {
-      return {
-        violations: Array.isArray(parsed.violations)
-          ? parsed.violations.filter((v: any) => v.violated === true)
-          : [],
-        allSatisfied: parsed.allSatisfied,
-        overallAssessment: parsed.overallAssessment ?? '',
-      }
+  const buildVerdict = (parsed: any): JudgeVerdict | null => {
+    if (!parsed || typeof parsed.allSatisfied !== 'boolean') return null
+    const all: ConstraintViolation[] = Array.isArray(parsed.violations) ? parsed.violations : []
+    return {
+      violations: all,
+      hardViolationCount: all.filter((v: any) => v.violated === true).length,
+      allSatisfied: parsed.allSatisfied,
+      overallAssessment: parsed.overallAssessment ?? '',
     }
+  }
+  try {
+    return buildVerdict(JSON.parse(text))
   } catch {
-    // Try extracting JSON from code block
     const match = text.match(/```(?:json)?\s*([\s\S]*?)```/)
     if (match) {
-      try {
-        const parsed = JSON.parse(match[1])
-        return {
-          violations: Array.isArray(parsed.violations)
-            ? parsed.violations.filter((v: any) => v.violated === true)
-            : [],
-          allSatisfied: parsed.allSatisfied ?? false,
-          overallAssessment: parsed.overallAssessment ?? '',
-        }
-      } catch { /* fall through */ }
+      try { return buildVerdict(JSON.parse(match[1])) } catch { /* fall through */ }
     }
   }
   return null
@@ -448,10 +457,10 @@ async function runAgenticLoop(
       }
     }
 
-    emit?.({ type: 'judge_result', violations: verdict.violations, allSatisfied: verdict.allSatisfied, assessment: verdict.overallAssessment })
+    emit?.({ type: 'judge_result', violations: verdict.violations.filter(v => v.violated), allSatisfied: verdict.allSatisfied, assessment: verdict.overallAssessment })
 
-    if (verdict.violations.length < bestViolationCount) {
-      bestViolationCount = verdict.violations.length
+    if (verdict.hardViolationCount < bestViolationCount) {
+      bestViolationCount = verdict.hardViolationCount
       bestResult = {
         status: 'solved',
         message: '',
@@ -469,17 +478,21 @@ async function runAgenticLoop(
       }
     }
 
-    if (verdict.allSatisfied && verdict.violations.length === 0) {
-      console.log('[agent] All constraints satisfied at attempt', attempt + 1)
-      bestResult!.diagnostics = [`Hoàn thành sau ${attempt + 1} lần thử.`]
+    if (verdict.allSatisfied && verdict.hardViolationCount === 0) {
+      console.log('[agent] All hard constraints satisfied at attempt', attempt + 1)
+      bestResult!.diagnostics = [`Tất cả ràng buộc thỏa mãn sau ${attempt + 1} lần thử.`]
       return bestResult!
     }
 
-    // Fix constraints based on judge violations
-    if (attempt < MAX_ATTEMPTS - 1 && verdict.violations.length > 0) {
-      const violatedIds = verdict.violations.map(v => v.constraintId).filter(id => id.startsWith('hc_') || id.startsWith('sc_'))
+    // Retry only for hard constraint violations
+    if (attempt < MAX_ATTEMPTS - 1 && verdict.hardViolationCount > 0) {
+      const violatedIds = verdict.violations
+        .filter(v => v.violated)
+        .map(v => v.constraintId)
+        .filter(id => id.startsWith('hc_') || id.startsWith('sc_'))
       if (violatedIds.length > 0) {
         const errorSummary = verdict.violations
+          .filter(v => v.violated)
           .map(v => `[${v.constraintId}] "${v.original}" bị vi phạm: ${v.reason}`)
           .join('\n')
         compiledConstraints = await recompileConstraints(payload, compiledConstraints, violatedIds, errorSummary, apiKey, model)
@@ -488,7 +501,15 @@ async function runAgenticLoop(
   }
 
   if (bestResult) {
-    bestResult.message = `Còn ${bestViolationCount} vi phạm sau ${MAX_ATTEMPTS} lần thử. Kết quả tốt nhất.`
+    const hardCount = bestResult.violations.filter(v => v.violated).length
+    const softCount = bestResult.violations.filter(v => !v.violated).length
+    if (hardCount > 0) {
+      bestResult.message = `Còn ${hardCount} ràng buộc cứng bị vi phạm sau ${MAX_ATTEMPTS} lần thử.`
+    } else if (softCount > 0) {
+      bestResult.message = `${softCount} ràng buộc mềm chưa đạt tối ưu.`
+    } else {
+      bestResult.message = 'Tất cả ràng buộc thỏa mãn.'
+    }
     return bestResult
   }
 

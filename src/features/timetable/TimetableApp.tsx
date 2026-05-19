@@ -2149,13 +2149,13 @@ export default function App({ onBackToLanding }) {
                         </div>
                       </div>
 
-                      {/* Violations warning + Retry button */}
-                      {aiResult && aiResult.violations && aiResult.violations.length > 0 && (
-                        <div className="mb-4 rounded-md border border-yellow-500/20 bg-yellow-500/[0.04] p-4">
+                      {/* Hard violations — red, serious */}
+                      {aiResult && aiResult.violations && aiResult.violations.filter(v => v.violated).length > 0 && (
+                        <div className="mb-4 rounded-md border border-red-500/20 bg-red-500/[0.04] p-4">
                           <div className="mb-2 flex items-center justify-between">
-                            <div className="flex items-center gap-2 text-sm font-medium text-yellow-400">
+                            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
                               <AlertTriangle size={14} strokeWidth={2} />
-                              <span>Còn {aiResult.violations.length} ràng buộc chưa thỏa mãn</span>
+                              <span>{aiResult.violations.filter(v => v.violated).length} ràng buộc cứng bị vi phạm</span>
                             </div>
                             <button
                               onClick={handleGenerate}
@@ -2166,16 +2166,15 @@ export default function App({ onBackToLanding }) {
                               Thử lại
                             </button>
                           </div>
-                          {aiResult.overallAssessment && (
-                            <p className="mb-2 text-xs text-white/40">{aiResult.overallAssessment}</p>
-                          )}
                           <div className="space-y-1.5">
-                            {aiResult.violations.map((v, i) => (
-                              <div key={i} className="flex items-start gap-2 rounded bg-white/[0.02] px-2.5 py-1.5 text-xs">
-                                <span className="mt-0.5 shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">Vi phạm</span>
-                                <div>
-                                  <span className="text-white/60">{v.original}</span>
-                                  <span className="ml-1.5 text-white/30">— {v.reason}</span>
+                            {aiResult.violations.filter(v => v.violated).map((v, i) => (
+                              <div key={i} className="rounded bg-white/[0.02] px-2.5 py-1.5 text-xs">
+                                <div className="flex items-start gap-2">
+                                  <span className="mt-0.5 shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">Vi phạm</span>
+                                  <div>
+                                    <span className="text-white/70">{v.original}</span>
+                                    <span className="ml-1.5 text-white/30">— {v.reason}</span>
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -2183,11 +2182,35 @@ export default function App({ onBackToLanding }) {
                         </div>
                       )}
 
-                      {/* Success message with diagnostics */}
-                      {aiResult?.status === 'solved' && aiResult.violations?.length === 0 && aiResult.diagnostics?.[0] && (
+                      {/* Soft violations — yellow, informational */}
+                      {aiResult && aiResult.violations && aiResult.violations.filter(v => !v.violated).length > 0 && (
+                        <div className="mb-4 rounded-md border border-yellow-500/20 bg-yellow-500/[0.04] p-4">
+                          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-yellow-400">
+                            <AlertTriangle size={14} strokeWidth={2} />
+                            <span>{aiResult.violations.filter(v => !v.violated).length} ràng buộc mềm chưa đạt tối ưu</span>
+                          </div>
+                          <div className="space-y-2">
+                            {aiResult.violations.filter(v => !v.violated).map((v, i) => (
+                              <div key={i} className="rounded bg-white/[0.02] px-2.5 py-2 text-xs space-y-0.5">
+                                <p className="text-white/70 font-medium">"{v.original}"</p>
+                                <p className="text-white/40">{v.reason}</p>
+                                {v.conflictsWith && (
+                                  <p className="text-yellow-400/60">Xung đột với: {v.conflictsWith}</p>
+                                )}
+                                {v.suggestion && (
+                                  <p className="text-blue-400/60">Gợi ý: {v.suggestion}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Success message */}
+                      {aiResult?.status === 'solved' && (aiResult.violations?.length ?? 0) === 0 && (
                         <div className="mb-4 flex items-center gap-2 rounded-md border border-green-500/20 bg-green-500/[0.04] px-4 py-2.5 text-xs text-green-400">
                           <Check size={14} strokeWidth={2} />
-                          <span>{aiResult.diagnostics[0]}</span>
+                          <span>Tất cả ràng buộc thỏa mãn</span>
                         </div>
                       )}
 
@@ -2391,7 +2414,7 @@ export default function App({ onBackToLanding }) {
                             </section>
                           )}
 
-                          {/* c) Detected violations (only when violations exist) */}
+                          {/* c) Hard violations detail panel */}
                           {aiResult.violations && aiResult.violations.filter((v) => v.violated).length > 0 && (
                             <section className={`${panelClass} p-4`}>
                               <div className="mb-4 flex items-center gap-2.5">
@@ -2399,21 +2422,49 @@ export default function App({ onBackToLanding }) {
                                   <AlertTriangle size={16} strokeWidth={1.5} className="text-red-400" />
                                 </span>
                                 <div>
-                                  <h2 className="text-sm font-semibold text-white">Vi phạm phát hiện</h2>
-                                  {aiResult.overallAssessment && (
-                                    <p className="text-xs text-white/40">{aiResult.overallAssessment}</p>
-                                  )}
+                                  <h2 className="text-sm font-semibold text-white">Ràng buộc cứng bị vi phạm</h2>
+                                  <p className="text-xs text-white/40">Solver cần sửa lại để đảm bảo các ràng buộc bắt buộc này</p>
                                 </div>
                               </div>
                               <div className="space-y-2">
                                 {aiResult.violations.filter((v) => v.violated).map((v, idx) => (
-                                  <div key={`${v.constraintId}-${idx}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3">
-                                    <p className="text-sm text-white/80">"{v.original}"</p>
-                                    <p className="mt-1 text-xs text-red-300/70">{v.reason}</p>
-                                    {v.confidence > 0 && (
-                                      <span className="mt-1 inline-block rounded border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/30">
-                                        confidence: {(v.confidence * 100).toFixed(0)}%
-                                      </span>
+                                  <div key={`${v.constraintId}-${idx}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3 space-y-1">
+                                    <p className="text-sm text-white/80 font-medium">"{v.original}"</p>
+                                    <p className="text-xs text-red-300/70">{v.reason}</p>
+                                    {v.conflictsWith && (
+                                      <p className="text-xs text-white/40">Xung đột với: <span className="text-white/60">{v.conflictsWith}</span></p>
+                                    )}
+                                    {v.suggestion && (
+                                      <p className="text-xs text-blue-400/60">Gợi ý: {v.suggestion}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+
+                          {/* c2) Soft violations detail panel */}
+                          {aiResult.violations && aiResult.violations.filter((v) => !v.violated).length > 0 && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-yellow-400" />
+                                </span>
+                                <div>
+                                  <h2 className="text-sm font-semibold text-white">Ràng buộc mềm chưa đạt tối ưu</h2>
+                                  <p className="text-xs text-white/40">Thời khóa biểu đã tạo được, nhưng một số ưu tiên chưa đạt</p>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {aiResult.violations.filter((v) => !v.violated).map((v, idx) => (
+                                  <div key={`${v.constraintId}-${idx}`} className="rounded-md border border-yellow-400/15 bg-yellow-400/[0.03] p-3 space-y-1">
+                                    <p className="text-sm text-white/80 font-medium">"{v.original}"</p>
+                                    <p className="text-xs text-white/40">{v.reason}</p>
+                                    {v.conflictsWith && (
+                                      <p className="text-xs text-yellow-400/60">Xung đột với: {v.conflictsWith}</p>
+                                    )}
+                                    {v.suggestion && (
+                                      <p className="text-xs text-blue-400/60">Gợi ý: {v.suggestion}</p>
                                     )}
                                   </div>
                                 ))}
@@ -2422,32 +2473,46 @@ export default function App({ onBackToLanding }) {
                           )}
 
                           {/* d) Infeasible reason (only when status='infeasible') */}
-                          {aiResult.status === 'infeasible' && aiResult.iisConstraintIds && aiResult.iisConstraintIds.length > 0 && (
+                          {aiResult.status === 'infeasible' && (
                             <section className={`${panelClass} p-4`}>
                               <div className="mb-4 flex items-center gap-2.5">
                                 <span className={iconShellClass}>
-                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-amber-400" />
+                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-red-400" />
                                 </span>
                                 <div>
-                                  <h2 className="text-sm font-semibold text-white">Lý do không xếp được</h2>
-                                  <p className="text-xs text-white/40">Các ràng buộc sau xung đột nhau</p>
+                                  <h2 className="text-sm font-semibold text-white">Không thể tạo thời khóa biểu</h2>
+                                  <p className="text-xs text-white/40">Các ràng buộc sau xung đột nhau, không có lịch nào thỏa mãn đồng thời</p>
                                 </div>
                               </div>
-                              <div className="rounded-md border border-amber-400/15 bg-amber-400/[0.03] p-4">
-                                <div className="space-y-2">
-                                  {aiResult.compiledConstraints
-                                    ?.filter((c) => aiResult.iisConstraintIds?.includes(c.id))
-                                    .map((c) => (
-                                      <div key={c.id} className="rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5">
-                                        <p className="text-sm text-white/70">{c.description}</p>
-                                        <p className="mt-0.5 text-xs text-white/30">"{c.original}"</p>
-                                      </div>
-                                    ))}
+                              {aiResult.iisConstraintIds && aiResult.iisConstraintIds.length > 0 ? (
+                                <div className="rounded-md border border-red-400/15 bg-red-400/[0.03] p-4">
+                                  <p className="mb-3 text-xs text-white/50">Nguyên nhân — các ràng buộc xung đột:</p>
+                                  <div className="space-y-2">
+                                    {aiResult.compiledConstraints
+                                      ?.filter((c) => aiResult.iisConstraintIds?.includes(c.id))
+                                      .map((c) => (
+                                        <div key={c.id} className="flex items-start gap-2 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5">
+                                          <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${c.priority === 'hard' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                            {c.priority === 'hard' ? 'Cứng' : 'Mềm'}
+                                          </span>
+                                          <div>
+                                            <p className="text-sm text-white/70">"{c.original}"</p>
+                                            <p className="mt-0.5 text-xs text-white/30">{c.description}</p>
+                                          </div>
+                                        </div>
+                                      ))}
+                                  </div>
+                                  <p className="mt-3 text-xs text-red-300/60">
+                                    Hãy bỏ hoặc nới lỏng một trong các ràng buộc trên, hoặc thêm nhiều slot thời gian hơn.
+                                  </p>
                                 </div>
-                                <p className="mt-3 text-sm text-amber-300/70">
-                                  Các ràng buộc này xung đột nhau. Hãy bỏ hoặc nới lỏng một trong số đó.
-                                </p>
-                              </div>
+                              ) : (
+                                <div className="rounded-md border border-red-400/15 bg-red-400/[0.03] p-4">
+                                  <p className="text-sm text-white/60">
+                                    {aiResult.diagnostics?.[0] ?? 'Không xác định được ràng buộc cụ thể gây xung đột. Thử giảm số ràng buộc cứng hoặc tăng số slot thời gian.'}
+                                  </p>
+                                </div>
+                              )}
                             </section>
                           )}
 

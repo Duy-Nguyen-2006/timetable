@@ -40,9 +40,11 @@ export type CompilerResult = {
 export type ConstraintViolation = {
   constraintId: string
   original: string
-  violated: boolean
+  violated: boolean     // true = hard constraint violated; false = soft constraint not fully met
   reason: string
   confidence: number
+  conflictsWith?: string  // which constraint causes the conflict
+  suggestion?: string     // how to resolve (mainly for soft violations)
 }
 
 export type VerifierResult = {
