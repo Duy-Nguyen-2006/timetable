@@ -7,7 +7,7 @@ import type { TimetableSolveResult, ConstraintViolation } from './types'
 export type AgentEvent =
   | { type: 'status'; message: string; iteration: number; maxIterations: number }
   | { type: 'code_fix'; attempt: number; error: string }
-  | { type: 'judge_result'; violations: ConstraintViolation[]; allSatisfied: boolean; assessment: string }
+  | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
   | { type: 'result'; data: TimetableSolveResult }
   | { type: 'error'; message: string }
 

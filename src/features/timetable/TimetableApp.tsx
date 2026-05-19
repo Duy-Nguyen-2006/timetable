@@ -736,13 +736,19 @@ export default function App({ onBackToLanding }) {
             setAgentStep('running')
             setAgentStatus(`Lỗi khi chạy code, đang sửa (lần ${event.attempt})...`)
             break
-          case 'judge_result':
+          case 'verified':
             if (event.allSatisfied) {
               setAgentStep('checking')
               setAgentStatus('Tất cả ràng buộc thỏa mãn!')
             } else {
-              setAgentStep('fixing')
-              setAgentStatus(`Phát hiện ${event.violations.length} vi phạm, đang sửa...`)
+              const hardCount = event.violations.filter((v: { violated: boolean }) => v.violated).length
+              if (hardCount > 0) {
+                setAgentStep('fixing')
+                setAgentStatus(`Phát hiện ${hardCount} vi phạm cứng, đang sửa...`)
+              } else {
+                setAgentStep('checking')
+                setAgentStatus(`Có ${event.violations.length} ràng buộc mềm chưa tối ưu, hoàn thành...`)
+              }
             }
             break
         }
@@ -2334,8 +2340,8 @@ export default function App({ onBackToLanding }) {
                                   <Code size={16} strokeWidth={1.5} />
                                 </span>
                                 <div>
-                                  <h2 className="text-sm font-semibold text-white">Cách AI hiểu ràng buộc của bạn</h2>
-                                  <p className="text-xs text-white/40">Các ràng buộc đã được biên dịch sang code OR-Tools</p>
+                                  <h2 className="text-sm font-semibold text-white">Hệ thống hiểu ràng buộc của bạn như sau</h2>
+                                  <p className="text-xs text-white/40">Nếu có điểm nào không đúng ý, hãy chỉnh sửa ràng buộc và tạo lại</p>
                                 </div>
                               </div>
                               <div className="space-y-2">

@@ -161,6 +161,37 @@ for a in assignments:
             if s['period'] <= 2:
                 objective_terms.append(x[(a['assignmentId'], s['slotId'])] * 3)
 
+[CHECKER CODE — BẮT BUỘC]:
+Song song với code OR-Tools, viết checker_code kiểm tra solution sau khi solve.
+Namespace checker: cells_map: dict[(assignmentId, slotId)] -> bool, assignments, slots (giống namespace chính).
+KHÔNG dùng f-string. KHÔNG import. KHÔNG print.
+Dòng cuối PHẢI là: result = (satisfied, reason) — satisfied: bool, reason: str tiếng Việt.
+
+Ví dụ checker hard "Sơn không dạy thứ 2":
+satisfied = True
+reason = "Thỏa mãn"
+for a in assignments:
+    if a['teacherLabel'] == 'Sơn':
+        for s in slots:
+            if s['dayId'] == 'monday' and cells_map.get((a['assignmentId'], s['slotId']), False):
+                satisfied = False
+                reason = 'Sơn dạy ' + a['subjectLabel'] + ' lớp ' + a['classLabel'] + ' vào thứ 2'
+result = (satisfied, reason)
+
+Ví dụ checker soft "Toán nên xếp tiết 1-2":
+total = 0
+preferred = 0
+for a in assignments:
+    if a['subjectLabel'] == 'Toán':
+        for s in slots:
+            if cells_map.get((a['assignmentId'], s['slotId']), False):
+                total += 1
+                if s['period'] <= 2:
+                    preferred += 1
+satisfied = total == 0 or preferred * 2 >= total
+reason = 'Thỏa mãn' if satisfied else str(preferred) + '/' + str(total) + ' tiết Toán ở tiết 1-2'
+result = (satisfied, reason)
+
 [OUTPUT] JSON array thuần, KHÔNG markdown, KHÔNG giải thích:
 [
   {
@@ -168,7 +199,8 @@ for a in assignments:
     "original": "text gốc",
     "description": "mô tả ngắn tiếng Việt",
     "priority": "hard",
-    "code": "python code, dùng \\n cho newline, \\' cho dấu nháy đơn"
+    "code": "python OR-Tools code, dùng \\n cho newline, \\' cho dấu nháy đơn",
+    "checker_code": "python checker code, dùng \\n cho newline, \\' cho dấu nháy đơn"
   },
   {
     "id": "sc_1",
@@ -176,7 +208,8 @@ for a in assignments:
     "description": "mô tả ngắn",
     "priority": "soft",
     "weight": 3,
-    "code": "python code"
+    "code": "python code",
+    "checker_code": "python checker code"
   }
 ]`
 
@@ -197,7 +230,7 @@ export function buildCompilerUserMessage(payload: InputPayload): string {
 
 export function toSolverProblem(
   payload: InputPayload,
-  constraints: Array<{ id: string; code: string; priority: 'hard' | 'soft' }>,
+  constraints: Array<{ id: string; code: string; priority: 'hard' | 'soft'; original?: string; checkerCode?: string }>,
 ): import('./sandbox').SolverProblem {
   return {
     slots: payload.slots.map(s => ({
@@ -222,6 +255,8 @@ export function toSolverProblem(
       id: c.id,
       code: c.code,
       priority: c.priority,
+      original: c.original ?? '',
+      checkerCode: c.checkerCode ?? '',
     })),
     solverConfig: { maxTimeSeconds: 30, numWorkers: 8, randomSeed: 1 },
   }

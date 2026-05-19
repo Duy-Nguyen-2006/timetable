@@ -79,6 +79,7 @@ def _empty_result(status, message, diagnostics,
         "iisConstraintIds": iis_constraint_ids or [],
         "executionErrors": execution_errors or [],
         "validationErrors": validation_errors or [],
+        "violations": [],
         "solverStats": solver_stats,
     }
 
@@ -279,15 +280,48 @@ def solve_timetable(problem):
         for s in slots
     }
 
+    cells_map = {}
     for a in assignments:
         for s in slots:
-            if solver.Value(x[(a["assignmentId"], s["slotId"])]) == 1:
+            assigned = solver.Value(x[(a["assignmentId"], s["slotId"])]) == 1
+            cells_map[(a["assignmentId"], s["slotId"])] = assigned
+            if assigned:
                 cells_by_slot[s["slotId"]]["entries"].append({
                     "assignmentKey": a["assignmentId"],
                     "subject": a["subjectLabel"],
                     "teacher": a["teacherLabel"],
                     "className": a["classLabel"],
                 })
+
+    # === Deterministic checker verification ===
+    violations = []
+    for c in ai_constraints:
+        checker_code = c.get("checkerCode") or c.get("checker_code", "")
+        if not checker_code or not checker_code.strip():
+            continue
+        cid = c.get("id", "unknown")
+        ns = {
+            "cells_map": cells_map,
+            "assignments": assignments,
+            "slots": slots,
+            "result": (True, ""),
+            "__builtins__": namespace_builtins,
+        }
+        try:
+            exec(compile(checker_code, "<checker_" + cid + ">", "exec"), ns, ns)
+            result_val = ns.get("result", (True, ""))
+            if isinstance(result_val, (tuple, list)) and len(result_val) >= 2:
+                satisfied, reason = bool(result_val[0]), str(result_val[1])
+                if not satisfied:
+                    violations.append({
+                        "constraintId": cid,
+                        "original": c.get("original", ""),
+                        "violated": c.get("priority", "hard") == "hard",
+                        "reason": reason,
+                        "confidence": 1.0,
+                    })
+        except Exception as e:
+            diagnostics.append("Checker " + cid + " lỗi: " + type(e).__name__ + ": " + str(e))
 
     return {
         "status": "solved",
@@ -297,5 +331,6 @@ def solve_timetable(problem):
         "iisConstraintIds": [],
         "executionErrors": execution_errors,
         "validationErrors": validation_errors,
+        "violations": violations,
         "solverStats": _stats(solver, objective_terms),
     }

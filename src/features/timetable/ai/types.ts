@@ -24,6 +24,7 @@ export type AICompiledConstraint = {
   priority: 'hard' | 'soft'
   weight?: number       // 1-10, required if priority='soft'
   code: string          // Python OR-Tools code
+  checkerCode?: string  // pure Python post-solve checker: cells_map → result=(bool, str)
 }
 
 export type AIUnparsedConstraint = {

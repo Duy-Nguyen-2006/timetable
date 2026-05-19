@@ -101,6 +101,8 @@ export type CompiledConstraint = {
   id: string
   code: string
   priority: 'hard' | 'soft'
+  original?: string
+  checkerCode?: string
 }
 
 export type SolverProblem = {
@@ -142,6 +144,7 @@ export type SolverDirectOutput = {
   iisConstraintIds: string[]
   executionErrors: Array<{ constraintId: string; error: string }>
   validationErrors: Array<{ constraintId: string; error: string }>
+  violations: import('@/features/timetable/ai/types').ConstraintViolation[]
   solverStats: {
     wallTimeSeconds: number
     objectiveValue: number | null
