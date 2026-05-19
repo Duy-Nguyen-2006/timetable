@@ -17,7 +17,7 @@ import { buildInputPayload, SYSTEM_PROMPT, type InputPayload } from '@/lib/timet
 /** Max outer iterations (coder → sandbox → judge → feedback) */
 const MAX_AGENT_ITERATIONS = 5
 /** Max retries for runtime/sandbox errors within a single iteration */
-const MAX_CODE_FIX_RETRIES = 3
+const MAX_CODE_FIX_RETRIES = 5
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -325,6 +325,11 @@ export default function App({ onBackToLanding }) {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
+  const [agentStep, setAgentStep] = useState<'idle' | 'thinking' | 'coding' | 'running' | 'checking' | 'fixing'>('idle')
+  const [agentIteration, setAgentIteration] = useState(0)
+  const [agentMaxIterations, setAgentMaxIterations] = useState(5)
+  const [agentElapsed, setAgentElapsed] = useState(0)
+  const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [expandedConstraintIds, setExpandedConstraintIds] = useState<Set<string>>(new Set())
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
   const [lowprizoApiKey, setLowprizoApiKey] = useState('')
@@ -694,6 +699,16 @@ export default function App({ onBackToLanding }) {
     setAiError(null)
     setAiResult(null)
     setAgentStatus('Đang khởi tạo...')
+    setAgentStep('thinking')
+    setAgentIteration(0)
+    setAgentElapsed(0)
+
+    // Start elapsed timer
+    if (agentTimerRef.current) clearInterval(agentTimerRef.current)
+    agentTimerRef.current = setInterval(() => {
+      setAgentElapsed(prev => prev + 1)
+    }, 1000)
+
     try {
       const result = await generateTimetableWithAI({
         apiKey,
@@ -707,14 +722,26 @@ export default function App({ onBackToLanding }) {
         switch (event.type) {
           case 'status':
             setAgentStatus(event.message)
+            setAgentIteration(event.iteration)
+            setAgentMaxIterations(event.maxIterations)
+            if (event.message.includes('kiểm tra')) {
+              setAgentStep('checking')
+            } else if (event.message.includes('sửa')) {
+              setAgentStep('fixing')
+            } else {
+              setAgentStep('coding')
+            }
             break
           case 'code_fix':
-            setAgentStatus(`Sửa lỗi code (lần ${event.attempt})...`)
+            setAgentStep('running')
+            setAgentStatus(`Lỗi khi chạy code, đang sửa (lần ${event.attempt})...`)
             break
           case 'judge_result':
             if (event.allSatisfied) {
+              setAgentStep('checking')
               setAgentStatus('Tất cả ràng buộc thỏa mãn!')
             } else {
+              setAgentStep('fixing')
               setAgentStatus(`Phát hiện ${event.violations.length} vi phạm, đang sửa...`)
             }
             break
@@ -726,6 +753,11 @@ export default function App({ onBackToLanding }) {
     } finally {
       setAiLoading(false)
       setAgentStatus(null)
+      setAgentStep('idle')
+      if (agentTimerRef.current) {
+        clearInterval(agentTimerRef.current)
+        agentTimerRef.current = null
+      }
     }
   }
 
@@ -2062,9 +2094,48 @@ export default function App({ onBackToLanding }) {
                       </label>
 
                       {aiLoading && (
-                        <div className="mb-4 flex flex-col items-center justify-center gap-3 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-sm text-white/30">
-                          <Loader2 size={18} className="animate-spin" strokeWidth={1.5} />
-                          <span>{agentStatus || 'Đang xếp thời khóa biểu, vui lòng chờ...'}</span>
+                        <div className="mb-4 rounded-md border border-white/[0.08] bg-[#0a0a0a] p-4">
+                          {/* Header with timer */}
+                          <div className="mb-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm font-medium text-white/70">
+                              <Loader2 size={14} className="animate-spin text-blue-400" strokeWidth={2} />
+                              <span>Coding Agent đang hoạt động</span>
+                            </div>
+                            <span className="text-xs tabular-nums text-white/30">
+                              {Math.floor(agentElapsed / 60)}:{String(agentElapsed % 60).padStart(2, '0')}
+                            </span>
+                          </div>
+
+                          {/* Step indicators */}
+                          <div className="mb-3 flex items-center gap-1">
+                            {(['thinking', 'coding', 'running', 'checking', 'fixing'] as const).map((step) => {
+                              const labels: Record<string, string> = { thinking: 'Suy nghĩ', coding: 'Viết code', running: 'Chạy thử', checking: 'Kiểm tra', fixing: 'Sửa lỗi' }
+                              const isActive = agentStep === step
+                              const isPast = ['thinking', 'coding', 'running', 'checking', 'fixing'].indexOf(agentStep) > ['thinking', 'coding', 'running', 'checking', 'fixing'].indexOf(step)
+                              return (
+                                <div key={step} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all ${isActive ? 'bg-blue-500/20 text-blue-400' : isPast ? 'bg-white/[0.04] text-white/30' : 'bg-white/[0.02] text-white/15'}`}>
+                                  {isPast ? <Check size={9} strokeWidth={2.5} /> : isActive ? <Circle size={7} className="animate-pulse fill-current" /> : <Circle size={7} />}
+                                  <span>{labels[step]}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+
+                          {/* Progress bar */}
+                          <div className="mb-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                            <div
+                              className="h-full rounded-full bg-blue-500/60 transition-all duration-500"
+                              style={{ width: `${agentIteration > 0 ? Math.min((agentIteration / agentMaxIterations) * 100, 100) : 5}%` }}
+                            />
+                          </div>
+
+                          {/* Status message */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-white/40">{agentStatus || 'Đang khởi tạo...'}</span>
+                            {agentIteration > 0 && (
+                              <span className="text-[10px] text-white/25">Lần {agentIteration}/{agentMaxIterations}</span>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -2077,6 +2148,48 @@ export default function App({ onBackToLanding }) {
                           <p className="text-xs text-white/40">Kết quả cuối cùng theo giáo viên và môn học</p>
                         </div>
                       </div>
+
+                      {/* Violations warning + Retry button */}
+                      {aiResult && aiResult.violations && aiResult.violations.length > 0 && (
+                        <div className="mb-4 rounded-md border border-yellow-500/20 bg-yellow-500/[0.04] p-4">
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm font-medium text-yellow-400">
+                              <AlertTriangle size={14} strokeWidth={2} />
+                              <span>Còn {aiResult.violations.length} ràng buộc chưa thỏa mãn</span>
+                            </div>
+                            <button
+                              onClick={handleGenerate}
+                              disabled={aiLoading}
+                              className="flex items-center gap-1.5 rounded-md bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white disabled:opacity-50"
+                            >
+                              <RotateCcw size={12} strokeWidth={2} />
+                              Thử lại
+                            </button>
+                          </div>
+                          {aiResult.overallAssessment && (
+                            <p className="mb-2 text-xs text-white/40">{aiResult.overallAssessment}</p>
+                          )}
+                          <div className="space-y-1.5">
+                            {aiResult.violations.map((v, i) => (
+                              <div key={i} className="flex items-start gap-2 rounded bg-white/[0.02] px-2.5 py-1.5 text-xs">
+                                <span className="mt-0.5 shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">Vi phạm</span>
+                                <div>
+                                  <span className="text-white/60">{v.original}</span>
+                                  <span className="ml-1.5 text-white/30">— {v.reason}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Success message with diagnostics */}
+                      {aiResult?.status === 'solved' && aiResult.violations?.length === 0 && aiResult.diagnostics?.[0] && (
+                        <div className="mb-4 flex items-center gap-2 rounded-md border border-green-500/20 bg-green-500/[0.04] px-4 py-2.5 text-xs text-green-400">
+                          <Check size={14} strokeWidth={2} />
+                          <span>{aiResult.diagnostics[0]}</span>
+                        </div>
+                      )}
 
                         {aiResult?.status === 'solved' ? (
                           <>
