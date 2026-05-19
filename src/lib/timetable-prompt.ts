@@ -6,6 +6,18 @@ export const SYSTEM_PROMPT = `Bạn là AI xếp thời khóa biểu trường h
 - hardConstraints: [{id, text}]
 - softConstraints: [{id, text, weight}]
 
+[QUY ƯỚC NGÀY VIỆT NAM — RẤT QUAN TRỌNG]:
+Trong tiếng Việt, ngày trong tuần được đánh số:
+- Thứ 2 (Thứ Hai) = dayId "monday"
+- Thứ 3 (Thứ Ba) = dayId "tuesday"
+- Thứ 4 (Thứ Tư) = dayId "wednesday"
+- Thứ 5 (Thứ Năm) = dayId "thursday"
+- Thứ 6 (Thứ Sáu) = dayId "friday"
+- Thứ 7 (Thứ Bảy) = dayId "saturday"
+- Chủ nhật = dayId "sunday"
+Khi constraint nói "thứ 2" nghĩa là MONDAY, "thứ 3" nghĩa là TUESDAY, v.v.
+Luôn dùng dayLabel trong slots để map chính xác.
+
 [BASE CONSTRAINTS — luôn áp dụng]:
 1. Mỗi assignment có ĐÚNG weeklyPeriods slot
 2. Giáo viên không trùng giờ (cùng slotId)
@@ -19,8 +31,9 @@ export const SYSTEM_PROMPT = `Bạn là AI xếp thời khóa biểu trường h
 
 Status values: "ok" | "infeasible" | "error"
 
-[VERIFY]: Kiểm tra lại TẤT CẢ constraints trước khi output.
-[QUAN TRỌNG]: Chỉ dùng ortools, json, sys. KHÔNG in gì ngoài JSON duy nhất ra stdout.`
+[VERIFY]: Kiểm tra lại TẤT CẢ constraints trước khi output. Đặc biệt kiểm tra mapping ngày (thứ 2=monday, thứ 3=tuesday...).
+[QUAN TRỌNG]: Chỉ dùng ortools, json, sys. KHÔNG in gì ngoài JSON duy nhất ra stdout.
+[BẮT BUỘC]: Output của bạn PHẢI là code Python hoàn chỉnh sử dụng ortools CP-SAT solver. KHÔNG BAO GIỜ output JSON trực tiếp. KHÔNG BAO GIỜ tự giải bằng tay. Luôn viết code Python để solver tìm lời giải.`
 
 export type InputPayload = {
   slots: Array<{

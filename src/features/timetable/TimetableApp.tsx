@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
-import { generateTimetableWithAI } from './ai/client'
+import { generateTimetableWithAI, type AgentEvent } from './ai/client'
 import { useApiKeyStore } from './ai/api-key-store'
 import type { TimetableSolveResult } from './ai/types'
 import {
@@ -324,6 +324,7 @@ export default function App({ onBackToLanding }) {
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [expandedConstraintIds, setExpandedConstraintIds] = useState<Set<string>>(new Set())
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
   const [lowprizoApiKey, setLowprizoApiKey] = useState('')
@@ -692,6 +693,7 @@ export default function App({ onBackToLanding }) {
     setAiLoading(true)
     setAiError(null)
     setAiResult(null)
+    setAgentStatus('Đang khởi tạo...')
     try {
       const result = await generateTimetableWithAI({
         apiKey,
@@ -701,14 +703,31 @@ export default function App({ onBackToLanding }) {
         deletedPeriods,
         assignments: assignmentList,
         constraints: constraintList,
-      }, apiKey ?? undefined)
+      }, apiKey ?? undefined, (event: AgentEvent) => {
+        switch (event.type) {
+          case 'status':
+            setAgentStatus(event.message)
+            break
+          case 'code_fix':
+            setAgentStatus(`Sửa lỗi code (lần ${event.attempt})...`)
+            break
+          case 'judge_result':
+            if (event.allSatisfied) {
+              setAgentStatus('Tất cả ràng buộc thỏa mãn!')
+            } else {
+              setAgentStatus(`Phát hiện ${event.violations.length} vi phạm, đang sửa...`)
+            }
+            break
+        }
+      })
       setAiResult(result)
     } catch (err) {
       setAiError(RESULT_NOT_FOUND_MESSAGE)
-      } finally {
-        setAiLoading(false)
-      }
+    } finally {
+      setAiLoading(false)
+      setAgentStatus(null)
     }
+  }
 
     const handleDownloadExcel = useCallback(() => {
       if (!aiResult || aiResult.status !== 'solved') return
@@ -2043,9 +2062,9 @@ export default function App({ onBackToLanding }) {
                       </label>
 
                       {aiLoading && (
-                        <div className="mb-4 flex items-center justify-center gap-3 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-sm text-white/30">
+                        <div className="mb-4 flex flex-col items-center justify-center gap-3 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-sm text-white/30">
                           <Loader2 size={18} className="animate-spin" strokeWidth={1.5} />
-                          <span>Đang xếp thời khóa biểu, vui lòng chờ...</span>
+                          <span>{agentStatus || 'Đang xếp thời khóa biểu, vui lòng chờ...'}</span>
                         </div>
                       )}
 

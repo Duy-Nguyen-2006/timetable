@@ -32,7 +32,7 @@ export async function chatCompletion(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({ model, messages, temperature: 0 }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(180_000),
   })
   if (!res.ok) {
     const text = await res.text()
