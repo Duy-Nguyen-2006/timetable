@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingExcludes: {
-    "/*": ["./release/**/*", "./dist/**/*"],
+    "/*": ["./release/**/*", "./dist/**/*", "./.venv/**/*"],
   },
   /* config options here */
   typescript: {
