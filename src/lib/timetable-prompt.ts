@@ -154,12 +154,26 @@ for a in assignments:
             if s['period'] == 1:
                 model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
 
+[VÍ DỤ HARD — "9A không học thứ 7"]:
+for a in assignments:
+    if a['classLabel'] == '9A':
+        for s in slots:
+            if s['dayId'] == 'saturday':
+                model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
+
 [VÍ DỤ SOFT — "Toán nên xếp tiết 1-2" (weight 3)]:
 for a in assignments:
     if a['subjectLabel'] == 'Toán':
         for s in slots:
             if s['period'] <= 2:
                 objective_terms.append(x[(a['assignmentId'], s['slotId'])] * 3)
+
+[VÍ DỤ SOFT — "Lý nên dạy buổi sáng" (weight 4)]:
+for a in assignments:
+    if a['subjectLabel'] == 'Lý':
+        for s in slots:
+            if s['sessionId'] == 'morning':
+                objective_terms.append(x[(a['assignmentId'], s['slotId'])] * 4)
 
 [CHECKER CODE — BẮT BUỘC]:
 Song song với code OR-Tools, viết checker_code kiểm tra solution sau khi solve.
@@ -178,6 +192,17 @@ for a in assignments:
                 reason = 'Sơn dạy ' + a['subjectLabel'] + ' lớp ' + a['classLabel'] + ' vào thứ 2'
 result = (satisfied, reason)
 
+Ví dụ checker hard "9A không học thứ 7":
+satisfied = True
+reason = "Thỏa mãn"
+for a in assignments:
+    if a['classLabel'] == '9A':
+        for s in slots:
+            if s['dayId'] == 'saturday' and cells_map.get((a['assignmentId'], s['slotId']), False):
+                satisfied = False
+                reason = '9A học ' + a['subjectLabel'] + ' vào thứ 7'
+result = (satisfied, reason)
+
 Ví dụ checker soft "Toán nên xếp tiết 1-2":
 total = 0
 preferred = 0
@@ -190,6 +215,20 @@ for a in assignments:
                     preferred += 1
 satisfied = total == 0 or preferred * 2 >= total
 reason = 'Thỏa mãn' if satisfied else str(preferred) + '/' + str(total) + ' tiết Toán ở tiết 1-2'
+result = (satisfied, reason)
+
+Ví dụ checker soft "Lý nên dạy buổi sáng":
+total = 0
+morning = 0
+for a in assignments:
+    if a['subjectLabel'] == 'Lý':
+        for s in slots:
+            if cells_map.get((a['assignmentId'], s['slotId']), False):
+                total += 1
+                if s['sessionId'] == 'morning':
+                    morning += 1
+satisfied = total == 0 or morning * 2 >= total
+reason = 'Thỏa mãn' if satisfied else str(morning) + '/' + str(total) + ' tiết Lý vào buổi sáng'
 result = (satisfied, reason)
 
 [OUTPUT] JSON array thuần, KHÔNG markdown, KHÔNG giải thích:

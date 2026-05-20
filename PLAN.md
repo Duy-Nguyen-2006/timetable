@@ -966,18 +966,18 @@ Tổng: ~14h coding + test.
 
 ## Checklist review (sau khi bạn code xong)
 
-- [ ] `.venv` không commit, có trong .gitignore
-- [ ] `validator.py` reject mọi case trong test_validator.py
-- [ ] `solver.py` pass tất cả test_solver.py
-- [ ] System prompt compiler có đủ ≥6 few-shot examples
-- [ ] Code AI sinh ra qua AST validator OK trước khi exec
-- [ ] Hard constraint có gắn assumption literal, IIS hoạt động
-- [ ] Soft constraint chỉ append vào `objective_terms`, không gọi `model.Maximize` trực tiếp
-- [ ] Python subprocess có timeout
-- [ ] Route trả về đủ field theo `TimetableSolveResult` mới
-- [ ] UI hiển thị compiledConstraints, unparsed, violations, iisConstraintIds
-- [ ] Fallback khi LLM fail: không crash, vẫn solve được (nếu không có constraint)
-- [ ] Không còn reference đến `normalizeConstraintsWithDevstral` cũ
+- [x] `.venv` không commit, có trong .gitignore
+- [x] `validator.py` reject mọi case trong test_validator.py
+- [x] `solver.py` pass tất cả test_solver.py
+- [x] System prompt compiler có đủ ≥6 few-shot examples
+- [x] Code AI sinh ra qua AST validator OK trước khi exec
+- [x] Hard constraint có gắn assumption literal, IIS hoạt động
+- [x] Soft constraint chỉ append vào `objective_terms`, không gọi `model.Maximize` trực tiếp
+- [x] Python subprocess có timeout
+- [x] Route trả về đủ field theo `TimetableSolveResult` mới
+- [x] UI hiển thị compiledConstraints, unparsed, violations, iisConstraintIds
+- [x] Fallback khi LLM fail: không crash, vẫn solve được (nếu không có constraint)
+- [x] Không còn reference đến `normalizeConstraintsWithDevstral` cũ
 
 ---
 
