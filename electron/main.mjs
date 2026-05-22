@@ -16,7 +16,7 @@ const LOADING_HTML = `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
   <div style="color:#555;font-size:13px;margin-top:6px">Đang khởi động ứng dụng...</div>
   <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
 </div>
-</body></html>`)}
+</body></html>`)}`
 
 function buildErrorHTML(msg) {
   const safe = String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
