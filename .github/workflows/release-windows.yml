@@ -39,13 +39,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path python-dist | Out-Null
           pyinstaller python/timetable_solver/runner.py --onefile --name runner --distpath python-dist/runner --workpath build/pyinstaller --specpath build/pyinstaller
 
+      - name: Generate Prisma client
+        run: npx prisma generate
+
       - name: Build Next app
+        shell: bash
         run: npm run build
         env:
           LOWPRIZO_API_BASE_URL: ${{ secrets.LOWPRIZO_API_BASE_URL }}
 
       - name: Build Electron artifacts
-        run: npm run dist:win
+        run: npm run package:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

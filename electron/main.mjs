@@ -7,6 +7,32 @@ import fs from 'node:fs'
 const isDev = !app.isPackaged
 let serverProcess = null
 
+const LOADING_HTML = `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Tack Timetable</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#050505;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,-apple-system,sans-serif}.dot{width:8px;height:8px;border-radius:50%;background:#6366f1;animation:bounce 1.2s infinite ease-in-out}.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}.dots{display:flex;gap:6px;margin-top:16px}@keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}</style>
+</head><body>
+<div style="text-align:center">
+  <div style="font-size:22px;font-weight:600;letter-spacing:-0.5px">Tack Timetable</div>
+  <div style="color:#555;font-size:13px;margin-top:6px">Đang khởi động ứng dụng...</div>
+  <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+</div>
+</body></html>`)}
+
+function buildErrorHTML(msg) {
+  const safe = String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Lỗi khởi động</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#050505;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,-apple-system,sans-serif}</style>
+</head><body>
+<div style="max-width:600px;padding:32px;text-align:center">
+  <div style="font-size:20px;font-weight:600;color:#f87171">Lỗi khởi động</div>
+  <div style="color:#888;font-size:13px;margin:10px 0 20px">Không thể khởi động server nội bộ</div>
+  <pre style="background:#111;border:1px solid #222;border-radius:8px;padding:16px;text-align:left;font-size:12px;color:#ddd;overflow:auto;max-height:300px;white-space:pre-wrap">${safe}</pre>
+  <div style="color:#555;font-size:12px;margin-top:16px">Hãy đảm bảo Python đã được cài đặt, hoặc liên hệ hỗ trợ.</div>
+</div>
+</body></html>`)}`
+}
+
 function getAppRoot() {
   return app.getAppPath()
 }
@@ -84,6 +110,7 @@ async function createWindow() {
     height: 960,
     minWidth: 1100,
     minHeight: 720,
+    show: false,
     autoHideMenuBar: true,
     backgroundColor: '#050505',
     webPreferences: {
@@ -92,8 +119,15 @@ async function createWindow() {
     },
   })
 
-  const url = isDev ? 'http://127.0.0.1:3000' : await startServer()
-  await win.loadURL(url)
+  await win.loadURL(LOADING_HTML)
+  win.show()
+
+  try {
+    const url = isDev ? 'http://127.0.0.1:3000' : await startServer()
+    await win.loadURL(url)
+  } catch (err) {
+    await win.loadURL(buildErrorHTML(err && err.message ? err.message : String(err)))
+  }
 }
 
 app.whenReady().then(createWindow)
