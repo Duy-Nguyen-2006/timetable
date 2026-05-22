@@ -39,6 +39,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path python-dist | Out-Null
           pyinstaller python/timetable_solver/runner.py --onefile --name runner --distpath python-dist/runner --workpath build/pyinstaller --specpath build/pyinstaller
 
+      - name: Validate Electron main syntax
+        run: node --check electron/main.mjs
+
       - name: Generate Prisma client
         run: npx prisma generate
 
