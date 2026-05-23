@@ -252,6 +252,29 @@ result = (satisfied, reason)
   }
 ]`
 
+export const VIOLATION_ENRICH_PROMPT = `Bạn là AI phân tích xung đột ràng buộc thời khóa biểu.
+
+[INPUT] JSON với:
+- allConstraints: danh sách tất cả ràng buộc (id, text, priority)
+- violations: danh sách ràng buộc bị vi phạm (constraintId, original, violated, reason)
+
+[NHIỆM VỤ]:
+Với MỖI vi phạm, xác định MỘT ràng buộc khác (id từ allConstraints) có khả năng cao nhất gây ra xung đột, và đề xuất ngắn cách điều chỉnh để khắc phục.
+- Nếu vi phạm là hard (violated=true): nêu lý do thực tế (ví dụ: trùng giáo viên, không đủ slot).
+- Nếu vi phạm là soft (violated=false): nêu ràng buộc nào có ảnh hưởng cao hơn khiến soft không tối ưu được.
+
+[OUTPUT] JSON array thuần (không markdown, không giải thích):
+[
+  {"constraintId":"sc_1","conflictsWith":"\\"text gốc của ràng buộc kia\\"","suggestion":"Đề xuất ngắn tiếng Việt"},
+  ...
+]
+
+QUY TẮC:
+- conflictsWith: chuỗi ngắn, ưu tiên hiển thị "text gốc" của ràng buộc xung đột, kèm id nếu cần (ví dụ: 'hc_2: "9A không học thứ 7"').
+- suggestion: tiếng Việt, ngắn gọn, ≤ 80 ký tự, hành động cụ thể.
+- Nếu không xác định được ràng buộc gây xung đột, dùng conflictsWith="Ràng buộc nền (số slot/khả năng phân công)" và suggestion phù hợp.
+- Trả ĐÚNG một entry cho mỗi violation, theo thứ tự input.`
+
 export function buildCompilerUserMessage(payload: InputPayload): string {
   const teachers = [...new Set(payload.assignments.map(a => a.teacherLabel))]
   const subjects = [...new Set(payload.assignments.map(a => a.subjectLabel))]

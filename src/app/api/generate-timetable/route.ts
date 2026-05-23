@@ -7,7 +7,7 @@ import type {
 import { db } from '@/lib/db'
 import { chatCompletion, detectModel } from '@/lib/llm-client'
 import { runSolverDirect } from '@/lib/sandbox'
-import { buildInputPayload, CONSTRAINT_COMPILER_PROMPT, buildCompilerUserMessage, toSolverProblem, type InputPayload } from '@/lib/timetable-prompt'
+import { buildInputPayload, CONSTRAINT_COMPILER_PROMPT, VIOLATION_ENRICH_PROMPT, buildCompilerUserMessage, toSolverProblem, type InputPayload } from '@/lib/timetable-prompt'
 
 // ---------------------------------------------------------------------------
 // SSE streaming helpers
@@ -211,6 +211,72 @@ async function recompileConstraints(
   return currentConstraints
 }
 
+// ---------------------------------------------------------------------------
+// Violation enrichment (conflictsWith + suggestion)
+// ---------------------------------------------------------------------------
+
+async function enrichViolations(
+  payload: InputPayload,
+  violations: ConstraintViolation[],
+  apiKey: string,
+  model: string,
+): Promise<ConstraintViolation[]> {
+  if (violations.length === 0) return violations
+
+  const allConstraints = [
+    ...payload.hardConstraints.map((c) => ({ id: c.id, text: c.text, priority: 'hard' as const })),
+    ...payload.softConstraints.map((c) => ({ id: c.id, text: c.text, priority: 'soft' as const })),
+  ]
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: VIOLATION_ENRICH_PROMPT },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        allConstraints,
+        violations: violations.map((v) => ({
+          constraintId: v.constraintId,
+          original: v.original,
+          violated: v.violated,
+          reason: v.reason,
+        })),
+      }),
+    },
+  ]
+
+  try {
+    const responseText = await chatCompletion(messages, apiKey, model)
+    const tryParse = (raw: string) => {
+      try {
+        const p = JSON.parse(raw)
+        return Array.isArray(p) ? p : null
+      } catch { return null }
+    }
+    const parsed = tryParse(responseText)
+      ?? (() => { const m = responseText.match(/\[[\s\S]*\]/); return m ? tryParse(m[0]) : null })()
+    if (!parsed) return violations
+
+    const byId = new Map<string, { conflictsWith?: string; suggestion?: string }>()
+    for (const entry of parsed as Array<Record<string, unknown>>) {
+      const id = String(entry.constraintId ?? '')
+      if (!id) continue
+      byId.set(id, {
+        conflictsWith: typeof entry.conflictsWith === 'string' ? entry.conflictsWith : undefined,
+        suggestion: typeof entry.suggestion === 'string' ? entry.suggestion : undefined,
+      })
+    }
+
+    return violations.map((v) => {
+      const extra = byId.get(v.constraintId)
+      if (!extra) return v
+      return { ...v, conflictsWith: extra.conflictsWith ?? v.conflictsWith, suggestion: extra.suggestion ?? v.suggestion }
+    })
+  } catch (err) {
+    console.warn('[enrichViolations] failed:', err instanceof Error ? err.message : err)
+    return violations
+  }
+}
+
 function toAICompiledConstraints(constraints: CompiledConstraintFull[]) {
   return constraints.map(c => ({
     id: c.id,
@@ -376,6 +442,9 @@ async function runAgenticLoop(
       bestResult.message = `${softCount} ràng buộc mềm chưa đạt tối ưu.`
     } else {
       bestResult.message = 'Tất cả ràng buộc thỏa mãn.'
+    }
+    if (bestResult.violations.length > 0) {
+      bestResult.violations = await enrichViolations(payload, bestResult.violations, apiKey, model)
     }
     return bestResult
   }

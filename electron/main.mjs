@@ -25,11 +25,11 @@ const LOADING_URL = 'data:text/html,' + encodeURIComponent(
   '<div class="track"><div class="fill" id="f"></div></div>' +
   '</div>' +
   '<script>' +
-  'var msgs=[[0,"Đang khởi động..."],[6,"Đang tải máy chủ nội bộ..."],[14,"Đang chuẩn bị giao diện..."],[24,"Sắp xong rồi..."],[38,"Vui lòng chờ thêm một chút..."]];' +
+  'var msgs=[[0,"Đang khởi động..."],[3,"Đang tải máy chủ nội bộ..."],[8,"Đang chuẩn bị giao diện..."],[18,"Lần đầu chạy thường mất 20-40 giây..."],[35,"Vui lòng chờ thêm một chút..."]];' +
   'var t0=Date.now();' +
   'function tick(){' +
   '  var s=(Date.now()-t0)/1000;' +
-  '  var p=92*(1-Math.exp(-s/18));' +
+  '  var p=94*(1-Math.exp(-s/12));' +
   '  document.getElementById("f").style.width=p+"%";' +
   '  var m=msgs[0][1];for(var i=0;i<msgs.length;i++){if(s>=msgs[i][0])m=msgs[i][1];}' +
   '  document.getElementById("s").textContent=m;' +
@@ -82,18 +82,24 @@ function getPythonBin() {
   return process.platform === 'win32' ? 'python' : 'python3'
 }
 
-async function waitForServer(url, attempts = 60) {
-  for (let index = 0; index < attempts; index += 1) {
+async function waitForServer(url, isReady) {
+  const ATTEMPTS = 240   // up to ~60s
+  const INTERVAL = 250
+  for (let index = 0; index < ATTEMPTS; index += 1) {
     const ok = await new Promise((resolve) => {
       const req = http.get(url, (res) => {
         res.resume()
         resolve(Boolean(res.statusCode && res.statusCode < 500))
       })
       req.on('error', () => resolve(false))
+      req.setTimeout(2000, () => { req.destroy(); resolve(false) })
     })
 
     if (ok) return
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    if (isReady && isReady() && index > 4) {
+      // server claims ready but TCP isn't accepting yet — keep polling briefly
+    }
+    await new Promise((resolve) => setTimeout(resolve, INTERVAL))
   }
 
   throw new Error('Next server did not start in time')
@@ -115,14 +121,23 @@ async function startServer() {
       TIMETABLE_PYTHON_BIN: getPythonBin(),
       TIMETABLE_PYTHON_RUNNER_DIR: path.join(process.resourcesPath, 'python'),
     },
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
+
+  let ready = false
+  const handleOutput = (buf) => {
+    const text = buf.toString()
+    process.stdout.write(text)
+    if (!ready && /ready|listening|started server/i.test(text)) ready = true
+  }
+  serverProcess.stdout?.on('data', handleOutput)
+  serverProcess.stderr?.on('data', (buf) => process.stderr.write(buf))
 
   serverProcess.on('exit', () => {
     serverProcess = null
   })
 
-  await waitForServer(`http://127.0.0.1:${port}`)
+  await waitForServer(`http://127.0.0.1:${port}`, () => ready)
   return `http://127.0.0.1:${port}`
 }
 
