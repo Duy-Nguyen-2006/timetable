@@ -78,9 +78,54 @@ export type ModelRequestPreview = {
   response_format?: Record<string, unknown>
 }
 
+export type ConstraintConfirmationItem = {
+  id: string
+  original: string
+  interpreted: string
+  accepted: boolean
+}
+
+export type GenerateTimetableRequest = {
+  apiKey?: string
+  days: Array<{ id: string; label: string }>
+  sessions: Array<{ id: string; label: string }>
+  periodCounts: Record<string, number>
+  deletedPeriods: Record<string, boolean>
+  assignments: Array<{
+    teacher: string
+    subject: string
+    className: string
+    weeklyPeriods: number | string
+  }>
+  constraints: Array<{ type: 'required' | 'preferred'; text: string }>
+  constraintConfirmations?: ConstraintConfirmationItem[]
+  features?: {
+    useIRPipeline?: boolean
+    shadowMode?: boolean
+  }
+}
+
+export type AgentEvent =
+  | { type: 'status'; message: string; iteration: number; maxIterations: number }
+  | { type: 'code_fix'; attempt: number; error: string }
+  | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
+  | { type: 'result'; data: TimetableSolveResult }
+  | { type: 'error'; message: string }
+
 // ---------------------------------------------------------------------------
 // Updated solve result type
 // ---------------------------------------------------------------------------
+
+export type PipelineTelemetry = {
+  totalDurationMs: number
+  compileAttempts: number
+  repairAttempts: number
+  solverAttempts: number
+  llmCallCount: number
+  tokenEstimateCharsIn: number
+  tokenEstimateCharsOut: number
+  precheckRejected: boolean
+}
 
 export type TimetableSolveResult = {
   status: 'solved' | 'infeasible' | 'error'
@@ -96,4 +141,5 @@ export type TimetableSolveResult = {
   overallAssessment: string | null
   solverStats: SolverStats | null
   modelRequestPreview: ModelRequestPreview | null
+  telemetry?: PipelineTelemetry
 }

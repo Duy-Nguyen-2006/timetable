@@ -1,39 +1,22 @@
-export const SYSTEM_PROMPT = `Bạn là AI xếp thời khóa biểu trường học Việt Nam.
+export const SYSTEM_PROMPT = `Bạn là AI hỗ trợ xếp thời khóa biểu Việt Nam.
 
-[INPUT] JSON qua stdin:
-- slots: [{id, dayId, dayLabel, sessionId, sessionLabel, period}]
-- assignments: [{id, teacherId, teacherLabel, classId, classLabel, subjectId, subjectLabel, weeklyPeriods}]
-- hardConstraints: [{id, text}]
-- softConstraints: [{id, text, weight}]
+[INPUT]
+- slots, assignments, hardConstraints, softConstraints (JSON).
 
-[QUY ƯỚC NGÀY VIỆT NAM — RẤT QUAN TRỌNG]:
-Trong tiếng Việt, ngày trong tuần được đánh số:
-- Thứ 2 (Thứ Hai) = dayId "monday"
-- Thứ 3 (Thứ Ba) = dayId "tuesday"
-- Thứ 4 (Thứ Tư) = dayId "wednesday"
-- Thứ 5 (Thứ Năm) = dayId "thursday"
-- Thứ 6 (Thứ Sáu) = dayId "friday"
-- Thứ 7 (Thứ Bảy) = dayId "saturday"
-- Chủ nhật = dayId "sunday"
-Khi constraint nói "thứ 2" nghĩa là MONDAY, "thứ 3" nghĩa là TUESDAY, v.v.
-Luôn dùng dayLabel trong slots để map chính xác.
+[MANDATORY RULES]
+1) Mỗi assignment phải có đúng weeklyPeriods slot.
+2) Giáo viên không trùng giờ theo slotId.
+3) Lớp không trùng giờ theo slotId.
+4) Mapping ngày bắt buộc chính xác:
+   - thứ 2->monday, thứ 3->tuesday, thứ 4->wednesday, thứ 5->thursday, thứ 6->friday, thứ 7->saturday, chủ nhật->sunday.
+5) Hard constraints dùng assumptions/IIS khi infeasible.
+6) Soft constraints dùng indicator + weight trong objective maximize.
 
-[BASE CONSTRAINTS — luôn áp dụng]:
-1. Mỗi assignment có ĐÚNG weeklyPeriods slot
-2. Giáo viên không trùng giờ (cùng slotId)
-3. Lớp không trùng giờ (cùng slotId)
-
-[HARD CONSTRAINTS]: BoolVar reify + assumptions. Infeasible → IIS qua SufficientAssumptionsForInfeasibility. Trả iisConstraintIds gồm các id của hard constraint gây infeasible.
-[SOFT CONSTRAINTS]: indicator BoolVar + weight nhân vào objective. Maximize tổng.
-
-[OUTPUT] 1 dòng JSON duy nhất ra stdout:
-{"status":"ok","cells":[{"assignmentId":"...","slotId":"..."}],"objective":42,"iisConstraintIds":[],"errorMessage":null}
-
-Status values: "ok" | "infeasible" | "error"
-
-[VERIFY]: Kiểm tra lại TẤT CẢ constraints trước khi output. Đặc biệt kiểm tra mapping ngày (thứ 2=monday, thứ 3=tuesday...).
-[QUAN TRỌNG]: Chỉ dùng ortools, json, sys. KHÔNG in gì ngoài JSON duy nhất ra stdout.
-[BẮT BUỘC]: Output của bạn PHẢI là code Python hoàn chỉnh sử dụng ortools CP-SAT solver. KHÔNG BAO GIỜ output JSON trực tiếp. KHÔNG BAO GIỜ tự giải bằng tay. Luôn viết code Python để solver tìm lời giải.`
+[OUTPUT]
+- BẮT BUỘC trả Python code hoàn chỉnh dùng OR-Tools CP-SAT.
+- Không output JSON trực tiếp.
+- Chỉ dùng ortools, json, sys.
+- Không in gì ngoài JSON kết quả cuối cùng ra stdout.`
 
 export type InputPayload = {
   slots: Array<{
@@ -115,51 +98,19 @@ export function buildInputPayload(input: {
   return { slots, assignments: builtAssignments, hardConstraints, softConstraints }
 }
 
-export const CONSTRAINT_COMPILER_PROMPT = `Bạn là AI biên dịch ràng buộc thời khóa biểu thành Python code snippets cho OR-Tools CP-SAT.
+export const CONSTRAINT_COMPILER_PROMPT = `Bạn biên dịch ràng buộc sang Python snippets cho OR-Tools CP-SAT.
 
-[NAMESPACE SẴN CÓ TRONG SNIPPET]:
-- model: CpModel (với hard constraints, model là _ProxyModel — tự động apply OnlyEnforceIf)
-- x: dict[(assignmentId, slotId)] = BoolVar
-- assignments: list[dict] với keys: assignmentId, teacherLabel, classLabel, subjectLabel, weeklyPeriods
-- slots: list[dict] với keys: slotId, dayId, dayLabel, sessionId, period (1-indexed)
-- objective_terms: list (soft constraints thêm vào đây)
+[NAMESPACE]
+- model, x, assignments, slots, objective_terms đã có sẵn.
 
-[MAPPING NGÀY — BẮT BUỘC CHÍNH XÁC]:
-- "thứ 2" / "Thứ Hai" → dayId "monday"
-- "thứ 3" / "Thứ Ba" → dayId "tuesday"
-- "thứ 4" / "Thứ Tư" → dayId "wednesday"
-- "thứ 5" / "Thứ Năm" → dayId "thursday"
-- "thứ 6" / "Thứ Sáu" → dayId "friday"
-- "tiết N" → period == N (period là 1-indexed)
-
-[QUY TẮC VIẾT SNIPPET]:
-1. KHÔNG import, KHÔNG print, KHÔNG sys, KHÔNG sửa x/assignments/slots
-2. KHÔNG dùng f-string (bị cấm). Dùng ghép chuỗi: 'prefix_' + a['assignmentId'] thay vì f'prefix_{a["assignmentId"]}'
-3. Hard constraint: model.Add(x[(aId, sId)] == 0) để cấm, hoặc model.Add(sum(...) <= N)
-4. Soft constraint: objective_terms.append(x[(aId, sId)] * weight) cho mỗi slot ưu tiên
-5. Nếu cần BoolVar mới: model.NewBoolVar('name_' + a['assignmentId'] + '_' + s['slotId'])
-6. Chỉ dùng model.Add, model.AddBoolOr, model.AddBoolAnd, model.NewBoolVar, model.AddAtMostOne
-
-[VÍ DỤ HARD — "Sơn không dạy thứ 2"]:
-for a in assignments:
-    if a['teacherLabel'] == 'Sơn':
-        for s in slots:
-            if s['dayId'] == 'monday':
-                model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
-
-[VÍ DỤ HARD — "Hương không dạy tiết 1"]:
-for a in assignments:
-    if a['teacherLabel'] == 'Hương':
-        for s in slots:
-            if s['period'] == 1:
-                model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
-
-[VÍ DỤ HARD — "9A không học thứ 7"]:
-for a in assignments:
-    if a['classLabel'] == '9A':
-        for s in slots:
-            if s['dayId'] == 'saturday':
-                model.Add(x[(a['assignmentId'], s['slotId'])] == 0)
+[MANDATORY RULES]
+1) Không import/print/sys và không sửa x/assignments/slots.
+2) Không dùng f-string.
+3) Hard: model.Add(...).
+4) Soft: objective_terms.append(x[...] * weight).
+5) Chỉ dùng API an toàn: model.Add, model.AddBoolOr, model.AddBoolAnd, model.NewBoolVar, model.AddAtMostOne.
+6) Mapping ngày bắt buộc: thứ 2->monday ... thứ 7->saturday.
+7) Viết checker_code song song; dòng cuối: result = (satisfied, reason).
 
 [VÍ DỤ SOFT — "Toán nên xếp tiết 1-2" (weight 3)]:
 for a in assignments:
@@ -252,6 +203,29 @@ result = (satisfied, reason)
   }
 ]`
 
+type CompilerMessageOptions = {
+  focusTexts?: string[]
+  includeAllContext?: boolean
+}
+
+function normalizeText(input: string): string {
+  return input
+    .toLocaleLowerCase('vi-VN')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+}
+
+function selectRelevantValues(values: string[], haystack: string): string[] {
+  const selected = values.filter((value) => {
+    const raw = value.trim()
+    if (!raw) return false
+    const lowerRaw = raw.toLocaleLowerCase('vi-VN')
+    const normalizedRaw = normalizeText(raw)
+    return haystack.includes(lowerRaw) || haystack.includes(normalizedRaw)
+  })
+  return selected.length > 0 ? selected : values.slice(0, 12)
+}
+
 export const VIOLATION_ENRICH_PROMPT = `Bạn là AI phân tích xung đột ràng buộc thời khóa biểu.
 
 [INPUT] JSON với:
@@ -275,7 +249,7 @@ QUY TẮC:
 - Nếu không xác định được ràng buộc gây xung đột, dùng conflictsWith="Ràng buộc nền (số slot/khả năng phân công)" và suggestion phù hợp.
 - Trả ĐÚNG một entry cho mỗi violation, theo thứ tự input.`
 
-export function buildCompilerUserMessage(payload: InputPayload): string {
+export function buildCompilerUserMessage(payload: InputPayload, options?: CompilerMessageOptions): string {
   const teachers = [...new Set(payload.assignments.map(a => a.teacherLabel))]
   const subjects = [...new Set(payload.assignments.map(a => a.subjectLabel))]
   const classes = [...new Set(payload.assignments.map(a => a.classLabel))]
@@ -283,11 +257,70 @@ export function buildCompilerUserMessage(payload: InputPayload): string {
   const sessions = [...new Map(payload.slots.map(s => [s.sessionId, { sessionId: s.sessionId, sessionLabel: s.sessionLabel }])).values()]
   const periods = [...new Set(payload.slots.map(s => s.period))].sort((a, b) => a - b)
 
+  if (options?.includeAllContext !== false || !options?.focusTexts || options.focusTexts.length === 0) {
+    return JSON.stringify({
+      hardConstraints: payload.hardConstraints,
+      softConstraints: payload.softConstraints,
+      context: { teachers, subjects, classes, days, sessions, periods },
+    })
+  }
+
+  const focusSource = options.focusTexts.join('\n')
+  const haystack = `${focusSource.toLocaleLowerCase('vi-VN')}\n${normalizeText(focusSource)}`
+
+  const focusedTeachers = selectRelevantValues(teachers, haystack)
+  const focusedSubjects = selectRelevantValues(subjects, haystack)
+  const focusedClasses = selectRelevantValues(classes, haystack)
+  const focusedDays = days.filter((d) => {
+    const dayText = `${d.dayId} ${d.dayLabel}`
+    const lower = dayText.toLocaleLowerCase('vi-VN')
+    const normalized = normalizeText(dayText)
+    return haystack.includes(lower) || haystack.includes(normalized)
+  })
+  const focusedSessions = sessions.filter((s) => {
+    const sessionText = `${s.sessionId} ${s.sessionLabel}`
+    const lower = sessionText.toLocaleLowerCase('vi-VN')
+    const normalized = normalizeText(sessionText)
+    return haystack.includes(lower) || haystack.includes(normalized)
+  })
+
   return JSON.stringify({
     hardConstraints: payload.hardConstraints,
     softConstraints: payload.softConstraints,
-    context: { teachers, subjects, classes, days, sessions, periods },
+    context: {
+      teachers: focusedTeachers,
+      subjects: focusedSubjects,
+      classes: focusedClasses,
+      days: focusedDays.length > 0 ? focusedDays : days,
+      sessions: focusedSessions.length > 0 ? focusedSessions : sessions,
+      periods,
+    },
   })
+}
+
+export function estimateSolverConfig(payload: InputPayload): { maxTimeSeconds: number; numWorkers: number; randomSeed: number } {
+  const slotCount = payload.slots.length
+  const assignmentCount = payload.assignments.length
+  const complexity = slotCount * assignmentCount
+
+  // Heuristic tuned by dataset benchmark groups:
+  // - small (<= 700): fewer workers to reduce process/search overhead
+  // - medium (<= 2500): balanced
+  // - large: more workers
+  let numWorkers = 4
+  if (complexity <= 700) numWorkers = 2
+  else if (complexity <= 2500) numWorkers = 3
+
+  let maxTimeSeconds = 15
+  if (complexity > 1500) maxTimeSeconds = 25
+  if (complexity > 3500) maxTimeSeconds = 40
+  if (complexity > 7000) maxTimeSeconds = 55
+
+  return {
+    maxTimeSeconds,
+    numWorkers,
+    randomSeed: 1,
+  }
 }
 
 export function toSolverProblem(
@@ -320,6 +353,6 @@ export function toSolverProblem(
       original: c.original ?? '',
       checkerCode: c.checkerCode ?? '',
     })),
-    solverConfig: { maxTimeSeconds: 30, numWorkers: 8, randomSeed: 1 },
+    solverConfig: estimateSolverConfig(payload),
   }
 }

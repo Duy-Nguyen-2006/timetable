@@ -1,0 +1,172 @@
+{
+  "benchmark": [
+    {
+      "dataset": 1,
+      "complexity": 320,
+      "legacy": {
+        "ok": true,
+        "elapsedMs": 356.0149650002131,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.019208717,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 1120
+        }
+      },
+      "adaptive": {
+        "ok": true,
+        "elapsedMs": 355.31343200091214,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.018752670000000003,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 1006
+        }
+      }
+    },
+    {
+      "dataset": 2,
+      "complexity": 640,
+      "legacy": {
+        "ok": true,
+        "elapsedMs": 371.1596360008116,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.028271514,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 1678
+        }
+      },
+      "adaptive": {
+        "ok": true,
+        "elapsedMs": 379.18598699980066,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.028462622000000003,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 2148
+        }
+      }
+    },
+    {
+      "dataset": 3,
+      "complexity": 1280,
+      "legacy": {
+        "ok": true,
+        "elapsedMs": 404.1725890001544,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.040522045,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 2218
+        }
+      },
+      "adaptive": {
+        "ok": true,
+        "elapsedMs": 373.74295300105587,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.040344131000000005,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 2390
+        }
+      }
+    },
+    {
+      "dataset": 4,
+      "complexity": 640,
+      "legacy": {
+        "ok": true,
+        "elapsedMs": 379.86594200083346,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.028148813,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 1112
+        }
+      },
+      "adaptive": {
+        "ok": true,
+        "elapsedMs": 377.63937400086434,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.026286407,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 1204
+        }
+      }
+    },
+    {
+      "dataset": 5,
+      "complexity": 315,
+      "legacy": {
+        "ok": true,
+        "elapsedMs": 360.37536900039413,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.018204191,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 515
+        }
+      },
+      "adaptive": {
+        "ok": true,
+        "elapsedMs": 373.9951360003033,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.015763198000000003,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 3,
+          "numBranches": 1228
+        }
+      }
+    },
+    {
+      "dataset": 6,
+      "complexity": 5810,
+      "legacy": {
+        "ok": true,
+        "elapsedMs": 565.4347769996093,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.20462021900000002,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 1828
+        }
+      },
+      "adaptive": {
+        "ok": true,
+        "elapsedMs": 557.588820998717,
+        "status": "solved",
+        "solverStats": {
+          "wallTimeSeconds": 0.196776844,
+          "objectiveValue": null,
+          "bestBound": null,
+          "numConflicts": 0,
+          "numBranches": 2598
+        }
+      }
+    }
+  ]
+}

@@ -28,9 +28,9 @@ import {
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
-import { generateTimetableWithAI, type AgentEvent } from './ai/client'
+import { generateTimetableWithAI } from './ai/client'
 import { useApiKeyStore } from './ai/api-key-store'
-import type { TimetableSolveResult } from './ai/types'
+import type { AgentEvent, TimetableSolveResult } from './ai/types'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -699,6 +699,22 @@ export default function App({ onBackToLanding }) {
       return
     }
 
+    const constraintConfirmations = constraintList.map((c) => ({
+      id: c.id,
+      original: c.text,
+      interpreted: c.text,
+      accepted: true,
+    }))
+
+    const needConfirm = constraintConfirmations.length > 0
+    if (needConfirm) {
+      const ok = window.confirm('Vui lòng xác nhận: hệ thống đang hiểu ràng buộc đúng như bạn đã nhập. Nhấn OK để tiếp tục xếp lịch.')
+      if (!ok) {
+        setAiError('Bạn đã hủy để chỉnh lại ràng buộc trước khi xếp lịch.')
+        return
+      }
+    }
+
     setAiLoading(true)
     setAiError(null)
     setAiResult(null)
@@ -722,6 +738,11 @@ export default function App({ onBackToLanding }) {
         deletedPeriods,
         assignments: assignmentList,
         constraints: constraintList,
+        constraintConfirmations,
+        features: {
+          useIRPipeline: true,
+          shadowMode: true,
+        },
       }, apiKey ?? undefined, (event: AgentEvent) => {
         switch (event.type) {
           case 'status':

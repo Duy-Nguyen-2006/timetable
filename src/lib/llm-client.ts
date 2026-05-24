@@ -1,23 +1,45 @@
 const API_BASE = 'https://api.lowprizo.com'
 const DEFAULT_MODEL = 'devstral-latest'
+const MODEL_CACHE_TTL_MS = 10 * 60 * 1000
+
+type ModelCacheEntry = {
+  model: string
+  expiresAt: number
+}
+
+const modelCache = new Map<string, ModelCacheEntry>()
 
 export async function detectModel(apiKey: string): Promise<string> {
+  const now = Date.now()
+  const cached = modelCache.get(apiKey)
+  if (cached && cached.expiresAt > now) return cached.model
+
+  let resolvedModel = DEFAULT_MODEL
+
   try {
     const res = await fetch(`${API_BASE}/v1/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(10_000),
     })
-    if (!res.ok) return DEFAULT_MODEL
-    const data = await res.json()
-    const models: unknown[] = data?.data ?? data?.models ?? []
-    if (Array.isArray(models) && models.length > 0) {
-      const first = models[0] as Record<string, unknown>
-      return (typeof first?.id === 'string' ? first.id : null) ?? DEFAULT_MODEL
+
+    if (res.ok) {
+      const data = await res.json()
+      const models: unknown[] = data?.data ?? data?.models ?? []
+      if (Array.isArray(models) && models.length > 0) {
+        const first = models[0] as Record<string, unknown>
+        resolvedModel = (typeof first?.id === 'string' ? first.id : null) ?? DEFAULT_MODEL
+      }
     }
   } catch {
     // fall through to default
   }
-  return DEFAULT_MODEL
+
+  modelCache.set(apiKey, {
+    model: resolvedModel,
+    expiresAt: now + MODEL_CACHE_TTL_MS,
+  })
+
+  return resolvedModel
 }
 
 export async function chatCompletion(

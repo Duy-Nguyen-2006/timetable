@@ -1,15 +1,8 @@
-import type { TimetableSolveResult, ConstraintViolation } from './types'
+import type { TimetableSolveResult, AgentEvent, GenerateTimetableRequest } from './types'
 
 // ---------------------------------------------------------------------------
 // Agent event types (mirrors server-side AgentEvent)
 // ---------------------------------------------------------------------------
-
-export type AgentEvent =
-  | { type: 'status'; message: string; iteration: number; maxIterations: number }
-  | { type: 'code_fix'; attempt: number; error: string }
-  | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
-  | { type: 'result'; data: TimetableSolveResult }
-  | { type: 'error'; message: string }
 
 export type AgentProgressCallback = (event: AgentEvent) => void
 
@@ -18,7 +11,7 @@ export type AgentProgressCallback = (event: AgentEvent) => void
 // ---------------------------------------------------------------------------
 
 export async function generateTimetableWithAI(
-  payload: any,
+  payload: GenerateTimetableRequest,
   apiKey?: string,
   onProgress?: AgentProgressCallback,
 ): Promise<TimetableSolveResult> {
