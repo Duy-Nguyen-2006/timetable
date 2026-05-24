@@ -15,6 +15,7 @@ import {
   buildSolverVerifyUserMessage,
 } from '@/lib/timetable-agent-prompts'
 import { persistGeneratedSolverArtifact } from '@/lib/generated-solver-artifacts'
+import { runDeterministicChecks } from '@/lib/deterministic-checker'
 import { chatCompletion } from '@/lib/llm-client'
 import { preprocessInputPayload } from '@/lib/preprocess'
 import { runSolverDirect } from '@/lib/sandbox'
@@ -64,6 +65,34 @@ function toArtifactSummary(artifact: GeneratedSolverArtifact) {
   }
 }
 
+function extractJsonObject(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  const candidate = fenced?.[1]?.trim() ?? trimmed
+  if (candidate.startsWith('{') && candidate.endsWith('}')) return candidate
+
+  const firstBrace = candidate.indexOf('{')
+  const lastBrace = candidate.lastIndexOf('}')
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return candidate.slice(firstBrace, lastBrace + 1)
+  }
+
+  return null
+}
+
+function createBaseFallbackSolverCode(_baseSolverCode: string) {
+  // Delegate to the canonical template_solver so common Vietnamese constraint
+  // patterns still apply even when the LLM-generated artifact is invalid.
+  return [
+    'from timetable_solver.template_solver import solve_timetable',
+    '',
+    '__all__ = ["solve_timetable"]',
+    '',
+  ].join('\n')
+}
+
 function normalizeVerifierAssessment(raw: string): VerifierAssessment {
   const fallback: VerifierAssessment = {
     verdict: 'retryable',
@@ -75,7 +104,9 @@ function normalizeVerifierAssessment(raw: string): VerifierAssessment {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<VerifierAssessment>
+    const jsonText = extractJsonObject(raw)
+    if (!jsonText) return fallback
+    const parsed = JSON.parse(jsonText) as Partial<VerifierAssessment>
     if (!parsed || typeof parsed !== 'object') return fallback
     return {
       verdict: parsed.verdict === 'solved' || parsed.verdict === 'infeasible' ? parsed.verdict : 'retryable',
@@ -92,14 +123,16 @@ function normalizeVerifierAssessment(raw: string): VerifierAssessment {
 
 function normalizeAuthorResponse(raw: string, baseSolverCode: string): SolverAuthorResponse {
   const fallback: SolverAuthorResponse = {
-    solverCode: baseSolverCode,
+    solverCode: createBaseFallbackSolverCode(baseSolverCode),
     entrypoint: 'solve_timetable',
     summary: 'Fallback to base solver template due to invalid author response.',
     assumptions: ['Agent 1 did not return valid JSON'],
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<SolverAuthorResponse>
+    const jsonText = extractJsonObject(raw)
+    if (!jsonText) return fallback
+    const parsed = JSON.parse(jsonText) as Partial<SolverAuthorResponse>
     if (!parsed || typeof parsed !== 'object' || typeof parsed.solverCode !== 'string' || !parsed.solverCode.trim()) {
       return fallback
     }
@@ -112,6 +145,16 @@ function normalizeAuthorResponse(raw: string, baseSolverCode: string): SolverAut
   } catch {
     return fallback
   }
+}
+
+function groupBy<T>(items: T[], key: (item: T) => string, value: (item: T) => string): Record<string, string[]> {
+  const map: Record<string, string[]> = {}
+  for (const item of items) {
+    const k = key(item)
+    if (!map[k]) map[k] = []
+    map[k].push(value(item))
+  }
+  return map
 }
 
 function toSolverProblem(payload: InputPayload) {
@@ -134,10 +177,24 @@ function toSolverProblem(payload: InputPayload) {
       subjectLabel: assignment.subjectLabel,
       weeklyPeriods: assignment.weeklyPeriods,
     })),
+    hardConstraints: payload.hardConstraints,
+    softConstraints: payload.softConstraints,
     solverConfig: {
       maxTimeSeconds: payload.slots.length * payload.assignments.length > 1500 ? 25 : 15,
       numWorkers: payload.slots.length * payload.assignments.length > 2500 ? 3 : 2,
       randomSeed: 1,
+    },
+    // Pre-computed lookup maps so generated Python code doesn't need to parse labels.
+    // Keys are human-readable labels (e.g. "Sơn", "monday", "6A").
+    meta: {
+      teacherToAsgIds: groupBy(payload.assignments, (a) => a.teacherLabel, (a) => a.id),
+      classToAsgIds: groupBy(payload.assignments, (a) => a.classLabel, (a) => a.id),
+      subjectToAsgIds: groupBy(payload.assignments, (a) => a.subjectLabel, (a) => a.id),
+      slotsByDayId: groupBy(payload.slots, (s) => s.dayId, (s) => s.id),
+      slotsBySessionId: groupBy(payload.slots, (s) => s.sessionId, (s) => s.id),
+      slotsByPeriod: groupBy(payload.slots, (s) => String(s.period), (s) => s.id),
+      dayLabelToId: Object.fromEntries(payload.slots.map((s) => [s.dayLabel, s.dayId])),
+      sessionLabelToId: Object.fromEntries(payload.slots.map((s) => [s.sessionLabel, s.sessionId])),
     },
   }
 }
@@ -153,6 +210,7 @@ async function generateSolverArtifact(input: {
   attempt: number
   maxAttempts: number
   counters: RuntimeCounters
+  requestId?: string
 }): Promise<GeneratedSolverArtifact> {
   const userMessage = buildSolverAuthorUserMessage({
     payload: input.payload,
@@ -181,7 +239,7 @@ async function generateSolverArtifact(input: {
     entrypoint: normalized.entrypoint,
     summary: normalized.summary,
     assumptions: normalized.assumptions,
-  })
+  }, input.requestId)
 }
 
 async function verifySolverOutput(input: {
@@ -219,7 +277,12 @@ function createResult(params: {
   runOutput: SolverExecutionOutput | null
   verification: VerifierAssessment | null
   telemetry: PipelineTelemetry
+  payload?: InputPayload
 }): TimetableSolveResult {
+  const iisIds = params.runOutput?.iisConstraintIds ?? []
+  const conflictingConstraints = iisIds.length > 0 && params.payload
+    ? params.payload.hardConstraints.filter((c) => iisIds.includes(c.id))
+    : []
   return {
     status: params.status,
     message: params.message,
@@ -229,7 +292,8 @@ function createResult(params: {
     unparsedConstraints: [],
     executionErrors: params.runOutput?.executionErrors ?? [],
     validationErrors: params.runOutput?.validationErrors ?? [],
-    iisConstraintIds: params.runOutput?.iisConstraintIds ?? [],
+    iisConstraintIds: iisIds,
+    conflictingConstraints,
     violations: params.runOutput?.violations ?? [],
     overallAssessment: params.verification?.rationale ?? null,
     solverStats: params.runOutput?.solverStats ?? null,
@@ -243,8 +307,14 @@ export async function runAgenticLoop(
   apiKey: string,
   model: string,
   emit?: (event: AgentEvent) => void,
+  requestId?: string,
 ): Promise<TimetableSolveResult> {
-  const MAX_ATTEMPTS = 4
+  // Coder retries Python errors up to MAX_CODER_INNER times per Checker cycle.
+  // Checker feeds violations back to Coder up to MAX_OUTER times.
+  const MAX_OUTER = 2
+  const MAX_CODER_INNER = 3
+  const MAX_ITERATIONS = MAX_OUTER * MAX_CODER_INNER
+
   const startedAt = Date.now()
   const counters: RuntimeCounters = {
     generationAttempts: 0,
@@ -269,102 +339,242 @@ export async function runAgenticLoop(
   }
 
   const normalizedPayload = preprocess.normalizedPayload
-  const diagnostics = [...preprocess.diagnostics, ...preprocess.warnings.map((warning) => `${warning.code}: ${warning.message}`)]
+  const diagnostics = [...preprocess.diagnostics, ...preprocess.warnings.map((w) => `${w.code}: ${w.message}`)]
   const baseSolverCode = preprocess.authoringContext.baseTemplateCode
 
-  let previousArtifact: GeneratedSolverArtifact | null = null
-  let previousRun: SolverExecutionOutput | null = null
-  let previousVerification: VerifierAssessment | null = null
+  const attemptDiagnostics: string[] = []
   let bestAttempt: {
     artifact: GeneratedSolverArtifact
     runOutput: SolverExecutionOutput
     verification: VerifierAssessment
   } | null = null
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    emit?.({ type: 'status', message: attempt === 1 ? 'Agent 1 đang viết solver...' : `Agent 1 đang sửa solver... (${attempt}/${MAX_ATTEMPTS})`, iteration: attempt, maxIterations: MAX_ATTEMPTS })
+  // checkerFeedback carries Checker violations → Coder on next outer iteration
+  let checkerFeedback: VerifierAssessment | null = null
+  let globalIteration = 0
 
-    const artifact = await generateSolverArtifact({
-      payload: normalizedPayload,
-      apiKey,
-      model,
-      baseSolverCode,
-      previousArtifact,
-      previousRun,
-      previousVerification,
-      attempt,
-      maxAttempts: MAX_ATTEMPTS,
-      counters,
-    })
+  for (let outerAttempt = 1; outerAttempt <= MAX_OUTER; outerAttempt++) {
+    // ── CODER SUB-LOOP ────────────────────────────────────────────────────────
+    // Coder writes code, runs Python, self-repairs on runtime errors.
+    // Exits when Python runs clean and output schema is valid.
+    let coderSuccess: { artifact: GeneratedSolverArtifact; runOutput: SolverExecutionOutput } | null = null
+    let prevArtifact: GeneratedSolverArtifact | null = null
+    let prevRun: SolverExecutionOutput | null = null
+    let prevFeedback: VerifierAssessment | null = checkerFeedback
 
-    emit?.({ type: 'status', message: 'Đang chạy solver generated...', iteration: attempt, maxIterations: MAX_ATTEMPTS })
-    counters.solverAttempts += 1
-    const solverResult = await runSolverDirect({
-      problem: toSolverProblem(normalizedPayload),
-      solverArtifactPath: artifact.path,
-      entrypoint: artifact.entrypoint,
-    })
+    for (let coderAttempt = 1; coderAttempt <= MAX_CODER_INNER; coderAttempt++) {
+      globalIteration++
+      const label = globalIteration === 1
+        ? 'Agent 1 (Coder) đang viết solver...'
+        : `Agent 1 (Coder) đang sửa solver... (lần ${globalIteration}/${MAX_ITERATIONS})`
+      emit?.({ type: 'status', message: label, iteration: globalIteration, maxIterations: MAX_ITERATIONS })
 
-    if (!solverResult.success) {
-      previousArtifact = artifact
-      previousRun = {
-        status: 'error',
-        message: solverResult.error,
-        diagnostics: [solverResult.error],
-        cells: [],
-        iisConstraintIds: [],
-        executionErrors: [],
-        validationErrors: [],
-        violations: [],
-        solverStats: null,
-        artifactPath: artifact.path,
-        loadError: solverResult.error,
-        runtimeError: solverResult.error,
+      let artifact: GeneratedSolverArtifact
+      try {
+        artifact = await generateSolverArtifact({
+          payload: normalizedPayload,
+          apiKey,
+          model,
+          baseSolverCode,
+          previousArtifact: prevArtifact,
+          previousRun: prevRun,
+          previousVerification: prevFeedback,
+          attempt: globalIteration,
+          maxAttempts: MAX_ITERATIONS,
+          counters,
+          requestId,
+        })
+        attemptDiagnostics.push(`[${globalIteration}] Coder artifact: ${artifact.summary || artifact.entrypoint}`)
+        emit?.({ type: 'debug', message: 'Coder tạo solver artifact.', detail: artifact.summary })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        attemptDiagnostics.push(`[${globalIteration}] Coder LLM lỗi: ${msg}`)
+        prevFeedback = {
+          verdict: 'retryable', confidence: 1,
+          rationale: 'LLM call thất bại.',
+          unmetRequirements: [msg],
+          repairInstructions: ['Gọi lại với full solver code hợp lệ.'],
+          confidentlyInfeasible: false,
+        }
+        emit?.({ type: 'code_fix', attempt: globalIteration, error: msg })
+        continue
       }
-      previousVerification = {
+
+      emit?.({ type: 'status', message: 'Đang chạy solver...', iteration: globalIteration, maxIterations: MAX_ITERATIONS })
+      counters.solverAttempts++
+      const solverResult = await runSolverDirect({
+        problem: toSolverProblem(normalizedPayload),
+        solverArtifactPath: artifact.path,
+        entrypoint: artifact.entrypoint,
+      })
+
+      if (!solverResult.success) {
+        const errMsg = solverResult.error
+        attemptDiagnostics.push(`[${globalIteration}] Python lỗi: ${errMsg}`)
+        emit?.({ type: 'debug', message: 'Python runner lỗi.', detail: errMsg })
+        prevArtifact = artifact
+        prevRun = {
+          status: 'error', message: errMsg,
+          diagnostics: [errMsg], cells: [],
+          iisConstraintIds: [], executionErrors: [], validationErrors: [], violations: [],
+          solverStats: null, artifactPath: artifact.path,
+          loadError: errMsg, runtimeError: errMsg,
+        }
+        prevFeedback = {
+          verdict: 'retryable', confidence: 1,
+          rationale: 'Python runtime lỗi — sửa code.',
+          unmetRequirements: [errMsg],
+          repairInstructions: ['Sửa lỗi import/syntax/runtime trong solver code.'],
+          confidentlyInfeasible: false,
+        }
+        emit?.({ type: 'code_fix', attempt: globalIteration, error: errMsg })
+        continue
+      }
+
+      const runOutput = solverResult.data
+
+      if (!Array.isArray(runOutput.cells)) {
+        const schemaErr = 'Output thiếu trường cells array — schema không hợp lệ.'
+        attemptDiagnostics.push(`[${globalIteration}] Schema lỗi: ${schemaErr}`)
+        prevArtifact = artifact
+        prevRun = runOutput
+        prevFeedback = {
+          verdict: 'retryable', confidence: 1,
+          rationale: schemaErr,
+          unmetRequirements: [schemaErr],
+          repairInstructions: ['Trả đúng schema: {status, message, diagnostics, cells, iisConstraintIds, executionErrors, validationErrors, violations, solverStats}.'],
+          confidentlyInfeasible: false,
+        }
+        emit?.({ type: 'code_fix', attempt: globalIteration, error: schemaErr })
+        continue
+      }
+
+      attemptDiagnostics.push(`[${globalIteration}] Coder OK: status=${runOutput.status}, cells=${runOutput.cells.length}`)
+      coderSuccess = { artifact, runOutput }
+      break
+    }
+
+    if (!coderSuccess) {
+      // Fallback: run the canonical template_solver directly. Covers the case
+      // where the LLM keeps emitting buggy Python — common Vietnamese constraint
+      // patterns are still applied so the user gets a valid schedule.
+      attemptDiagnostics.push(`[${globalIteration}] Fallback: chạy template_solver mặc định.`)
+      emit?.({ type: 'status', message: 'Chạy solver mặc định (template fallback)...', iteration: globalIteration, maxIterations: MAX_ITERATIONS })
+      const fallbackCode = createBaseFallbackSolverCode(baseSolverCode)
+      const fallbackArtifact = persistGeneratedSolverArtifact({
+        solverCode: fallbackCode,
+        entrypoint: 'solve_timetable',
+        summary: 'Template fallback (canonical solver) — LLM artifact invalid.',
+        assumptions: ['Coder LLM failed; using deterministic template_solver.'],
+      }, requestId)
+      counters.solverAttempts++
+      const fallbackResult = await runSolverDirect({
+        problem: toSolverProblem(normalizedPayload),
+        solverArtifactPath: fallbackArtifact.path,
+        entrypoint: fallbackArtifact.entrypoint,
+      })
+
+      if (fallbackResult.success && Array.isArray(fallbackResult.data.cells)) {
+        attemptDiagnostics.push(`[${globalIteration}] Fallback OK: status=${fallbackResult.data.status}, cells=${fallbackResult.data.cells.length}`)
+        coderSuccess = { artifact: fallbackArtifact, runOutput: fallbackResult.data }
+      } else {
+        const errMsg = 'Coder không tạo được solver hợp lệ sau nhiều lần thử, fallback cũng lỗi.'
+        const fbErr = fallbackResult.success ? 'Fallback output schema không hợp lệ.' : fallbackResult.error
+        attemptDiagnostics.push(`[${globalIteration}] Fallback lỗi: ${fbErr}`)
+        if (bestAttempt) {
+          return createResult({
+            status: 'error', message: errMsg,
+            diagnostics: [...diagnostics, ...attemptDiagnostics, ...bestAttempt.verification.unmetRequirements],
+            artifact: bestAttempt.artifact, runOutput: bestAttempt.runOutput,
+            verification: bestAttempt.verification,
+            telemetry: buildTelemetry(startedAt, counters, false),
+            payload: normalizedPayload,
+          })
+        }
+        return createResult({
+          status: 'error', message: errMsg,
+          diagnostics: [...diagnostics, ...attemptDiagnostics],
+          artifact: null, runOutput: null, verification: null,
+          telemetry: buildTelemetry(startedAt, counters, false),
+          payload: normalizedPayload,
+        })
+      }
+    }
+
+    // ── CHECKER ───────────────────────────────────────────────────────────────
+    // Phase 4: run deterministic pre-check before calling LLM Checker.
+    const { artifact, runOutput } = coderSuccess
+    emit?.({ type: 'status', message: 'Agent 2 (Checker) đang kiểm tra kết quả...', iteration: globalIteration, maxIterations: MAX_ITERATIONS })
+
+    let verification: VerifierAssessment
+
+    const hasCells = Array.isArray(runOutput.cells) && runOutput.cells.length > 0
+    const detCheck = hasCells && runOutput.status !== 'infeasible'
+      ? runDeterministicChecks(normalizedPayload.hardConstraints, normalizedPayload.assignments, runOutput.cells)
+      : null
+
+    if (detCheck && detCheck.violations.length > 0) {
+      // Hard violations found deterministically — skip LLM, feed directly to Coder
+      const msg = `Phát hiện ${detCheck.violations.length} vi phạm ràng buộc cứng (kiểm tra tự động).`
+      attemptDiagnostics.push(`[outer ${outerAttempt}] Det-check: ${msg}`)
+      verification = {
         verdict: 'retryable',
         confidence: 1,
-        rationale: 'Runner không chạy được solver generated.',
-        unmetRequirements: [solverResult.error],
-        repairInstructions: ['Sửa lỗi import/runtime để solver generated chạy được.'],
+        rationale: msg,
+        unmetRequirements: detCheck.violations.map((v) => v.evidence),
+        repairInstructions: detCheck.violations.map((v) => v.repair),
         confidentlyInfeasible: false,
       }
-      emit?.({ type: 'code_fix', attempt, error: solverResult.error })
-      continue
+    } else if (detCheck && detCheck.allChecked && normalizedPayload.softConstraints.length === 0) {
+      // All hard constraints parsed and satisfied, no soft constraints → solved
+      const msg = 'Tất cả ràng buộc cứng đã được xác minh tự động.'
+      attemptDiagnostics.push(`[outer ${outerAttempt}] Det-check: ${msg}`)
+      verification = {
+        verdict: 'solved',
+        confidence: 1,
+        rationale: msg,
+        unmetRequirements: [],
+        repairInstructions: [],
+        confidentlyInfeasible: false,
+      }
+    } else {
+      // Some constraints unparseable or have soft constraints → call LLM Checker
+      try {
+        verification = await verifySolverOutput({
+          payload: normalizedPayload,
+          artifact,
+          runOutput,
+          apiKey,
+          model,
+          counters,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        attemptDiagnostics.push(`[outer ${outerAttempt}] Checker lỗi: ${msg}`)
+        verification = {
+          verdict: 'retryable', confidence: 1,
+          rationale: 'Checker LLM call thất bại.',
+          unmetRequirements: [msg],
+          repairInstructions: ['Chạy lại với output rõ ràng hơn.'],
+          confidentlyInfeasible: false,
+        }
+      }
     }
 
-    const runOutput = solverResult.data
-    emit?.({ type: 'status', message: 'Agent 2 đang verify output...', iteration: attempt, maxIterations: MAX_ATTEMPTS })
-    const verification = await verifySolverOutput({
-      payload: normalizedPayload,
-      artifact,
-      runOutput,
-      apiKey,
-      model,
-      counters,
-    })
-
+    attemptDiagnostics.push(`[outer ${outerAttempt}] Checker verdict=${verification.verdict}: ${verification.rationale}`)
+    emit?.({ type: 'debug', message: `status=${runOutput.status}; checker=${verification.verdict}`, detail: verification.rationale })
     emit?.({ type: 'verified', violations: runOutput.violations ?? [], allSatisfied: verification.verdict === 'solved' })
 
-    previousArtifact = artifact
-    previousRun = runOutput
-    previousVerification = verification
-
-    bestAttempt = {
-      artifact,
-      runOutput,
-      verification,
-    }
+    bestAttempt = { artifact, runOutput, verification }
 
     if (verification.verdict === 'solved') {
       return createResult({
         status: 'solved',
         message: runOutput.message || 'Đã tạo thời khóa biểu hợp lệ.',
         diagnostics: [...diagnostics, verification.rationale],
-        artifact,
-        runOutput,
-        verification,
+        artifact, runOutput, verification,
         telemetry: buildTelemetry(startedAt, counters, false),
+        payload: normalizedPayload,
       })
     }
 
@@ -373,35 +583,35 @@ export async function runAgenticLoop(
         status: 'infeasible',
         message: runOutput.message || 'Không thể tạo thời khóa biểu với các ràng buộc hiện tại.',
         diagnostics: [...diagnostics, verification.rationale, ...verification.unmetRequirements],
-        artifact,
-        runOutput,
-        verification,
+        artifact, runOutput, verification,
         telemetry: buildTelemetry(startedAt, counters, false),
+        payload: normalizedPayload,
       })
     }
 
-    emit?.({ type: 'code_fix', attempt, error: verification.repairInstructions.join('\n') || verification.rationale })
+    // Feed Checker violations → Coder on next outer iteration
+    checkerFeedback = verification
+    emit?.({ type: 'code_fix', attempt: globalIteration, error: verification.repairInstructions.join('\n') || verification.rationale })
   }
 
   if (bestAttempt) {
     return createResult({
       status: bestAttempt.verification.verdict === 'infeasible' ? 'infeasible' : 'error',
       message: bestAttempt.verification.rationale || bestAttempt.runOutput.message || 'Không thể hội tụ lời giải hợp lệ.',
-      diagnostics: [...diagnostics, ...bestAttempt.verification.unmetRequirements],
-      artifact: bestAttempt.artifact,
-      runOutput: bestAttempt.runOutput,
+      diagnostics: [...diagnostics, ...attemptDiagnostics, ...bestAttempt.verification.unmetRequirements],
+      artifact: bestAttempt.artifact, runOutput: bestAttempt.runOutput,
       verification: bestAttempt.verification,
       telemetry: buildTelemetry(startedAt, counters, false),
+      payload: normalizedPayload,
     })
   }
 
   return createResult({
     status: 'error',
     message: 'Không thể tạo thời khóa biểu sau nhiều lần thử.',
-    diagnostics,
-    artifact: null,
-    runOutput: null,
-    verification: null,
+    diagnostics: [...diagnostics, ...attemptDiagnostics],
+    artifact: null, runOutput: null, verification: null,
     telemetry: buildTelemetry(startedAt, counters, false),
+    payload: normalizedPayload,
   })
 }
