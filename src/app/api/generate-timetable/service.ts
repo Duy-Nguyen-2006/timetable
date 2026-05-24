@@ -509,11 +509,25 @@ export async function runAgenticLoop(
     let verification: VerifierAssessment
 
     const hasCells = Array.isArray(runOutput.cells) && runOutput.cells.length > 0
-    const detCheck = hasCells && runOutput.status !== 'infeasible'
+    const detCheck = hasCells && runOutput.status === 'solved'
       ? runDeterministicChecks(normalizedPayload.hardConstraints, normalizedPayload.assignments, runOutput.cells)
       : null
 
-    if (detCheck && detCheck.violations.length > 0) {
+    if (runOutput.status === 'error') {
+      const msg = runOutput.message || 'Solver trả về trạng thái lỗi.'
+      attemptDiagnostics.push(`[outer ${outerAttempt}] Solver error: ${msg}`)
+      verification = {
+        verdict: 'retryable',
+        confidence: 1,
+        rationale: msg,
+        unmetRequirements: [
+          ...((runOutput.diagnostics ?? []).length ? runOutput.diagnostics : [msg]),
+          ...(runOutput.executionErrors ?? []).map((error) => error.error),
+        ],
+        repairInstructions: ['Sửa solver để trả về status solved hoặc infeasible với schema hợp lệ.'],
+        confidentlyInfeasible: false,
+      }
+    } else if (detCheck && detCheck.violations.length > 0) {
       // Hard violations found deterministically — skip LLM, feed directly to Coder
       const msg = `Phát hiện ${detCheck.violations.length} vi phạm ràng buộc cứng (kiểm tra tự động).`
       attemptDiagnostics.push(`[outer ${outerAttempt}] Det-check: ${msg}`)
@@ -555,7 +569,17 @@ export async function runAgenticLoop(
         // no violations), don't block on LLM Checker — accept as solved.
         // Soft constraint scoring is best-effort; missing it is not fatal.
         const detCleared = detCheck !== null && detCheck.violations.length === 0
-        if (detCleared && runOutput.status !== 'infeasible') {
+        if (runOutput.status === 'infeasible') {
+          const note = runOutput.message || 'Solver xác định bài toán không có nghiệm với các ràng buộc hiện tại.'
+          verification = {
+            verdict: 'infeasible',
+            confidence: 0.75,
+            rationale: `${note} (Checker LLM không khả dụng).`,
+            unmetRequirements: runOutput.diagnostics ?? [],
+            repairInstructions: [],
+            confidentlyInfeasible: true,
+          }
+        } else if (detCleared) {
           const note = detCheck.allChecked
             ? 'Tất cả ràng buộc cứng đã xác minh tự động (Checker LLM không khả dụng).'
             : 'Không phát hiện vi phạm ràng buộc cứng (Checker LLM không khả dụng).'
