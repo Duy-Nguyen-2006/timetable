@@ -27,7 +27,7 @@ export function buildInputPayload(input: {
   periodCounts: Record<string, number>
   deletedPeriods: Record<string, boolean>
   assignments: Array<{ teacher: string; subject: string; className: string; weeklyPeriods: number | string }>
-  constraints: Array<{ type: 'required' | 'preferred'; text: string }>
+  constraints: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }>
 }): InputPayload {
   const { days, sessions, periodCounts, deletedPeriods, assignments, constraints } = input
 
@@ -72,7 +72,7 @@ export function buildInputPayload(input: {
     if (constraint.type === 'required') {
       hardConstraints.push({ id: `hc_${index + 1}`, text: constraint.text })
     } else {
-      softConstraints.push({ id: `sc_${index + 1}`, text: constraint.text, weight: 5 })
+      softConstraints.push({ id: `sc_${index + 1}`, text: constraint.text, weight: constraint.weight ?? 5 })
     }
   })
 

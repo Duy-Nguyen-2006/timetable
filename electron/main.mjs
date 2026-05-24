@@ -167,6 +167,12 @@ async function createWindow() {
   }
 }
 
+// Suppress VSync/GL errors on Linux (DRM vsync unavailable on Wayland/VMs/some drivers)
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-gpu-vsync')
+  app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor')
+}
+
 app.whenReady().then(createWindow)
 
 app.on('window-all-closed', () => {

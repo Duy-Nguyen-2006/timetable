@@ -130,7 +130,7 @@ export type GenerateTimetableRequest = {
     className: string
     weeklyPeriods: number | string
   }>
-  constraints: Array<{ type: 'required' | 'preferred'; text: string }>
+  constraints: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }>
   constraintConfirmations?: ConstraintConfirmationItem[]
 }
 
@@ -138,6 +138,7 @@ export type AgentEvent =
   | { type: 'status'; message: string; iteration: number; maxIterations: number }
   | { type: 'code_fix'; attempt: number; error: string }
   | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
+  | { type: 'debug'; message: string; detail?: string }
   | { type: 'result'; data: TimetableSolveResult }
   | { type: 'error'; message: string }
 
@@ -166,6 +167,7 @@ export type TimetableSolveResult = {
   executionErrors: ExecutionError[]
   validationErrors: ValidationError[]
   iisConstraintIds: string[]
+  conflictingConstraints: Array<{ id: string; text: string }>
   violations: ConstraintViolation[]
   overallAssessment: string | null
   solverStats: SolverStats | null

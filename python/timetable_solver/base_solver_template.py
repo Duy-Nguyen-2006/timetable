@@ -150,8 +150,22 @@ def solve_base_model(problem, extra_setup=None):
     diagnostics = []
     objective_terms = []
 
+    # Create assumption literals for each user hard constraint (enables IIS extraction).
+    # Coder should use model.Add(...).OnlyEnforceIf(lit) so these are tracked properly.
+    hard_constraints = problem.get("hardConstraints", [])
+    hard_constraint_literals = {}
+    for hc in hard_constraints:
+        lit = model.NewBoolVar(f"hc_assume_{hc['id']}")
+        hard_constraint_literals[hc["id"]] = lit
+    base["hardConstraintLiterals"] = hard_constraint_literals
+
     if extra_setup is not None:
         extra_setup(base, objective_terms, diagnostics)
+
+    # Assume all user hard constraint literals are True so solver enforces them.
+    # When INFEASIBLE, SufficientAssumptionsForInfeasibility() identifies the culprits.
+    if hard_constraint_literals:
+        model.AddAssumptions(list(hard_constraint_literals.values()))
 
     if objective_terms:
         model.Maximize(sum(objective_terms))
@@ -165,10 +179,15 @@ def solve_base_model(problem, extra_setup=None):
     has_objective = bool(objective_terms)
 
     if status == cp_model.INFEASIBLE:
+        # Extract IIS: map assumption literal indices back to user constraint IDs.
+        lit_index_to_id = {lit.Index(): hc_id for hc_id, lit in hard_constraint_literals.items()}
+        iis_lits = solver.SufficientAssumptionsForInfeasibility()
+        iis_ids = [lit_index_to_id[l] for l in iis_lits if l in lit_index_to_id]
         return build_empty_result(
             RESULT_STATUS["infeasible"],
             "Không thể xếp thời khóa biểu hợp lệ.",
             ["OR-Tools xác định bài toán không có nghiệm với các ràng buộc hiện tại."] + diagnostics,
+            iis_constraint_ids=iis_ids,
             solver_stats=build_solver_stats(solver, has_objective=has_objective),
         )
 

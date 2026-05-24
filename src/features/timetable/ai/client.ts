@@ -78,7 +78,7 @@ export async function generateTimetableWithAI(
       if (!line.startsWith('data: ')) continue
       const data = line.slice(6).trim()
 
-      if (data === '[DONE]') break
+      if (data === '[DONE]') continue
 
       try {
         const event = JSON.parse(data) as AgentEvent

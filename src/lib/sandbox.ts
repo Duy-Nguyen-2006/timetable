@@ -6,6 +6,25 @@ import { randomUUID } from 'node:crypto'
 
 const SANDBOX_TIMEOUT_MS = 120_000
 
+function getPackagedPythonSourceDir() {
+  const runnerDir = process.env.TIMETABLE_PYTHON_RUNNER_DIR
+  if (!runnerDir) return null
+  const candidate = path.resolve(runnerDir, '..', 'python-src', 'timetable_solver')
+  return existsSync(candidate) ? candidate : null
+}
+
+function resolveRunnerPath(): string {
+  const packagedRunner = getPackagedPythonSourceDir()
+  if (packagedRunner) return path.join(packagedRunner, 'runner.py')
+  return path.join(process.cwd(), 'python', 'timetable_solver', 'runner.py')
+}
+
+function resolvePythonPath() {
+  const packagedRunner = getPackagedPythonSourceDir()
+  if (packagedRunner) return path.resolve(packagedRunner, '..')
+  return path.join(process.cwd(), 'python')
+}
+
 function resolvePythonBin(): string {
   if (process.env.TIMETABLE_PYTHON_BIN) return process.env.TIMETABLE_PYTHON_BIN
   const venvCandidates = [
@@ -116,6 +135,8 @@ export type SolverProblem = {
     subjectLabel: string
     weeklyPeriods: number
   }>
+  hardConstraints: Array<{ id: string; text: string }>
+  softConstraints: Array<{ id: string; text: string; weight: number }>
   aiCompiledConstraints?: Array<{
     id: string
     code: string
@@ -144,7 +165,7 @@ export type SolverDirectOutput = import('@/features/timetable/ai/types').SolverE
 
 export function runSolverDirect(request: SolverProblem | SolverExecutionRequest): Promise<SolverDirectResult> {
   return new Promise((resolve) => {
-    const runnerPath = path.join(process.cwd(), 'python', 'timetable_solver', 'runner.py')
+    const runnerPath = resolveRunnerPath()
     if (!existsSync(runnerPath)) {
       resolve({ success: false, error: `runner.py not found at ${runnerPath}` })
       return
@@ -153,6 +174,10 @@ export function runSolverDirect(request: SolverProblem | SolverExecutionRequest)
     const pythonBin = resolvePythonBin()
     const child = spawn(pythonBin, [runnerPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONPATH: [resolvePythonPath(), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+      },
     })
 
     let stdout = ''

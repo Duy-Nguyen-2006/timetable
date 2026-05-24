@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto'
+
 import { NextResponse } from 'next/server'
 
 import type { AgentEvent, GenerateTimetableRequest } from '@/features/timetable/ai/types'
 import { db } from '@/lib/db'
+import { cleanupSolverArtifact } from '@/lib/generated-solver-artifacts'
 import { detectModel } from '@/lib/llm-client'
 import { buildInputPayload } from '@/lib/timetable-prompt'
 import { runAgenticLoop } from './service'
@@ -49,14 +52,26 @@ export async function POST(request: Request) {
 
     const model = await detectModel(apiKey)
     const payload = buildInputPayload(input)
+    const requestId = randomUUID()
+    if (payload.slots.length === 0) {
+      return NextResponse.json(
+        { error: 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.' },
+        { status: 400 },
+      )
+    }
+
     if (!acceptSSE) {
-      const result = await runAgenticLoop(payload, apiKey, model)
-      return NextResponse.json(result)
+      try {
+        const result = await runAgenticLoop(payload, apiKey, model, undefined, requestId)
+        return NextResponse.json(result)
+      } finally {
+        cleanupSolverArtifact(requestId)
+      }
     }
 
     const { stream, send, close } = createSSEStream()
 
-    runAgenticLoop(payload, apiKey, model, send)
+    runAgenticLoop(payload, apiKey, model, send, requestId)
       .then((result) => {
         send({ type: 'result', data: result })
         close()
@@ -64,6 +79,9 @@ export async function POST(request: Request) {
       .catch((err) => {
         send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
         close()
+      })
+      .finally(() => {
+        cleanupSolverArtifact(requestId)
       })
 
     return new Response(stream, {

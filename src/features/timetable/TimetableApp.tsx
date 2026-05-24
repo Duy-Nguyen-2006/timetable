@@ -56,6 +56,7 @@ import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically
 
 const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
+const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
 
 function loadStoredLowprizoApiKey() {
   if (typeof window === 'undefined') return ''
@@ -89,6 +90,7 @@ type ConstraintItem = {
   id: string
   type: keyof typeof constraintTypes
   text: string
+  weight?: number
 }
 
 type BulkAssignmentError = {
@@ -320,7 +322,7 @@ export default function App({ onBackToLanding }) {
   const [bulkAssignmentText, setBulkAssignmentText] = useState('')
   const [bulkAssignmentErrors, setBulkAssignmentErrors] = useState<BulkAssignmentError[]>([])
   const [assignmentList, setAssignmentList] = useState<AssignmentItem[]>([])
-  const [constraintDraft, setConstraintDraft] = useState<{ type: keyof typeof constraintTypes; text: string }>({ type: 'required', text: '' })
+  const [constraintDraft, setConstraintDraft] = useState<{ type: keyof typeof constraintTypes; text: string; weight: number }>({ type: 'required', text: '', weight: 5 })
   const [constraintList, setConstraintList] = useState<ConstraintItem[]>([])
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
@@ -695,6 +697,7 @@ export default function App({ onBackToLanding }) {
       id: `${now}-${i}-${text}`,
       type: constraintDraft.type,
       text,
+      weight: constraintDraft.type === 'preferred' ? constraintDraft.weight : undefined,
     }))
 
     setConstraintList((current) => [...current, ...newItems])
@@ -709,6 +712,12 @@ export default function App({ onBackToLanding }) {
     const apiKey = lowprizoApiKey.trim()
     if (!apiKey) {
       setAiError('Vui lòng nhập Lowprizo API key trước khi xếp lịch.')
+      setAiResult(null)
+      return
+    }
+
+    if (activePeriodCount <= 0) {
+      setAiError(NO_ACTIVE_PERIOD_MESSAGE)
       setAiResult(null)
       return
     }
@@ -788,8 +797,11 @@ export default function App({ onBackToLanding }) {
         }
       })
       setAiResult(result)
+      if (result.status !== 'solved') {
+        setAiError(result.message || result.overallAssessment || RESULT_NOT_FOUND_MESSAGE)
+      }
     } catch (err) {
-      setAiError(RESULT_NOT_FOUND_MESSAGE)
+      setAiError(err instanceof Error ? err.message : RESULT_NOT_FOUND_MESSAGE)
     } finally {
       setAiLoading(false)
       setAgentStatus(null)
@@ -1078,8 +1090,9 @@ export default function App({ onBackToLanding }) {
             </button>
             <button
               type="button"
-              onClick={() => setPage('details')}
-              className={navNextClass}
+              onClick={() => activePeriodCount > 0 && setPage('details')}
+              disabled={activePeriodCount <= 0}
+              className={`${navNextClass} ${navDisabledClass}`}
             >
               Tiếp tục
               <ChevronRight size={14} strokeWidth={1.5} />
@@ -2028,6 +2041,27 @@ export default function App({ onBackToLanding }) {
                           />
                       </label>
 
+                      {constraintDraft.type === 'preferred' && (
+                        <div className="mt-3 flex items-center gap-2">
+                          <span className="text-xs text-white/40">Độ ưu tiên:</span>
+                          {([['Thấp', 3], ['TB', 5], ['Cao', 8]] as const).map(([label, val]) => (
+                            <button
+                              key={val}
+                              type="button"
+                              onClick={() => setConstraintDraft((c) => ({ ...c, weight: val }))}
+                              className={`rounded px-2.5 py-1 text-xs font-medium transition ${
+                                constraintDraft.weight === val
+                                  ? 'bg-white/10 text-white'
+                                  : 'text-white/40 hover:text-white/70'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <span className="ml-1 text-xs text-white/25">{constraintDraft.weight}/10</span>
+                        </div>
+                      )}
+
                       <button
                         type="button"
                         onClick={importConstraint}
@@ -2063,6 +2097,11 @@ export default function App({ onBackToLanding }) {
                                       <Circle className={constraintType.iconClass} size={10} fill="currentColor" strokeWidth={0} />
                                       {constraintType.label}
                                     </span>
+                                    {constraint.type === 'preferred' && constraint.weight != null && (
+                                      <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/40">
+                                        w={constraint.weight}
+                                      </span>
+                                    )}
                                   </div>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                                   <p className="min-w-0 flex-1 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5 text-sm text-white/60">
@@ -2095,7 +2134,7 @@ export default function App({ onBackToLanding }) {
                     <button
                       type="button"
                       onClick={handleGenerate}
-                      disabled={aiLoading || !lowprizoApiKey.trim()}
+                      disabled={aiLoading || !lowprizoApiKey.trim() || activePeriodCount <= 0}
                       className={`${navNextClass} disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {aiLoading ? (
@@ -2377,8 +2416,13 @@ export default function App({ onBackToLanding }) {
                           Nhấn Xếp lịch để tạo bảng kết quả cuối.
                         </div>
                         ) : aiResult || aiError ? (
-                          <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] py-12 text-center text-sm font-semibold text-white">
-                            {RESULT_NOT_FOUND_MESSAGE}
+                          <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] px-4 py-12 text-center text-sm font-semibold text-white">
+                            <div>{aiError || aiResult?.message || RESULT_NOT_FOUND_MESSAGE}</div>
+                            {aiResult?.diagnostics?.length ? (
+                              <div className="mx-auto mt-3 max-w-2xl text-xs font-normal text-white/45">
+                                {aiResult.diagnostics.slice(0, 3).join(' · ')}
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
 
@@ -2561,23 +2605,18 @@ export default function App({ onBackToLanding }) {
                                   <p className="text-xs text-white/40">Các ràng buộc sau xung đột nhau, không có lịch nào thỏa mãn đồng thời</p>
                                 </div>
                               </div>
-                              {aiResult.iisConstraintIds && aiResult.iisConstraintIds.length > 0 ? (
+                              {(aiResult.conflictingConstraints ?? []).length > 0 ? (
                                 <div className="rounded-md border border-red-400/15 bg-red-400/[0.03] p-4">
                                   <p className="mb-3 text-xs text-white/50">Nguyên nhân — các ràng buộc xung đột:</p>
                                   <div className="space-y-2">
-                                    {aiResult.compiledConstraints
-                                      ?.filter((c) => aiResult.iisConstraintIds?.includes(c.id))
-                                      .map((c) => (
-                                        <div key={c.id} className="flex items-start gap-2 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5">
-                                          <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${c.priority === 'hard' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                                            {c.priority === 'hard' ? 'Cứng' : 'Mềm'}
-                                          </span>
-                                          <div>
-                                            <p className="text-sm text-white/70">"{c.original}"</p>
-                                            <p className="mt-0.5 text-xs text-white/30">{c.description}</p>
-                                          </div>
-                                        </div>
-                                      ))}
+                                    {(aiResult.conflictingConstraints ?? []).map((c) => (
+                                      <div key={c.id} className="flex items-start gap-2 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5">
+                                        <span className="mt-0.5 shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
+                                          Cứng
+                                        </span>
+                                        <p className="text-sm text-white/70">"{c.text}"</p>
+                                      </div>
+                                    ))}
                                   </div>
                                   <p className="mt-3 text-xs text-red-300/60">
                                     Hãy bỏ hoặc nới lỏng một trong các ràng buộc trên, hoặc thêm nhiều slot thời gian hơn.
