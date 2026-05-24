@@ -1,115 +1,61 @@
 # Walkthrough
 
-## Tóm gọn cuộc trò chuyện
-- User muốn hiểu luồng workflow hiện tại của tính năng generate timetable, các điểm hạn chế, và plan nâng cấp theo 4 tiêu chí: chính xác rất cao, tiết kiệm token, chạy nhanh, không nặng máy.
-- Phân tích hiện trạng cho thấy pipeline đang là: FE -> API route -> LLM compile constraints -> Python CP-SAT solver -> iterative repair.
-- Điểm yếu chính: phụ thuộc LLM codegen tự do, retry tốn token, spawn Python lặp lại gây trễ, cấu hình solver chưa adaptive, khó bảo chứng semantic tuyệt đối cho mọi câu NL.
-- User nhấn mạnh yêu cầu vẫn phải cực kỳ flexible vì có nhiều ràng buộc lạ và ràng buộc điều kiện lồng nhau.
-- Định hướng chốt: giữ flexibility bằng mô hình 2-lane + 2-model (generator/reviewer), thêm bước xác nhận nghĩa ràng buộc cho user non-tech trước khi solve.
-- Scope người dùng vẫn non-tech: chỉ nhập tiếng Việt tự nhiên, xác nhận bằng UI đơn giản, không lộ kỹ thuật nội bộ.
+## Trạng thái kiến trúc mới
+- Flow generate timetable đã chuyển khỏi mô hình compiler snippet / IR scaffold.
+- [`runAgenticLoop()`](src/app/api/generate-timetable/service.ts) hiện là orchestrator 2-agent:
+  1. preprocess input + lấy base solver template,
+  2. Agent 1 viết/sửa full generated solver artifact,
+  3. hệ thống chạy artifact bằng Python runner,
+  4. Agent 2 verify output dựa trên yêu cầu gốc,
+  5. feedback quay lại Agent 1 đến khi solved / confidently infeasible / hết lượt.
 
-## Assumptions
-- "100% accuracy" được hiểu là:
-  - 100% không trả lịch vi phạm hard constraints mà không bị phát hiện.
-  - 100% trong phạm vi biểu đạt của IR/DSL được hệ thống hỗ trợ.
-- Không cam kết 100% hiểu đúng mọi câu tiếng Việt tự do ngay lượt đầu; thay vào đó dùng vòng xác nhận nghĩa để khóa semantic trước solve.
+## Quyết định kiến trúc đã chốt
+- Giữ [`buildInputPayload()`](src/lib/timetable-prompt.ts) làm mapping UI payload sang payload chuẩn.
+- Giữ preprocess nhưng đổi vai trò: structural validation + authoring context cho solver artifact.
+- Bỏ luồng chính dùng IR / deterministic constraint compiler / checker snippet.
+- Không còn ép AI trả JSON array compiled constraints.
+- Generated solver artifact được quản lý qua [`src/lib/generated-solver-artifacts.ts`](src/lib/generated-solver-artifacts.ts).
+- Prompt Agent 1 / Agent 2 được tách sang [`src/lib/timetable-agent-prompts.ts`](src/lib/timetable-agent-prompts.ts).
+- Python runner [`python/timetable_solver/runner.py`](python/timetable_solver/runner.py) hỗ trợ dynamic-load solver artifact theo path + entrypoint.
 
-## Mục tiêu nâng cấp
-1. Giữ trải nghiệm non-tech, không bắt user viết kỹ thuật.
-2. Tăng độ đúng semantic của constraint trước khi solve.
-3. Giảm token usage/rate limit risk.
-4. Giảm latency và tải CPU/RAM.
-5. Giữ khả năng cover các ràng buộc lạ, nhiều tầng điều kiện.
+## File chính đã thay đổi
+- [`src/app/api/generate-timetable/service.ts`](src/app/api/generate-timetable/service.ts): refactor orchestration sang 2-agent generated solver loop.
+- [`src/app/api/generate-timetable/route.ts`](src/app/api/generate-timetable/route.ts): bỏ wiring `useIRPipeline` / `shadowMode` khỏi request path.
+- [`src/features/timetable/ai/types.ts`](src/features/timetable/ai/types.ts): thêm type artifact/verifier mới và bỏ feature flags IR khỏi request type.
+- [`src/features/timetable/TimetableApp.tsx`](src/features/timetable/TimetableApp.tsx): không gửi feature flags IR cũ nữa.
+- [`src/lib/timetable-prompt.ts`](src/lib/timetable-prompt.ts): chỉ giữ payload mapping và solver config helper; đã loại prompt/compiler helper cũ khỏi file.
+- [`src/lib/preprocess.ts`](src/lib/preprocess.ts): thêm `authoringContext` cho generated solver flow.
+- [`src/lib/sandbox.ts`](src/lib/sandbox.ts): hỗ trợ `SolverExecutionRequest` có `solverArtifactPath` / `entrypoint`.
+- [`src/lib/solver-worker.ts`](src/lib/solver-worker.ts): cập nhật contract theo runtime mới.
+- [`python/timetable_solver/base_solver_template.py`](python/timetable_solver/base_solver_template.py): base OR-Tools helper/template để Agent 1 dùng làm nền.
+- [`python/timetable_solver/runner.py`](python/timetable_solver/runner.py): dynamic loader cho generated solver artifact.
+- [`eslint.config.mjs`](eslint.config.mjs): ignore `release/**` để lint không quét artifact build.
 
-## Kiến trúc mục tiêu (đề xuất)
+## Các lớp cũ đã loại khỏi main flow
+- [`src/features/timetable/ai/ir.ts`](src/features/timetable/ai/ir.ts) đã bị xóa khỏi workspace.
+- [`src/lib/ir-compiler.ts`](src/lib/ir-compiler.ts) đã bị xóa khỏi workspace.
+- [`CONSTRAINT_COMPILER_PROMPT`](src/lib/timetable-prompt.ts), [`buildCompilerUserMessage()`](src/lib/timetable-prompt.ts), và [`VIOLATION_ENRICH_PROMPT`](src/lib/timetable-prompt.ts) đã bị loại khỏi [`src/lib/timetable-prompt.ts`](src/lib/timetable-prompt.ts).
 
-### A) Constraint Understanding Layer (mới)
-- Model A (Generator): chuyển NL -> IR có cấu trúc (không sinh Python trực tiếp).
-- Model B (Reviewer): review IR, phát hiện ambiguity/mâu thuẫn, đề xuất bản IR đã sửa.
-- IR Compiler (deterministic): IR -> CP-SAT constraints + checker code chuẩn.
+## Verify đã chạy
+- Targeted generated-artifact runner verification với Dataset 1: ✅ solved qua [`python/timetable_solver/runner.py`](python/timetable_solver/runner.py) và generated artifact [`python/timetable_solver/generated/generated_solver.py`](python/timetable_solver/generated/generated_solver.py).
+- [`npm run lint`](package.json): ✅ pass với 0 errors, còn 3 warnings ngoài scope chính.
+- [`npm run build`](package.json): ✅ pass.
+- [`./.venv/bin/pytest python/tests`](python/tests): ✅ 35 passed.
+- [`npm run dist:linux`](package.json): ✅ pass, tạo AppImage và deb.
 
-### B) Human Confirmation Layer (mới, cho non-tech)
-- Trang “Xác nhận ý hiểu ràng buộc” trước khi bấm xếp lịch.
-- Hiển thị 3 lớp:
-  1) Câu gốc user.
-  2) Câu diễn giải dễ hiểu.
-  3) Logic tóm tắt thân thiện (không lộ code).
-- Nút thao tác: “Đúng ý”, “Sửa lại”, “Bỏ”, “Thêm ví dụ”.
+## Release artifacts mới nhất
+- [`release/Tack-Timetable-3.0.8-x86_64.AppImage`](release/Tack-Timetable-3.0.8-x86_64.AppImage)
+- [`release/Tack-Timetable-3.0.8-amd64.deb`](release/Tack-Timetable-3.0.8-amd64.deb)
 
-### C) Solver Execution Layer (nâng cấp)
-- Chỉ nhận IR đã được xác nhận.
-- Adaptive solver config (workers/timeouts theo quy mô bài toán + phần cứng).
-- Pre-check infeasible sớm trước khi vào CP-SAT solve đầy đủ.
-- Hạn chế spawn process lặp lại; ưu tiên long-lived Python worker.
+## Cảnh báo còn lại
+- Lint còn 3 warnings không chặn:
+  - unused eslint-disable trong [`scripts/benchmark-datasets.mjs`](scripts/benchmark-datasets.mjs),
+  - anonymous default export trong legacy [`timetable/postcss.config.js`](timetable/postcss.config.js),
+  - anonymous default export trong legacy [`timetable/tailwind.config.js`](timetable/tailwind.config.js).
+- Next build vẫn cảnh báo [`scripts/post-build.js`](scripts/post-build.js) bị parse như ES module do [`package.json`](package.json) chưa khai báo `type: module`; không chặn build.
+- Electron builder vẫn dùng default icon; không chặn release.
 
-## Plan triển khai chi tiết
-
-## Phase 0 — Baseline & đo hiện trạng
-- [x] Gắn telemetry cho pipeline hiện tại tại [`POST()`](src/app/api/generate-timetable/route.ts:32), [`runAgenticLoop()`](src/app/api/generate-timetable/service.ts:153), [`runSolverDirect()`](src/lib/sandbox.ts:157).
-- [ ] Thu thập baseline: token/request, số lượt retry, P50/P95 latency, CPU peak, tỷ lệ infeasible, tỷ lệ cần user sửa constraint.
-- [ ] Verify: chạy 20-50 dataset đại diện + lưu report baseline vào [`worklog.md`](worklog.md).
-
-## Phase 1 — Giảm token + tăng tốc low-risk
-- [x] Cache model detection theo API key (TTL 5-15 phút) tại [`detectModel()`](src/lib/llm-client.ts:4).
-- [x] Rút gọn prompt/context trong [`buildCompilerUserMessage()`](src/lib/timetable-prompt.ts:142) theo “relevant entities only”.
-- [x] Sửa retry strategy trong [`compileConstraints()`](src/app/api/generate-timetable/service.ts:54) để tránh phình hội thoại.
-- [x] Sửa retry strategy trong [`recompileConstraints()`](src/app/api/generate-timetable/service.ts:87) theo patch-based repair.
-- [ ] Verify:
-  - [ ] token/request giảm >= 30% so baseline.
-  - [ ] P95 latency giảm >= 20%.
-  - [ ] [`npm run lint`](package.json:15), [`npm run build`](package.json:13), Python tests ở [`python/tests/`](python/tests/).
-
-## Phase 2 — IR + 2-model (giữ flexibility cho ràng buộc lạ)
-- [x] Thiết kế schema IR v1 (JSON schema) cho implication, nested implication, scope theo ngày/tuần, entity teacher/class/subject/period.
-- [x] Thêm Generator step (NL -> IR draft).
-- [x] Thêm Reviewer step (IR draft -> IR reviewed + warnings).
-- [x] Thêm deterministic IR compiler (IR -> solver constraints/checkers).
-- [x] Giữ fallback controlled cho case IR parse fail.
-
-## Phase 3 — Trang xác nhận nghĩa ràng buộc cho non-tech
-- [x] Thêm bước confirm cơ bản trước solve trong flow từ [`generateTimetableWithAI()`](src/features/timetable/ai/client.ts:13) qua [`handleGenerate()`](src/features/timetable/TimetableApp.tsx:694).
-- [x] Lưu payload confirmation + feature toggles vào [`GenerateTimetableRequest`](src/features/timetable/ai/types.ts:88).
-
-## Phase 4 — Tối ưu compute & độ ổn định solver
-- [x] Adaptive `numWorkers`/`maxTimeSeconds` tại [`estimateSolverConfig()`](src/lib/timetable-prompt.ts:191).
-- [x] Thêm pre-check fail-fast tại [`precheckProblem()`](src/app/api/generate-timetable/service.ts:72).
-- [x] Chuẩn bị long-lived worker interface tại [`src/lib/solver-worker.ts`](src/lib/solver-worker.ts).
-
-## Phase 5 — Hardening & rollout an toàn
-- [x] Thêm feature flag + shadow mode wiring tại [`POST()`](src/app/api/generate-timetable/route.ts:32) và [`runAgenticLoop()`](src/app/api/generate-timetable/service.ts:153).
-
-### Ghi chú verify mới nhất
-- [`npm run build`](package.json:13): ✅ pass sau các thay đổi Phase 0→5.
-- [`npm run lint`](package.json:15): ❌ fail do quét artifact build ngoài scope source (đặc biệt trong `release/**` và `.next/**`).
-- Python tests [`python/tests/`](python/tests/): chưa chạy được do thiếu `pytest` trên môi trường hiện tại (`No module named pytest`).
-- Benchmark với [`datasets.txt`](datasets.txt) đã chạy bằng [`scripts/benchmark_datasets.py`](scripts/benchmark_datasets.py), kết quả lưu ở [`benchmark_latest.json`](benchmark_latest.json) nhưng tất cả case fail do thiếu `ortools` (`ModuleNotFoundError: No module named 'ortools'`), nên chưa thể so sánh hiệu năng thực giữa build mới và baseline cũ.
-- Đã thêm telemetry response vào [`TimetableSolveResult.telemetry`](src/features/timetable/ai/types.ts:130) để phục vụ baseline thực tế.
-
-## Trạng thái implementation (đồng bộ)
-- [x] Phase 2 core items đã scaffold xong (IR schema/generator/reviewer/compiler/fallback).
-- [x] Phase 3 core items đã có confirm flow cơ bản cho non-tech và payload confirmation.
-- [x] Phase 4 core items đã có adaptive config + precheck + worker interface scaffold.
-- [x] Phase 5 core items đã có feature flag + shadow mode wiring.
-- [ ] Các hạng mục verify KPI nâng cao vẫn pending (semantic benchmark lớn, performance KPI, rollout metrics).
-
-## KPI mục tiêu cuối
-- Token/request: giảm 40-70%.
-- P95 latency: giảm 30-50%.
-- CPU peak: giảm 20-40%.
-- Hard-constraint safety: không trả kết quả vi phạm mà không bị phát hiện.
-- User non-tech satisfaction: tăng tỷ lệ “đúng ý ngay lần đầu” đáng kể.
-
-## Rủi ro & giảm thiểu
-- Rủi ro: IR quá chặt làm giảm flexibility.
-  - Giảm thiểu: giữ lane fallback + reviewer + human confirm.
-- Rủi ro: thêm bước confirm làm tăng thao tác.
-  - Giảm thiểu: chỉ bật confirm khi confidence thấp hoặc constraint phức tạp.
-- Rủi ro: migration phức tạp.
-  - Giảm thiểu: feature flag + shadow mode + rollout dần.
-
-## Gợi ý thứ tự thực thi thực tế (ít rủi ro nhất)
-1) Phase 0 -> Phase 1.
-2) Phase 3 (UI confirm tối giản) song song chuẩn bị IR.
-3) Phase 2 (IR + 2-model) cho nhóm constraint khó trước.
-4) Phase 4 tối ưu compute.
-5) Phase 5 rollout kiểm soát.
+## Kết luận
+- Main generation path đã chuyển sang kiến trúc 2-agent generated solver loop.
+- IR/compiler snippet path cũ đã bị remove/bypass khỏi main flow.
+- Verify chính, tests, build và Linux release đều pass.

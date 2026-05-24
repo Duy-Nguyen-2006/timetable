@@ -6,6 +6,9 @@ build/
 release/
 python-dist/
 # !.env.example # Removed by Orchids to allow .env files
+CLAUDE.md
+tmp_*.json
+python/timetable_solver/generated/
 *.log
 .DS_Store
 .venv/

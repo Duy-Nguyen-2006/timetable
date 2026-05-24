@@ -1,215 +1,241 @@
+import { createHash } from 'node:crypto'
+
 import type {
-  TimetableSolveResult,
-  ConstraintViolation,
   AgentEvent,
+  GeneratedSolverArtifact,
   PipelineTelemetry,
+  SolverExecutionOutput,
+  TimetableSolveResult,
+  VerifierAssessment,
 } from '@/features/timetable/ai/types'
-import { chatCompletion } from '@/lib/llm-client'
-import { runSolverDirect } from '@/lib/sandbox'
 import {
-  CONSTRAINT_COMPILER_PROMPT,
-  buildCompilerUserMessage,
-  toSolverProblem,
-  type InputPayload,
-} from '@/lib/timetable-prompt'
-import { buildIRDraftFromConstraints, reviewIRDraft } from '@/features/timetable/ai/ir'
-import { compileIRToConstraints } from '@/lib/ir-compiler'
-
-type CompiledConstraintFull = {
-  id: string
-  original: string
-  description: string
-  priority: 'hard' | 'soft'
-  weight?: number
-  code: string
-  checkerCode?: string
-}
-
-function normalizeConstraint(c: Record<string, unknown>): CompiledConstraintFull {
-  return {
-    id: String(c.id ?? ''),
-    original: String(c.original ?? ''),
-    description: String(c.description ?? ''),
-    priority: c.priority === 'soft' ? 'soft' : 'hard',
-    weight: typeof c.weight === 'number' ? c.weight : undefined,
-    code: String(c.code ?? ''),
-    checkerCode: String(c.checker_code ?? c.checkerCode ?? ''),
-  }
-}
-
-function parseCompiledConstraints(text: string): CompiledConstraintFull[] | null {
-  const tryParse = (raw: string): CompiledConstraintFull[] | null => {
-    try {
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) return parsed.map(normalizeConstraint)
-    } catch {
-      // fall through
-    }
-    return null
-  }
-
-  return tryParse(text) ?? (() => {
-    const m = text.match(/\[[\s\S]*\]/)
-    return m ? tryParse(m[0]) : null
-  })()
-}
-
-type AgentLoopOptions = {
-  useIRPipeline?: boolean
-  shadowMode?: boolean
-}
+  SOLVER_AUTHOR_SYSTEM_PROMPT,
+  SOLVER_VERIFY_SYSTEM_PROMPT,
+  buildSolverAuthorUserMessage,
+  buildSolverVerifyUserMessage,
+} from '@/lib/timetable-agent-prompts'
+import { persistGeneratedSolverArtifact } from '@/lib/generated-solver-artifacts'
+import { chatCompletion } from '@/lib/llm-client'
+import { preprocessInputPayload } from '@/lib/preprocess'
+import { runSolverDirect } from '@/lib/sandbox'
+import type { InputPayload } from '@/lib/timetable-prompt'
 
 type RuntimeCounters = {
-  compileAttempts: number
-  repairAttempts: number
+  generationAttempts: number
+  verificationAttempts: number
   solverAttempts: number
   llmCallCount: number
   charsIn: number
   charsOut: number
 }
 
+type SolverAuthorResponse = {
+  solverCode: string
+  entrypoint: string
+  summary: string
+  assumptions?: string[]
+}
+
 function estimateTokenChars(messages: Array<{ content: string }>): number {
-  return messages.reduce((sum, m) => sum + m.content.length, 0)
+  return messages.reduce((sum, message) => sum + message.content.length, 0)
 }
 
-function precheckProblem(payload: InputPayload): { ok: boolean; reason?: string } {
-  if (payload.slots.length === 0) return { ok: false, reason: 'Không có slot khả dụng.' }
-  if (payload.assignments.length === 0) return { ok: false, reason: 'Không có phân công để xếp.' }
+function buildTelemetry(startedAt: number, counters: RuntimeCounters, inputRejected: boolean): PipelineTelemetry {
+  return {
+    totalDurationMs: Date.now() - startedAt,
+    compileAttempts: counters.generationAttempts,
+    repairAttempts: counters.verificationAttempts,
+    solverAttempts: counters.solverAttempts,
+    llmCallCount: counters.llmCallCount,
+    tokenEstimateCharsIn: counters.charsIn,
+    tokenEstimateCharsOut: counters.charsOut,
+    inputRejected,
+  }
+}
 
-  // Validate per-class demand against per-class slot capacity.
-  // Each class can only occupy one teacher/subject per slot, so the right
-  // capacity baseline is slots per class (not global slots for all classes).
-  const slotsPerClass = payload.slots.length
-  const demandByClass = new Map<string, number>()
+function toArtifactSummary(artifact: GeneratedSolverArtifact) {
+  return {
+    id: artifact.sourceHash ?? createHash('sha256').update(artifact.solverCode).digest('hex'),
+    description: artifact.summary,
+    original: 'AI generated solver artifact',
+    priority: 'hard' as const,
+    code: artifact.solverCode,
+    checkerCode: '',
+  }
+}
 
-  for (const assignment of payload.assignments) {
-    const className = String(assignment.className || '').trim()
-    const periods = Number(assignment.weeklyPeriods || 0)
-    if (!className) continue
-    demandByClass.set(className, (demandByClass.get(className) ?? 0) + periods)
+function normalizeVerifierAssessment(raw: string): VerifierAssessment {
+  const fallback: VerifierAssessment = {
+    verdict: 'retryable',
+    confidence: 0,
+    rationale: 'Verifier không trả về JSON hợp lệ.',
+    unmetRequirements: ['Verifier output invalid JSON'],
+    repairInstructions: ['Trả JSON hợp lệ theo schema verifier.'],
+    confidentlyInfeasible: false,
   }
 
-  for (const [className, demand] of demandByClass.entries()) {
-    if (demand > slotsPerClass) {
-      return {
-        ok: false,
-        reason: `Lớp ${className} có tổng số tiết yêu cầu (${demand}) vượt số slot khả dụng (${slotsPerClass}).`,
-      }
+  try {
+    const parsed = JSON.parse(raw) as Partial<VerifierAssessment>
+    if (!parsed || typeof parsed !== 'object') return fallback
+    return {
+      verdict: parsed.verdict === 'solved' || parsed.verdict === 'infeasible' ? parsed.verdict : 'retryable',
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+      rationale: typeof parsed.rationale === 'string' ? parsed.rationale : fallback.rationale,
+      unmetRequirements: Array.isArray(parsed.unmetRequirements) ? parsed.unmetRequirements.map(String) : [],
+      repairInstructions: Array.isArray(parsed.repairInstructions) ? parsed.repairInstructions.map(String) : [],
+      confidentlyInfeasible: Boolean(parsed.confidentlyInfeasible),
     }
+  } catch {
+    return fallback
   }
-
-  return { ok: true }
 }
 
-async function compileConstraints(
-  payload: InputPayload,
-  apiKey: string,
-  model: string,
-  counters?: RuntimeCounters,
-): Promise<CompiledConstraintFull[]> {
-  if (payload.hardConstraints.length === 0 && payload.softConstraints.length === 0) {
-    return []
+function normalizeAuthorResponse(raw: string, baseSolverCode: string): SolverAuthorResponse {
+  const fallback: SolverAuthorResponse = {
+    solverCode: baseSolverCode,
+    entrypoint: 'solve_timetable',
+    summary: 'Fallback to base solver template due to invalid author response.',
+    assumptions: ['Agent 1 did not return valid JSON'],
   }
 
-  const baseUserMessage = buildCompilerUserMessage(payload)
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    counters && (counters.compileAttempts += 1)
-    const userInstruction = attempt === 0
-      ? baseUserMessage
-      : JSON.stringify({
-          task: 'Sửa định dạng output',
-          requirement: 'Trả JSON array thuần, không markdown, không giải thích.',
-          previousError: 'Invalid JSON array output',
-          input: JSON.parse(baseUserMessage),
-        })
-
-    const messages = [
-      { role: 'system' as const, content: CONSTRAINT_COMPILER_PROMPT },
-      { role: 'user' as const, content: userInstruction },
-    ]
-    counters && (counters.llmCallCount += 1)
-    counters && (counters.charsIn += estimateTokenChars(messages))
-    const responseText = await chatCompletion(messages, apiKey, model)
-    counters && (counters.charsOut += responseText.length)
-
-    const constraints = parseCompiledConstraints(responseText)
-    if (constraints && constraints.length > 0) return constraints
+  try {
+    const parsed = JSON.parse(raw) as Partial<SolverAuthorResponse>
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.solverCode !== 'string' || !parsed.solverCode.trim()) {
+      return fallback
+    }
+    return {
+      solverCode: parsed.solverCode,
+      entrypoint: typeof parsed.entrypoint === 'string' && parsed.entrypoint.trim() ? parsed.entrypoint : 'solve_timetable',
+      summary: typeof parsed.summary === 'string' && parsed.summary.trim() ? parsed.summary : 'Generated solver artifact',
+      assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions.map(String) : [],
+    }
+  } catch {
+    return fallback
   }
-
-  return []
 }
 
-async function recompileConstraints(
-  payload: InputPayload,
-  currentConstraints: CompiledConstraintFull[],
-  failedIds: string[],
-  errors: string,
-  apiKey: string,
-  model: string,
-  counters?: RuntimeCounters,
-): Promise<CompiledConstraintFull[]> {
-  if (failedIds.length === 0) return currentConstraints
+function toSolverProblem(payload: InputPayload) {
+  return {
+    slots: payload.slots.map((slot) => ({
+      slotId: slot.id,
+      dayId: slot.dayId,
+      dayLabel: slot.dayLabel,
+      sessionId: slot.sessionId,
+      sessionLabel: slot.sessionLabel,
+      period: slot.period,
+    })),
+    assignments: payload.assignments.map((assignment) => ({
+      assignmentId: assignment.id,
+      teacherId: assignment.teacherId,
+      teacherLabel: assignment.teacherLabel,
+      classId: assignment.classId,
+      classLabel: assignment.classLabel,
+      subjectId: assignment.subjectId,
+      subjectLabel: assignment.subjectLabel,
+      weeklyPeriods: assignment.weeklyPeriods,
+    })),
+    solverConfig: {
+      maxTimeSeconds: payload.slots.length * payload.assignments.length > 1500 ? 25 : 15,
+      numWorkers: payload.slots.length * payload.assignments.length > 2500 ? 3 : 2,
+      randomSeed: 1,
+    },
+  }
+}
 
-  const failedConstraints = currentConstraints.filter((c) => failedIds.includes(c.id))
-  const okConstraints = currentConstraints.filter((c) => !failedIds.includes(c.id))
+async function generateSolverArtifact(input: {
+  payload: InputPayload
+  apiKey: string
+  model: string
+  baseSolverCode: string
+  previousArtifact: GeneratedSolverArtifact | null
+  previousRun: SolverExecutionOutput | null
+  previousVerification: VerifierAssessment | null
+  attempt: number
+  maxAttempts: number
+  counters: RuntimeCounters
+}): Promise<GeneratedSolverArtifact> {
+  const userMessage = buildSolverAuthorUserMessage({
+    payload: input.payload,
+    baseSolverCode: input.baseSolverCode,
+    previousArtifact: input.previousArtifact,
+    previousRun: input.previousRun,
+    previousVerification: input.previousVerification,
+    attempt: input.attempt,
+    maxAttempts: input.maxAttempts,
+  })
 
-  const focusTexts = [
-    ...failedConstraints.map((c) => `${c.original}\n${c.description}`),
-    errors,
+  const messages = [
+    { role: 'system' as const, content: SOLVER_AUTHOR_SYSTEM_PROMPT },
+    { role: 'user' as const, content: userMessage },
   ]
-  const compilerInput = JSON.parse(buildCompilerUserMessage(payload, {
-    focusTexts,
-    includeAllContext: false,
-  })) as { context?: unknown }
-  const repairPayload = {
-    task: 'Sửa các constraint sau bị lỗi. Giữ nguyên id. Chỉ trả JSON array cho các constraint cần sửa.',
-    errors,
-    constraintsToFix: failedConstraints,
-    context: compilerInput.context,
-  }
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    counters && (counters.repairAttempts += 1)
-    const messages = [
-      { role: 'system' as const, content: CONSTRAINT_COMPILER_PROMPT },
-      {
-        role: 'user' as const,
-        content: JSON.stringify({
-          ...repairPayload,
-          requirement: 'Output phải là JSON array thuần.',
-          previousError: attempt === 0 ? undefined : 'Invalid JSON array output',
-        }),
-      },
-    ]
-    counters && (counters.llmCallCount += 1)
-    counters && (counters.charsIn += estimateTokenChars(messages))
-    const responseText = await chatCompletion(messages, apiKey, model)
-    counters && (counters.charsOut += responseText.length)
+  input.counters.generationAttempts += 1
+  input.counters.llmCallCount += 1
+  input.counters.charsIn += estimateTokenChars(messages)
+  const response = await chatCompletion(messages, input.apiKey, input.model)
+  input.counters.charsOut += response.length
 
-    const fixed = parseCompiledConstraints(responseText)
-    if (fixed && fixed.length > 0) {
-      const fixedMap = new Map(fixed.map((c) => [c.id, c]))
-      return [
-        ...okConstraints,
-        ...failedConstraints.map((c) => fixedMap.get(c.id) ?? c),
-      ]
-    }
-  }
-
-  return currentConstraints
+  const normalized = normalizeAuthorResponse(response, input.baseSolverCode)
+  return persistGeneratedSolverArtifact({
+    solverCode: normalized.solverCode,
+    entrypoint: normalized.entrypoint,
+    summary: normalized.summary,
+    assumptions: normalized.assumptions,
+  })
 }
 
-function toAICompiledConstraints(constraints: CompiledConstraintFull[]) {
-  return constraints.map((c) => ({
-    id: c.id,
-    description: c.description,
-    original: c.original,
-    priority: c.priority,
-    weight: c.weight,
-    code: c.code,
-    checkerCode: c.checkerCode,
-  }))
+async function verifySolverOutput(input: {
+  payload: InputPayload
+  artifact: GeneratedSolverArtifact
+  runOutput: SolverExecutionOutput
+  apiKey: string
+  model: string
+  counters: RuntimeCounters
+}): Promise<VerifierAssessment> {
+  const userMessage = buildSolverVerifyUserMessage({
+    payload: input.payload,
+    artifact: input.artifact,
+    runOutput: input.runOutput,
+  })
+
+  const messages = [
+    { role: 'system' as const, content: SOLVER_VERIFY_SYSTEM_PROMPT },
+    { role: 'user' as const, content: userMessage },
+  ]
+
+  input.counters.verificationAttempts += 1
+  input.counters.llmCallCount += 1
+  input.counters.charsIn += estimateTokenChars(messages)
+  const response = await chatCompletion(messages, input.apiKey, input.model)
+  input.counters.charsOut += response.length
+  return normalizeVerifierAssessment(response)
+}
+
+function createResult(params: {
+  status: 'solved' | 'infeasible' | 'error'
+  message: string
+  diagnostics: string[]
+  artifact: GeneratedSolverArtifact | null
+  runOutput: SolverExecutionOutput | null
+  verification: VerifierAssessment | null
+  telemetry: PipelineTelemetry
+}): TimetableSolveResult {
+  return {
+    status: params.status,
+    message: params.message,
+    diagnostics: params.diagnostics,
+    cells: params.runOutput?.cells ?? [],
+    compiledConstraints: params.artifact ? [toArtifactSummary(params.artifact)] : [],
+    unparsedConstraints: [],
+    executionErrors: params.runOutput?.executionErrors ?? [],
+    validationErrors: params.runOutput?.validationErrors ?? [],
+    iisConstraintIds: params.runOutput?.iisConstraintIds ?? [],
+    violations: params.runOutput?.violations ?? [],
+    overallAssessment: params.verification?.rationale ?? null,
+    solverStats: params.runOutput?.solverStats ?? null,
+    modelRequestPreview: null,
+    telemetry: params.telemetry,
+  }
 }
 
 export async function runAgenticLoop(
@@ -217,251 +243,165 @@ export async function runAgenticLoop(
   apiKey: string,
   model: string,
   emit?: (event: AgentEvent) => void,
-  options?: AgentLoopOptions,
 ): Promise<TimetableSolveResult> {
   const MAX_ATTEMPTS = 4
   const startedAt = Date.now()
   const counters: RuntimeCounters = {
-    compileAttempts: 0,
-    repairAttempts: 0,
+    generationAttempts: 0,
+    verificationAttempts: 0,
     solverAttempts: 0,
     llmCallCount: 0,
     charsIn: 0,
     charsOut: 0,
   }
 
-  const precheck = precheckProblem(payload)
-  if (!precheck.ok) {
-    return {
-      status: 'infeasible',
-      message: 'Không thể tạo thời khóa biểu với dữ liệu đầu vào hiện tại.',
-      diagnostics: [precheck.reason ?? 'Precheck failed.'],
-      cells: [],
-      compiledConstraints: [],
-      unparsedConstraints: [],
-      executionErrors: [],
-      validationErrors: [],
-      iisConstraintIds: [],
-      violations: [],
-      overallAssessment: null,
-      solverStats: null,
-      modelRequestPreview: null,
-      telemetry: {
-        totalDurationMs: Date.now() - startedAt,
-        compileAttempts: 0,
-        repairAttempts: 0,
-        solverAttempts: 0,
-        llmCallCount: 0,
-        tokenEstimateCharsIn: 0,
-        tokenEstimateCharsOut: 0,
-        precheckRejected: true,
-      },
-    }
+  const preprocess = preprocessInputPayload(payload)
+  if (!preprocess.ok) {
+    return createResult({
+      status: 'error',
+      message: 'Dữ liệu đầu vào không hợp lệ.',
+      diagnostics: [...preprocess.diagnostics, ...preprocess.fatalErrors],
+      artifact: null,
+      runOutput: null,
+      verification: null,
+      telemetry: buildTelemetry(startedAt, counters, true),
+    })
   }
 
-  emit?.({ type: 'status', message: 'Đang biên dịch ràng buộc...', iteration: 1, maxIterations: MAX_ATTEMPTS })
+  const normalizedPayload = preprocess.normalizedPayload
+  const diagnostics = [...preprocess.diagnostics, ...preprocess.warnings.map((warning) => `${warning.code}: ${warning.message}`)]
+  const baseSolverCode = preprocess.authoringContext.baseTemplateCode
 
-  let compiledConstraints = options?.useIRPipeline
-    ? (() => {
-        const allConstraints = [
-          ...payload.hardConstraints.map((c) => ({ ...c, type: 'required' as const })),
-          ...payload.softConstraints.map((c) => ({ ...c, type: 'preferred' as const })),
-        ]
-        const draft = buildIRDraftFromConstraints(allConstraints)
-        const reviewed = reviewIRDraft(draft)
-        return compileIRToConstraints(reviewed.rules).map((c) => ({
-          id: c.id,
-          original: c.original,
-          description: c.description,
-          priority: c.priority,
-          weight: c.weight,
-          code: c.code,
-          checkerCode: c.checkerCode,
-        }))
-      })()
-    : await compileConstraints(payload, apiKey, model, counters)
+  let previousArtifact: GeneratedSolverArtifact | null = null
+  let previousRun: SolverExecutionOutput | null = null
+  let previousVerification: VerifierAssessment | null = null
+  let bestAttempt: {
+    artifact: GeneratedSolverArtifact
+    runOutput: SolverExecutionOutput
+    verification: VerifierAssessment
+  } | null = null
 
-  let bestResult: TimetableSolveResult | null = null
-  let bestViolationCount = Infinity
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    emit?.({ type: 'status', message: attempt === 1 ? 'Agent 1 đang viết solver...' : `Agent 1 đang sửa solver... (${attempt}/${MAX_ATTEMPTS})`, iteration: attempt, maxIterations: MAX_ATTEMPTS })
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    emit?.({
-      type: 'status',
-      message: attempt === 0 ? 'Đang tạo thời khóa biểu...' : `Đang thử lại... (${attempt + 1}/${MAX_ATTEMPTS})`,
-      iteration: attempt + 1,
-      maxIterations: MAX_ATTEMPTS,
+    const artifact = await generateSolverArtifact({
+      payload: normalizedPayload,
+      apiKey,
+      model,
+      baseSolverCode,
+      previousArtifact,
+      previousRun,
+      previousVerification,
+      attempt,
+      maxAttempts: MAX_ATTEMPTS,
+      counters,
     })
 
+    emit?.({ type: 'status', message: 'Đang chạy solver generated...', iteration: attempt, maxIterations: MAX_ATTEMPTS })
     counters.solverAttempts += 1
-    const solverProblem = toSolverProblem(payload, compiledConstraints)
-    const solverResult = await runSolverDirect(solverProblem)
+    const solverResult = await runSolverDirect({
+      problem: toSolverProblem(normalizedPayload),
+      solverArtifactPath: artifact.path,
+      entrypoint: artifact.entrypoint,
+    })
 
     if (!solverResult.success) {
-      if (attempt < MAX_ATTEMPTS - 1) continue
-      return {
+      previousArtifact = artifact
+      previousRun = {
         status: 'error',
-        message: `Lỗi khi chạy solver: ${solverResult.error}`,
-        diagnostics: [],
+        message: solverResult.error,
+        diagnostics: [solverResult.error],
         cells: [],
-        compiledConstraints: [],
-        unparsedConstraints: [],
+        iisConstraintIds: [],
         executionErrors: [],
         validationErrors: [],
-        iisConstraintIds: [],
         violations: [],
-        overallAssessment: null,
         solverStats: null,
-        modelRequestPreview: null,
+        artifactPath: artifact.path,
+        loadError: solverResult.error,
+        runtimeError: solverResult.error,
       }
+      previousVerification = {
+        verdict: 'retryable',
+        confidence: 1,
+        rationale: 'Runner không chạy được solver generated.',
+        unmetRequirements: [solverResult.error],
+        repairInstructions: ['Sửa lỗi import/runtime để solver generated chạy được.'],
+        confidentlyInfeasible: false,
+      }
+      emit?.({ type: 'code_fix', attempt, error: solverResult.error })
+      continue
     }
 
-    const data = solverResult.data
+    const runOutput = solverResult.data
+    emit?.({ type: 'status', message: 'Agent 2 đang verify output...', iteration: attempt, maxIterations: MAX_ATTEMPTS })
+    const verification = await verifySolverOutput({
+      payload: normalizedPayload,
+      artifact,
+      runOutput,
+      apiKey,
+      model,
+      counters,
+    })
 
-    if (data.executionErrors && data.executionErrors.length > 0) {
-      const errorIds = data.executionErrors.map((e) => e.constraintId)
-      const errorSummary = data.executionErrors.map((e) => `[${e.constraintId}] ${e.error}`).join('\n')
-      emit?.({ type: 'code_fix', attempt: attempt + 1, error: `Lỗi constraint code: ${errorSummary}` })
-      if (attempt < MAX_ATTEMPTS - 1) {
-        compiledConstraints = await recompileConstraints(payload, compiledConstraints, errorIds, errorSummary, apiKey, model, counters)
-        continue
-      }
+    emit?.({ type: 'verified', violations: runOutput.violations ?? [], allSatisfied: verification.verdict === 'solved' })
+
+    previousArtifact = artifact
+    previousRun = runOutput
+    previousVerification = verification
+
+    bestAttempt = {
+      artifact,
+      runOutput,
+      verification,
     }
 
-    if (data.status === 'infeasible') {
-      const iisIds = data.iisConstraintIds ?? []
-      const iisInfo = iisIds.length > 0
-        ? `Constraints gây mâu thuẫn: ${iisIds.join(', ')}`
-        : 'Không xác định được constraint nào gây mâu thuẫn — có thể base constraints quá chặt với lịch này.'
-
-      emit?.({ type: 'code_fix', attempt: attempt + 1, error: `Solver INFEASIBLE. ${iisInfo}` })
-
-      if (attempt < MAX_ATTEMPTS - 1 && iisIds.length > 0) {
-        const errorSummary = `Infeasible vì constraint quá chặt: ${iisIds.join(', ')}`
-        compiledConstraints = await recompileConstraints(payload, compiledConstraints, iisIds, errorSummary, apiKey, model, counters)
-        continue
-      }
-
-      return {
-        status: 'infeasible',
-        message: 'Không thể tạo thời khóa biểu với các ràng buộc hiện tại.',
-        diagnostics: [iisInfo],
-        cells: [],
-        compiledConstraints: toAICompiledConstraints(compiledConstraints),
-        unparsedConstraints: [],
-        executionErrors: data.executionErrors ?? [],
-        validationErrors: data.validationErrors ?? [],
-        iisConstraintIds: iisIds,
-        violations: [],
-        overallAssessment: null,
-        solverStats: data.solverStats,
-        modelRequestPreview: null,
-        telemetry: {
-          totalDurationMs: Date.now() - startedAt,
-          compileAttempts: counters.compileAttempts,
-          repairAttempts: counters.repairAttempts,
-          solverAttempts: counters.solverAttempts,
-          llmCallCount: counters.llmCallCount,
-          tokenEstimateCharsIn: counters.charsIn,
-          tokenEstimateCharsOut: counters.charsOut,
-          precheckRejected: false,
-        },
-      }
-    }
-
-    if (data.status !== 'solved') continue
-
-    const cells = data.cells
-    const violations: ConstraintViolation[] = data.violations ?? []
-    const hardViolationCount = violations.filter((v) => v.violated).length
-    const allSatisfied = hardViolationCount === 0
-
-    emit?.({ type: 'verified', violations, allSatisfied })
-
-    if (hardViolationCount < bestViolationCount) {
-      bestViolationCount = hardViolationCount
-      bestResult = {
+    if (verification.verdict === 'solved') {
+      return createResult({
         status: 'solved',
-        message: '',
-        diagnostics: [],
-        cells,
-        compiledConstraints: toAICompiledConstraints(compiledConstraints),
-        unparsedConstraints: [],
-        executionErrors: data.executionErrors ?? [],
-        validationErrors: data.validationErrors ?? [],
-        iisConstraintIds: [],
-        violations,
-        overallAssessment: null,
-        solverStats: data.solverStats,
-        modelRequestPreview: null,
-      }
+        message: runOutput.message || 'Đã tạo thời khóa biểu hợp lệ.',
+        diagnostics: [...diagnostics, verification.rationale],
+        artifact,
+        runOutput,
+        verification,
+        telemetry: buildTelemetry(startedAt, counters, false),
+      })
     }
 
-    if (allSatisfied) {
-      bestResult!.diagnostics = [`Tất cả ràng buộc thỏa mãn sau ${attempt + 1} lần thử.`]
-      return bestResult!
+    if (verification.verdict === 'infeasible' && verification.confidentlyInfeasible) {
+      return createResult({
+        status: 'infeasible',
+        message: runOutput.message || 'Không thể tạo thời khóa biểu với các ràng buộc hiện tại.',
+        diagnostics: [...diagnostics, verification.rationale, ...verification.unmetRequirements],
+        artifact,
+        runOutput,
+        verification,
+        telemetry: buildTelemetry(startedAt, counters, false),
+      })
     }
 
-    if (attempt < MAX_ATTEMPTS - 1 && hardViolationCount > 0) {
-      const violatedIds = violations
-        .filter((v) => v.violated)
-        .map((v) => v.constraintId)
-        .filter((id) => id.startsWith('hc_') || id.startsWith('sc_'))
-      if (violatedIds.length > 0) {
-        const errorSummary = violations
-          .filter((v) => v.violated)
-          .map((v) => `[${v.constraintId}] "${v.original}" bị vi phạm: ${v.reason}`)
-          .join('\n')
-        compiledConstraints = await recompileConstraints(payload, compiledConstraints, violatedIds, errorSummary, apiKey, model, counters)
-      }
-    }
+    emit?.({ type: 'code_fix', attempt, error: verification.repairInstructions.join('\n') || verification.rationale })
   }
 
-  if (bestResult) {
-    const hardCount = bestResult.violations.filter((v) => v.violated).length
-    const softCount = bestResult.violations.filter((v) => !v.violated).length
-    if (hardCount > 0) {
-      bestResult.message = `Còn ${hardCount} ràng buộc cứng bị vi phạm sau ${MAX_ATTEMPTS} lần thử.`
-    } else if (softCount > 0) {
-      bestResult.message = `${softCount} ràng buộc mềm chưa đạt tối ưu.`
-    } else {
-      bestResult.message = 'Tất cả ràng buộc thỏa mãn.'
-    }
-    const telemetry: PipelineTelemetry = {
-      totalDurationMs: Date.now() - startedAt,
-      compileAttempts: counters.compileAttempts,
-      repairAttempts: counters.repairAttempts,
-      solverAttempts: counters.solverAttempts,
-      llmCallCount: counters.llmCallCount,
-      tokenEstimateCharsIn: counters.charsIn,
-      tokenEstimateCharsOut: counters.charsOut,
-      precheckRejected: false,
-    }
-    return { ...bestResult, telemetry }
+  if (bestAttempt) {
+    return createResult({
+      status: bestAttempt.verification.verdict === 'infeasible' ? 'infeasible' : 'error',
+      message: bestAttempt.verification.rationale || bestAttempt.runOutput.message || 'Không thể hội tụ lời giải hợp lệ.',
+      diagnostics: [...diagnostics, ...bestAttempt.verification.unmetRequirements],
+      artifact: bestAttempt.artifact,
+      runOutput: bestAttempt.runOutput,
+      verification: bestAttempt.verification,
+      telemetry: buildTelemetry(startedAt, counters, false),
+    })
   }
 
-  return {
+  return createResult({
     status: 'error',
-    message: `Không thể tạo thời khóa biểu sau ${MAX_ATTEMPTS} lần thử.`,
-    diagnostics: [],
-    cells: [],
-    compiledConstraints: [],
-    unparsedConstraints: [],
-    executionErrors: [],
-    validationErrors: [],
-    iisConstraintIds: [],
-    violations: [],
-    overallAssessment: null,
-    solverStats: null,
-    modelRequestPreview: null,
-    telemetry: {
-      totalDurationMs: Date.now() - startedAt,
-      compileAttempts: counters.compileAttempts,
-      repairAttempts: counters.repairAttempts,
-      solverAttempts: counters.solverAttempts,
-      llmCallCount: counters.llmCallCount,
-      tokenEstimateCharsIn: counters.charsIn,
-      tokenEstimateCharsOut: counters.charsOut,
-      precheckRejected: false,
-    },
-  }
+    message: 'Không thể tạo thời khóa biểu sau nhiều lần thử.',
+    diagnostics,
+    artifact: null,
+    runOutput: null,
+    verification: null,
+    telemetry: buildTelemetry(startedAt, counters, false),
+  })
 }

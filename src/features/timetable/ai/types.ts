@@ -56,6 +56,39 @@ export type VerifierResult = {
 export type ExecutionError = { constraintId: string; error: string }
 export type ValidationError = { constraintId: string; error: string }
 
+export type GeneratedSolverArtifact = {
+  path: string
+  solverCode: string
+  entrypoint: string
+  summary: string
+  assumptions: string[]
+  sourceHash?: string
+}
+
+export type SolverExecutionOutput = {
+  status: 'solved' | 'infeasible' | 'error'
+  message: string
+  diagnostics: string[]
+  cells: TimetableSolveCell[]
+  iisConstraintIds: string[]
+  executionErrors: ExecutionError[]
+  validationErrors: ValidationError[]
+  violations: ConstraintViolation[]
+  solverStats: SolverStats | null
+  artifactPath?: string
+  loadError?: string | null
+  runtimeError?: string | null
+}
+
+export type VerifierAssessment = {
+  verdict: 'solved' | 'retryable' | 'infeasible'
+  confidence: number
+  rationale: string
+  unmetRequirements: string[]
+  repairInstructions: string[]
+  confidentlyInfeasible: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Common types
 // ---------------------------------------------------------------------------
@@ -99,10 +132,6 @@ export type GenerateTimetableRequest = {
   }>
   constraints: Array<{ type: 'required' | 'preferred'; text: string }>
   constraintConfirmations?: ConstraintConfirmationItem[]
-  features?: {
-    useIRPipeline?: boolean
-    shadowMode?: boolean
-  }
 }
 
 export type AgentEvent =
@@ -124,7 +153,7 @@ export type PipelineTelemetry = {
   llmCallCount: number
   tokenEstimateCharsIn: number
   tokenEstimateCharsOut: number
-  precheckRejected: boolean
+  inputRejected: boolean
 }
 
 export type TimetableSolveResult = {

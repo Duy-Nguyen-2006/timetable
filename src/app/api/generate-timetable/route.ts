@@ -49,17 +49,14 @@ export async function POST(request: Request) {
 
     const model = await detectModel(apiKey)
     const payload = buildInputPayload(input)
-    const useIRPipeline = input.features?.useIRPipeline ?? false
-    const shadowMode = input.features?.shadowMode ?? false
-
     if (!acceptSSE) {
-      const result = await runAgenticLoop(payload, apiKey, model, undefined, { useIRPipeline, shadowMode })
+      const result = await runAgenticLoop(payload, apiKey, model)
       return NextResponse.json(result)
     }
 
     const { stream, send, close } = createSSEStream()
 
-    runAgenticLoop(payload, apiKey, model, send, { useIRPipeline, shadowMode })
+    runAgenticLoop(payload, apiKey, model, send)
       .then((result) => {
         send({ type: 'result', data: result })
         close()

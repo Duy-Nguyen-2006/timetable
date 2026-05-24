@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import re
+import sys
 from collections import defaultdict
+from pathlib import Path
 
 def parse_datasets(filename):
     with open(filename, 'r', encoding='utf-8') as f:
@@ -205,8 +207,9 @@ def print_report(datasets):
 
 if __name__ == '__main__':
     try:
-        datasets = parse_datasets('/home/user/timetable/datasets.txt')
-        print(f"Loaded {len(datasets)} datasets")
+        dataset_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name('datasets.txt')
+        datasets = parse_datasets(str(dataset_path))
+        print(f"Loaded {len(datasets)} datasets from {dataset_path}")
 
         all_valid = print_report(datasets)
 

@@ -97,14 +97,6 @@ export function runCodeInSandbox(code: string, payload: unknown): Promise<Sandbo
   })
 }
 
-export type CompiledConstraint = {
-  id: string
-  code: string
-  priority: 'hard' | 'soft'
-  original?: string
-  checkerCode?: string
-}
-
 export type SolverProblem = {
   slots: Array<{
     slotId: string
@@ -124,7 +116,13 @@ export type SolverProblem = {
     subjectLabel: string
     weeklyPeriods: number
   }>
-  aiCompiledConstraints: CompiledConstraint[]
+  aiCompiledConstraints?: Array<{
+    id: string
+    code: string
+    priority: 'hard' | 'soft'
+    original?: string
+    checkerCode?: string
+  }>
   solverConfig: {
     maxTimeSeconds: number
     numWorkers: number
@@ -136,25 +134,15 @@ export type SolverDirectResult =
   | { success: true; data: SolverDirectOutput }
   | { success: false; error: string }
 
-export type SolverDirectOutput = {
-  status: 'solved' | 'infeasible' | 'error'
-  message: string
-  diagnostics: string[]
-  cells: import('@/features/timetable/ai/types').TimetableSolveCell[]
-  iisConstraintIds: string[]
-  executionErrors: Array<{ constraintId: string; error: string }>
-  validationErrors: Array<{ constraintId: string; error: string }>
-  violations: import('@/features/timetable/ai/types').ConstraintViolation[]
-  solverStats: {
-    wallTimeSeconds: number
-    objectiveValue: number | null
-    bestBound: number | null
-    numConflicts: number
-    numBranches: number
-  } | null
+export type SolverExecutionRequest = {
+  problem: SolverProblem
+  solverArtifactPath?: string
+  entrypoint?: string
 }
 
-export function runSolverDirect(problem: SolverProblem): Promise<SolverDirectResult> {
+export type SolverDirectOutput = import('@/features/timetable/ai/types').SolverExecutionOutput
+
+export function runSolverDirect(request: SolverProblem | SolverExecutionRequest): Promise<SolverDirectResult> {
   return new Promise((resolve) => {
     const runnerPath = path.join(process.cwd(), 'python', 'timetable_solver', 'runner.py')
     if (!existsSync(runnerPath)) {
@@ -171,7 +159,11 @@ export function runSolverDirect(problem: SolverProblem): Promise<SolverDirectRes
     let stderr = ''
     let timedOut = false
 
-    const timeoutMs = Math.max((problem.solverConfig.maxTimeSeconds + 15) * 1000, 60_000)
+    const actualRequest: SolverExecutionRequest = 'problem' in request
+      ? request
+      : { problem: request }
+
+    const timeoutMs = Math.max((actualRequest.problem.solverConfig.maxTimeSeconds + 15) * 1000, 60_000)
     const timeoutId = setTimeout(() => {
       timedOut = true
       child.kill('SIGKILL')
@@ -202,7 +194,7 @@ export function runSolverDirect(problem: SolverProblem): Promise<SolverDirectRes
       }
     })
 
-    child.stdin.write(JSON.stringify(problem))
+    child.stdin.write(JSON.stringify(actualRequest))
     child.stdin.end()
   })
 }

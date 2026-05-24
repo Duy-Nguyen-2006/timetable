@@ -302,7 +302,7 @@ function InfoField({ icon: Icon, label, placeholder, value, onChange }) {
 export default function App({ onBackToLanding }) {
   const { apiKey } = useApiKeyStore()
   const [page, setPage] = useState('select')
-  const [selectedDays, setSelectedDays] = useState(['monday', 'wednesday', 'friday'])
+  const [selectedDays, setSelectedDays] = useState(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
   const [selectedSessions, setSelectedSessions] = useState(['morning'])
   const [periods, setPeriods] = useState(defaultPeriods)
   const [deletedPeriods, setDeletedPeriods] = useState({})
@@ -310,6 +310,7 @@ export default function App({ onBackToLanding }) {
   const [teacherImportMode, setTeacherImportMode] = useState('update')
   const teacherInputRef = useRef<(HTMLInputElement & HTMLTextAreaElement) | null>(null)
   const [teacherList, setTeacherList] = useState<string[]>([])
+  const [subjectImportMode, setSubjectImportMode] = useState<'update' | 'bulk'>('update')
   const [subjectInput, setSubjectInput] = useState('')
   const [subjectList, setSubjectList] = useState<string[]>([])
   const [classInput, setClassInput] = useState('')
@@ -510,13 +511,19 @@ export default function App({ onBackToLanding }) {
     })
   }
 
+  const parseLines = (input: string) =>
+    input
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+
   const importTeacher = () => {
     const teacherInputElement = document.getElementById('teacher-input') as HTMLInputElement | HTMLTextAreaElement | null
-    const inputValue = teacherInputRef.current?.value ?? teacherInputElement?.value ?? teacherInput
-    const names = inputValue
-      .split(teacherImportMode === 'bulk' ? /\r?\n/ : /\n/)
-      .map((name) => name.trim())
-      .filter(Boolean)
+    const rawInput = teacherInputRef.current?.value ?? teacherInputElement?.value ?? teacherInput
+    const normalizedInput = rawInput.replace(/\r\n?/g, '\n')
+    const names = teacherImportMode === 'bulk'
+      ? parseLines(normalizedInput)
+      : [normalizedInput.trim()].filter(Boolean)
     if (!names.length) return
 
     setTeacherList((current) => {
@@ -534,10 +541,19 @@ export default function App({ onBackToLanding }) {
   }
 
   const importSubject = (presetValue?: string) => {
-    const name = normalizeSubjectName(presetValue ?? subjectInput)
-    if (!name) return
+    const rawInput = presetValue ?? subjectInput
+    const names = presetValue || subjectImportMode !== 'bulk'
+      ? [normalizeSubjectName(rawInput)].filter(Boolean)
+      : parseLines(rawInput).map((name) => normalizeSubjectName(name)).filter(Boolean)
+    if (!names.length) return
 
-    setSubjectList((current) => (current.includes(name) ? current : [...current, name]))
+    setSubjectList((current) => {
+      const next = [...current]
+      names.forEach((name) => {
+        if (!next.includes(name)) next.push(name)
+      })
+      return next
+    })
     setSubjectInput('')
   }
 
@@ -569,8 +585,9 @@ export default function App({ onBackToLanding }) {
     setClassList((current) => {
       const next = [...current]
       classes.forEach((className) => {
-        if (!next.includes(className)) {
-          next.push(className)
+        const normalizedClassName = String(className).trim().toUpperCase()
+        if (normalizedClassName && !next.includes(normalizedClassName)) {
+          next.push(normalizedClassName)
         }
       })
       return next
@@ -670,10 +687,7 @@ export default function App({ onBackToLanding }) {
   }
 
   const importConstraint = () => {
-    const lines = constraintDraft.text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
+    const lines = parseLines(constraintDraft.text)
     if (!lines.length) return
 
     const now = Date.now()
@@ -705,7 +719,6 @@ export default function App({ onBackToLanding }) {
       interpreted: c.text,
       accepted: true,
     }))
-
     const needConfirm = constraintConfirmations.length > 0
     if (needConfirm) {
       const ok = window.confirm('Vui lòng xác nhận: hệ thống đang hiểu ràng buộc đúng như bạn đã nhập. Nhấn OK để tiếp tục xếp lịch.')
@@ -739,10 +752,6 @@ export default function App({ onBackToLanding }) {
         assignments: assignmentList,
         constraints: constraintList,
         constraintConfirmations,
-        features: {
-          useIRPipeline: true,
-          shadowMode: true,
-        },
       }, apiKey ?? undefined, (event: AgentEvent) => {
         switch (event.type) {
           case 'status':
@@ -1241,79 +1250,85 @@ export default function App({ onBackToLanding }) {
 
             <div className="grid flex-1 gap-4 lg:grid-cols-[0.9fr_1.1fr]">
               <section className={`${panelClass} p-4`}>
-                <div className="mb-4 flex items-center gap-2.5">
-                  <span className={iconShellClass}>
-                    <User size={16} strokeWidth={1.5} />
-                  </span>
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">Nhập giáo viên</h2>
-                    <p className="text-xs text-white/40">Thêm từng giáo viên vào danh sách</p>
-                  </div>
-                </div>
-
-                <div className="mb-4 grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'bulk', label: 'Bulk Update', color: '#6699FF' },
-                    { id: 'update', label: 'Update', color: '#FFCC00' },
-                  ].map((option) => {
-                    const isActive = teacherImportMode === option.id
-
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setTeacherImportMode(option.id)}
-                        className={`rounded px-3 py-2 text-sm font-medium transition ${isActive ? 'text-black' : 'border border-white/[0.08] text-white/60 hover:text-white'}`}
-                        style={{ backgroundColor: isActive ? option.color : 'transparent' }}
-                      >
-                        {option.label}
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <label className="block">
-                  <span className="mb-2 block text-xs font-medium text-white/50">Nhập tên giáo viên</span>
-                  {teacherImportMode === 'bulk' ? (
-                    <textarea
-                      id="teacher-input"
-                      ref={teacherInputRef}
-                      value={teacherInput}
-                      onChange={(event) => setTeacherInput(event.target.value)}
-                      onInput={(event) => setTeacherInput(event.currentTarget.value)}
-                      placeholder={`Nguyễn Văn A\nTrần Thị B\nLê Văn C`}
-                      rows={6}
-                      className={`${inputClass} min-h-36 resize-y`}
-                    />
-                  ) : (
-                    <input
-                      id="teacher-input"
-                      ref={teacherInputRef}
-                      type="text"
-                      value={teacherInput}
-                      onChange={(event) => setTeacherInput(event.target.value)}
-                      onInput={(event) => setTeacherInput(event.currentTarget.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          importTeacher()
-                        }
-                      }}
-                      placeholder="Ví dụ: Nguyễn Văn A"
-                      className={inputClass}
-                    />
-                  )}
-                </label>
-
-                <button
-                  type="button"
-                  onClick={importTeacher}
-                  disabled={!teacherInput.trim()}
-                  className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    importTeacher()
+                  }}
                 >
-                  <Plus size={14} strokeWidth={1.5} />
-                  Import
-                </button>
+                  <div className="mb-4 flex items-center gap-2.5">
+                    <span className={iconShellClass}>
+                      <User size={16} strokeWidth={1.5} />
+                    </span>
+                    <div>
+                      <h2 className="text-sm font-semibold text-white">Nhập giáo viên</h2>
+                      <p className="text-xs text-white/40">Thêm từng giáo viên vào danh sách</p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4 grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'bulk', label: 'Bulk Update', color: '#6699FF' },
+                      { id: 'update', label: 'Update', color: '#FFCC00' },
+                    ].map((option) => {
+                      const isActive = teacherImportMode === option.id
+
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setTeacherImportMode(option.id)}
+                          className={`rounded px-3 py-2 text-sm font-medium transition ${isActive ? 'text-black' : 'border border-white/[0.08] text-white/60 hover:text-white'}`}
+                          style={{ backgroundColor: isActive ? option.color : 'transparent' }}
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-medium text-white/50">Nhập tên giáo viên</span>
+                    {teacherImportMode === 'bulk' ? (
+                      <textarea
+                        id="teacher-input"
+                        ref={teacherInputRef}
+                        value={teacherInput}
+                        onChange={(event) => setTeacherInput(event.target.value)}
+                        onInput={(event) => setTeacherInput(event.currentTarget.value)}
+                        placeholder={`Nguyễn Văn A\nTrần Thị B\nLê Văn C`}
+                        rows={6}
+                        className={`${inputClass} min-h-36 resize-y`}
+                      />
+                    ) : (
+                      <input
+                        id="teacher-input"
+                        ref={teacherInputRef}
+                        type="text"
+                        value={teacherInput}
+                        onChange={(event) => setTeacherInput(event.target.value)}
+                        onInput={(event) => setTeacherInput(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            importTeacher()
+                          }
+                        }}
+                        placeholder="Ví dụ: Nguyễn Văn A"
+                        className={inputClass}
+                      />
+                    )}
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={!teacherInput.trim()}
+                    className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
+                  >
+                    <Plus size={14} strokeWidth={1.5} />
+                    Import
+                  </button>
+                </form>
               </section>
 
               <aside className={`${panelClass} p-4`}>
@@ -1417,21 +1432,52 @@ export default function App({ onBackToLanding }) {
                     </div>
                   </div>
 
+                  <div className="mb-4 grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'bulk', label: 'Bulk Update', color: '#6699FF' },
+                      { id: 'update', label: 'Update', color: '#FFCC00' },
+                    ].map((option) => {
+                      const isActive = subjectImportMode === option.id
+
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setSubjectImportMode(option.id as 'update' | 'bulk')}
+                          className={`rounded px-3 py-2 text-sm font-medium transition ${isActive ? 'text-black' : 'border border-white/[0.08] text-white/60 hover:text-white'}`}
+                          style={{ backgroundColor: isActive ? option.color : 'transparent' }}
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+
                   <label className="block">
                     <span className="mb-2 block text-xs font-medium text-white/50">Nhập tên môn học</span>
-                    <input
-                      type="text"
-                      value={subjectInput}
-                      onChange={(event) => setSubjectInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          importSubject()
-                        }
-                      }}
-                      placeholder="Ví dụ: Toán"
-                      className={inputClass}
-                    />
+                    {subjectImportMode === 'bulk' ? (
+                      <textarea
+                        value={subjectInput}
+                        onChange={(event) => setSubjectInput(event.target.value)}
+                        placeholder={`Toán\nNgữ văn\nTiếng Anh`}
+                        rows={6}
+                        className={`${inputClass} min-h-36 resize-y`}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={subjectInput}
+                        onChange={(event) => setSubjectInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            importSubject()
+                          }
+                        }}
+                        placeholder="Ví dụ: Toán"
+                        className={inputClass}
+                      />
+                    )}
                   </label>
 
                     <button
@@ -2716,54 +2762,59 @@ export default function App({ onBackToLanding }) {
                           </div>
                         )}
 
-                        {aiResult && !aiLoading && (
-                          <div className="space-y-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4 text-white">
-                            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
-                              <div>
-                                <p className="text-sm font-semibold text-white">{aiResult.message}</p>
-                                <p className="mt-1 text-xs text-white/35">
-                                  Trạng thái: {aiResult.status === 'solved' ? 'Đã xếp được lịch' : aiResult.status === 'infeasible' ? 'Không khả thi' : 'Có lỗi'}
-                                </p>
+                        {aiResult && !aiLoading && (() => {
+                          const currentResult = aiResult
+                          const currentSolverStats = currentResult.solverStats
+
+                          return (
+                            <div className="space-y-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4 text-white">
+                              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
+                                <div>
+                                  <p className="text-sm font-semibold text-white">{currentResult.message}</p>
+                                  <p className="mt-1 text-xs text-white/35">
+                                    Trạng thái: {currentResult.status === 'solved' ? 'Đã xếp được lịch' : currentResult.status === 'infeasible' ? 'Không khả thi' : 'Có lỗi'}
+                                  </p>
+                                </div>
+                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${currentResult.status === 'solved' ? 'border-[#4DB848]/25 bg-[#4DB848]/10 text-[#4DB848]' : currentResult.status === 'infeasible' ? 'border-amber-500/25 bg-amber-500/10 text-amber-300' : 'border-red-500/25 bg-red-500/10 text-red-300'}`}>
+                                  {currentResult.status === 'solved' ? 'Solved' : currentResult.status === 'infeasible' ? 'Infeasible' : 'Error'}
+                                </span>
                               </div>
-                              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${aiResult.status === 'solved' ? 'border-[#4DB848]/25 bg-[#4DB848]/10 text-[#4DB848]' : aiResult.status === 'infeasible' ? 'border-amber-500/25 bg-amber-500/10 text-amber-300' : 'border-red-500/25 bg-red-500/10 text-red-300'}`}>
-                                {aiResult.status === 'solved' ? 'Solved' : aiResult.status === 'infeasible' ? 'Infeasible' : 'Error'}
-                              </span>
+
+                              {currentSolverStats && (
+                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Wall time</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.wallTimeSeconds.toFixed(3)}s</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Objective</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.objectiveValue ?? '—'}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Best bound</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.bestBound ?? '—'}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Conflicts</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.numConflicts}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Branches</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.numBranches}</p></div>
+                                </div>
+                              )}
+
+                              {currentResult.diagnostics?.length ? (
+                                <div className="space-y-2">
+                                  {currentResult.diagnostics.map((diagnostic, index) => (
+                                    <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-sm text-white/55">
+                                      {diagnostic}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-white/45">Không có chẩn đoán bổ sung.</p>
+                              )}
+
+                              <div className="grid gap-4 xl:grid-cols-2">
+                                <div className={`${panelMutedClass} p-3`}>
+                                  <p className="text-xs font-medium text-white/70">Compiled constraints</p>
+                                  <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(currentResult.compiledConstraints, null, 2)}</pre>
+                                </div>
+                                <div className={`${panelMutedClass} p-3`}>
+                                  <p className="text-xs font-medium text-white/70">Request preview gửi model</p>
+                                  <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(currentResult.modelRequestPreview, null, 2)}</pre>
+                                </div>
+                              </div>
                             </div>
-
-                            {aiResult.solverStats && (
-                              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Wall time</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.wallTimeSeconds.toFixed(3)}s</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Objective</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.objectiveValue ?? '—'}</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Best bound</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.bestBound ?? '—'}</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Conflicts</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.numConflicts}</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Branches</p><p className="mt-1 text-sm text-white/70">{aiResult.solverStats.numBranches}</p></div>
-                              </div>
-                            )}
-
-                            {aiResult.diagnostics?.length ? (
-                              <div className="space-y-2">
-                                {aiResult.diagnostics.map((diagnostic, index) => (
-                                  <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-sm text-white/55">
-                                    {diagnostic}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-sm text-white/45">Không có chẩn đoán bổ sung.</p>
-                            )}
-
-                            <div className="grid gap-4 xl:grid-cols-2">
-                              <div className={`${panelMutedClass} p-3`}>
-                                <p className="text-xs font-medium text-white/70">Compiled constraints</p>
-                                <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(aiResult.compiledConstraints, null, 2)}</pre>
-                              </div>
-                              <div className={`${panelMutedClass} p-3`}>
-                                <p className="text-xs font-medium text-white/70">Request preview gửi model</p>
-                                <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(aiResult.modelRequestPreview, null, 2)}</pre>
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                          )
+                        })()}
                       </section>
                     )}
 

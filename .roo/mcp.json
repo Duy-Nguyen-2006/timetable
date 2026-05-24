@@ -15,7 +15,9 @@
 			"alwaysAllow": [
 				"list_repos",
 				"query",
-				"context"
+				"context",
+				"impact",
+				"detect_changes"
 			]
 		}
 	}
