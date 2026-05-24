@@ -551,12 +551,29 @@ export async function runAgenticLoop(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         attemptDiagnostics.push(`[outer ${outerAttempt}] Checker lỗi: ${msg}`)
-        verification = {
-          verdict: 'retryable', confidence: 1,
-          rationale: 'Checker LLM call thất bại.',
-          unmetRequirements: [msg],
-          repairInstructions: ['Chạy lại với output rõ ràng hơn.'],
-          confidentlyInfeasible: false,
+        // If deterministic check already cleared all hard constraints (or found
+        // no violations), don't block on LLM Checker — accept as solved.
+        // Soft constraint scoring is best-effort; missing it is not fatal.
+        const detCleared = detCheck !== null && detCheck.violations.length === 0
+        if (detCleared && runOutput.status !== 'infeasible') {
+          const note = detCheck.allChecked
+            ? 'Tất cả ràng buộc cứng đã xác minh tự động (Checker LLM không khả dụng).'
+            : 'Không phát hiện vi phạm ràng buộc cứng (Checker LLM không khả dụng).'
+          verification = {
+            verdict: 'solved', confidence: 0.8,
+            rationale: note,
+            unmetRequirements: [],
+            repairInstructions: [],
+            confidentlyInfeasible: false,
+          }
+        } else {
+          verification = {
+            verdict: 'retryable', confidence: 1,
+            rationale: 'Checker LLM call thất bại.',
+            unmetRequirements: [msg],
+            repairInstructions: ['Chạy lại với output rõ ràng hơn.'],
+            confidentlyInfeasible: false,
+          }
         }
       }
     }
