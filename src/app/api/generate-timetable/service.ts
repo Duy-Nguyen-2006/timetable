@@ -247,7 +247,7 @@ async function generateSolverCodeWithLowprizo(args: {
             content: [
               args.coderPrompt,
               '',
-              'Base solver template for reference:',
+              '--- Reference implementation (use as-is, adapt, or write your own) ---',
               createBaseFallbackSolverCode(),
             ].join('\n'),
           },

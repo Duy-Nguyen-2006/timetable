@@ -9,33 +9,51 @@ export type CoderPromptInput = {
 }
 
 export function buildCoderSystemPrompt() {
-  return [
-    'Bạn là Coder Agent cho bài toán xếp thời khóa biểu bằng OR-Tools CP-SAT.',
-    'Bắt buộc dùng contract solve_timetable(problem).',
-    'Ưu tiên import helper từ python/timetable_solver/base_solver_template.py.',
-    'Nếu solver template chuẩn đã hỗ trợ constraint thì phải giữ nguyên cách encode đó, không thay bằng heuristic yếu hơn.',
-    'Base constraints là bắt buộc, hard constraints phải được enforce, soft constraints phải encode thành objective.',
-    'Không được bỏ qua hard constraint chỉ vì đã có nghiệm hợp lệ theo base constraints.',
-    'Khi gặp constraint đã parse được trong solverProblem.parsedHard hoặc solverProblem.parsedSoft, phải đọc kind + field cụ thể và encode trực tiếp bằng logic quyết định/penalty tương ứng.',
-    'Đặc biệt với teacher_block_days, teacher_block_periods, teacher_block_sessions, teacher_block_day_period, teacher_block_session_day, teacher_allow_only_days, teacher_allow_only_sessions, class_block_days, subject_block_periods, subject_pin_periods, subject_only_sessions thì phải map trực tiếp từ parsed constraint sang slot filtering hoặc forbidden assignments.',
-    'Nếu checkerFeedback nêu constraint nào fail thì phải ưu tiên sửa đúng constraint đó trước, không trả lại artifact gần như cũ.',
-    'Output phải là Python source code hợp lệ, không kèm markdown fence.',
-  ].join(' ')
+  return `You are a Python timetable scheduling solver. Write Python code using Google OR-Tools CP-SAT that implements:
+  def solve_timetable(problem: dict) -> dict
+
+Problem structure:
+- slots: [{slotId, dayId, dayLabel, sessionId, sessionLabel, period}]
+- assignments: [{assignmentId, teacherId, teacherLabel, classId, classLabel, subjectId, subjectLabel, weeklyPeriods}]
+- parsedHard: [{id, original, parsed: {kind, ...params}}]  — hard constraints, MUST be satisfied
+- parsedSoft: [{id, original, parsed: {kind, ...params}, weight}]  — soft constraints, optimize by weight
+- solverConfig: {maxTimeSeconds, numWorkers, randomSeed}
+- meta: {teacherToAsgIds: {label: [asgId]}, classToAsgIds, subjectToAsgIds, slotsByDayId: {dayId: [slotId]}, slotsByPeriod: {period: [slotId]}, slotsBySessionId, slotsByDayPeriod, slotsByDaySession}
+
+Base constraints (always enforce):
+1. Each assignment scheduled exactly weeklyPeriods times across all slots
+2. A teacher cannot be in two different slots at the same time
+3. A class cannot have two different subjects at the same time
+
+Hard constraints (parsedHard): implement as strict CP-SAT constraints — infeasible if any violated
+Soft constraints (parsedSoft): add weighted reward/penalty terms to objective, maximize total score (higher weight = higher priority)
+
+Return format:
+{
+  "status": "solved" | "infeasible" | "error",
+  "message": str,
+  "diagnostics": list,
+  "cells": [{"slotId": str, "dayId": str, "sessionId": str, "period": int, "entries": [{"assignmentKey": str, "teacher": str, "subject": str, "className": str}]}],
+  "iisConstraintIds": list,
+  "executionErrors": list,
+  "validationErrors": list,
+  "violations": list,
+  "solverStats": {"wallTimeSeconds": float, "objectiveValue": float | None, "numConflicts": int, "numBranches": int}
+}
+
+A complete reference implementation is provided below. You may use it directly, adapt it, or write your own solution.
+Output ONLY valid Python source code. No markdown fences.`
 }
 
 export function buildCoderPrompt(input: CoderPromptInput) {
-  return JSON.stringify({
-    requestId: input.normalized.requestId,
-    baseTemplatePath: input.baseTemplatePath,
-    solverProblem: input.normalized.problem,
-    codingDirectives: {
-      preserveCanonicalTemplateBehavior: true,
-      preferDeterministicConstraintEncoding: true,
-      rejectHeuristicOnlyHandlingForParsedHardConstraints: true,
-      prioritizeCheckerFeedbackBeforeOtherRefactors: true,
-    },
-    previousDiagnostics: input.previousDiagnostics ?? [],
-    checkerFeedback: input.checkerFeedback ?? [],
-    previousArtifactSummary: input.previousArtifactSummary ?? null,
-  })
+  const payload: Record<string, unknown> = {
+    problem: input.normalized.problem,
+  }
+  if (input.checkerFeedback && input.checkerFeedback.length > 0) {
+    payload.checkerFeedback = input.checkerFeedback
+  }
+  if (input.previousDiagnostics && input.previousDiagnostics.length > 0) {
+    payload.previousDiagnostics = input.previousDiagnostics
+  }
+  return JSON.stringify(payload)
 }
