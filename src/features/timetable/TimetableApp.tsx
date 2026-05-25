@@ -873,7 +873,8 @@ export default function App({ onBackToLanding }) {
     setAgentTimeline((current) => [...current, event])
   }, [])
 
-  const handleGenerate = async (disableLlm = false) => {
+    const handleGenerate = async (_useTemplate = false) => {
+
     const apiKey = lowprizoApiKey.trim()
     if (!apiKey) {
       setAiError('Vui lòng nhập Lowprizo API key trước khi xếp lịch.')
@@ -1180,10 +1181,9 @@ export default function App({ onBackToLanding }) {
                   })
                   break
               }
-            },
+              },
+        )
 
-        { disableLlm },
-      )
       setAiResult(result)
       setAgentTimeline(result.lifecycleEvents ?? [])
       setAgentIteration(result.telemetry?.totalAttempts ?? agentIteration)
@@ -2674,10 +2674,12 @@ export default function App({ onBackToLanding }) {
 
                             {/* Step indicators */}
                             <div className="mb-3 flex items-center gap-1">
-                              {STEP_ORDER.map((step) => {
-                                const isActive = agentStep === step
-                                const isPast = STEP_ORDER.indexOf(agentStep) > STEP_ORDER.indexOf(step)
-                                return (
+                                {STEP_ORDER.map((step) => {
+                                  const isActive = agentStep === step
+                                  const currentStepIndex = agentStep === 'idle' ? -1 : STEP_ORDER.indexOf(agentStep)
+                                  const isPast = currentStepIndex > STEP_ORDER.indexOf(step)
+                                  return (
+
                                   <div key={step} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all ${isActive ? 'bg-blue-500/20 text-blue-400' : isPast ? 'bg-white/[0.04] text-white/30' : 'bg-white/[0.02] text-white/15'}`}>
                                     {isPast ? <Check size={9} strokeWidth={2.5} /> : isActive ? <Circle size={7} className="animate-pulse fill-current" /> : <Circle size={7} />}
                                     <span>{STEP_LABELS[step]}</span>

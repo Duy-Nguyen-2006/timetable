@@ -8,9 +8,9 @@ export type PiCheckerPromptInput = {
 
 export function buildPiCheckerSystemPrompt() {
   return [
-    'Bạn là Checker Agent cho pipeline pi.dev timetable.',
+    'Bạn là Checker Agent cho pipeline timetable coder + checker.',
     'Bạn không viết code.',
-    'Nếu base constraints hoặc hard constraints fail, verdict phải là retry để Pi code lại.',
+    'Nếu base constraints hoặc hard constraints fail, verdict phải là retry để coder agent sửa lại artifact.',
     'Nếu pass base và hard, bạn chấp nhận kết quả và chỉ báo soft constraints chưa thỏa cho user.',
   ].join(' ')
 }

@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { existsSync, realpathSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import os from 'node:os'
 import path from 'node:path'
 
 import { getGeneratedSolverWorkspace } from '@/lib/generated-solver-artifacts'
@@ -92,6 +93,45 @@ function writeSandboxLog(request: SolverExecutionRequest, content: string) {
   writeFileSync(workspace.logPath, content, 'utf8')
 }
 
+function buildSandboxEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: process.env.PATH || '',
+    SYSTEMROOT: process.env.SYSTEMROOT || '',
+    HOME: os.tmpdir(),
+    TMPDIR: os.tmpdir(),
+    TEMP: os.tmpdir(),
+    TMP: os.tmpdir(),
+    PYTHONPATH: resolvePythonPath(),
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
+    TIMETABLE_SANDBOX_MODE: '1',
+  }
+}
+
+function validateArtifactPath(solverArtifactPath?: string) {
+  if (!solverArtifactPath) {
+    return null
+  }
+
+  const requestId = path.basename(path.dirname(solverArtifactPath))
+  const workspace = getGeneratedSolverWorkspace(requestId)
+
+  try {
+    const resolvedArtifactPath = realpathSync(solverArtifactPath)
+    const resolvedWorkspaceDir = realpathSync(workspace.rootDir)
+    const expectedArtifactPath = path.join(resolvedWorkspaceDir, 'generated_solver.py')
+
+    if (resolvedArtifactPath !== expectedArtifactPath) {
+      return 'Solver artifact path is outside the sandbox workspace.'
+    }
+  } catch {
+    return 'Solver artifact path could not be resolved inside sandbox workspace.'
+  }
+
+  return null
+}
+
 export function runSolverDirect(request: SolverProblem | SolverExecutionRequest): Promise<SolverDirectResult> {
   return new Promise((resolve) => {
     const runnerPath = resolveRunnerPath()
@@ -100,60 +140,69 @@ export function runSolverDirect(request: SolverProblem | SolverExecutionRequest)
       return
     }
 
-    const pythonBin = resolvePythonBin()
-    const child = spawn(pythonBin, [runnerPath], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PYTHONPATH: [resolvePythonPath(), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
-      },
-    })
+    const actualRequest: SolverExecutionRequest = 'problem' in request
+      ? request
+      : { problem: request }
+
+    const artifactPathError = validateArtifactPath(actualRequest.solverArtifactPath)
+    if (artifactPathError) {
+      writeSandboxLog(actualRequest, artifactPathError)
+      resolve({ success: false, error: artifactPathError })
+      return
+    }
+
+      const pythonBin = resolvePythonBin()
+      const child: ChildProcessWithoutNullStreams = spawn(pythonBin, [runnerPath], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: actualRequest.solverArtifactPath
+          ? path.dirname(actualRequest.solverArtifactPath)
+          : os.tmpdir(),
+        env: buildSandboxEnv(),
+      })
+
 
     let stdout = ''
     let stderr = ''
     let timedOut = false
 
-    const actualRequest: SolverExecutionRequest = 'problem' in request
-      ? request
-      : { problem: request }
+    const timeoutMs = Math.min(
+      SANDBOX_TIMEOUT_MS,
+      Math.max((actualRequest.problem.solverConfig.maxTimeSeconds + 15) * 1000, 60_000),
+    )
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGKILL')
+      writeSandboxLog(actualRequest, `timeout after ${timeoutMs / 1000}s`)
+      resolve({ success: false, error: `Solver timed out after ${timeoutMs / 1000}s` })
+    }, timeoutMs)
 
-    const timeoutMs = Math.max((actualRequest.problem.solverConfig.maxTimeSeconds + 15) * 1000, 60_000)
-      const timeoutId = setTimeout(() => {
-        timedOut = true
-        child.kill('SIGKILL')
-        writeSandboxLog(actualRequest, `timeout after ${timeoutMs / 1000}s`)
-        resolve({ success: false, error: `Solver timed out after ${timeoutMs / 1000}s` })
-      }, timeoutMs)
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
 
+    child.on('error', (error: Error) => {
+      clearTimeout(timeoutId)
+      writeSandboxLog(actualRequest, `spawn_error\n${error.message}`)
+      resolve({ success: false, error: error.message })
+    })
 
-      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    child.on('close', () => {
+      clearTimeout(timeoutId)
+      if (timedOut) return
+      const output = stdout.trim()
+      writeSandboxLog(actualRequest, [`stdout`, stdout.trim(), '', 'stderr', stderr.trim()].join('\n'))
+      if (!output) {
+        resolve({ success: false, error: `No output from solver.\nstderr: ${stderr}` })
+        return
+      }
+      try {
+        const parsed = JSON.parse(output) as SolverDirectOutput
+        resolve({ success: true, data: parsed })
+      } catch {
+        resolve({ success: false, error: `Invalid JSON from solver: ${output.slice(0, 200)}\nstderr: ${stderr}` })
+      }
+    })
 
-      child.on('error', (error: Error) => {
-        clearTimeout(timeoutId)
-        writeSandboxLog(actualRequest, `spawn_error\n${error.message}`)
-        resolve({ success: false, error: error.message })
-      })
-
-      child.on('close', () => {
-        clearTimeout(timeoutId)
-        if (timedOut) return
-        const output = stdout.trim()
-        writeSandboxLog(actualRequest, [`stdout`, stdout.trim(), '', 'stderr', stderr.trim()].join('\n'))
-        if (!output) {
-          resolve({ success: false, error: `No output from solver.\nstderr: ${stderr}` })
-          return
-        }
-        try {
-          const parsed = JSON.parse(output) as SolverDirectOutput
-          resolve({ success: true, data: parsed })
-        } catch {
-          resolve({ success: false, error: `Invalid JSON from solver: ${output.slice(0, 200)}\nstderr: ${stderr}` })
-        }
-      })
-
-      child.stdin.write(JSON.stringify(actualRequest))
-      child.stdin.end()
-
+    child.stdin.write(JSON.stringify(actualRequest))
+    child.stdin.end()
   })
 }

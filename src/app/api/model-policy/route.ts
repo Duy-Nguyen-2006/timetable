@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-const LOWPRIZO_API_BASE_URL = process.env.LOWPRIZO_API_BASE_URL || 'https://api.lowprizo.com'
+const LOWPRIZO_API_BASE_URL = process.env.PI_DEV_BASE_URL || process.env.LOWPRIZO_API_BASE_URL || 'https://api.lowprizo.com/v1'
 
 function readApiKey(request: Request) {
   const auth = request.headers.get('authorization')?.trim() || ''

@@ -6,7 +6,6 @@ export async function generateTimetableWithAI(
   payload: SolverRequestPayload,
   apiKey?: string,
   onProgress?: AgentProgressCallback,
-  options?: { disableLlm?: boolean },
 ): Promise<TimetableSolveResult> {
   const effectiveApiKey = apiKey ?? payload?.apiKey
   if (!effectiveApiKey?.trim()) {
@@ -16,11 +15,11 @@ export async function generateTimetableWithAI(
   if (!onProgress) {
     const response = await fetch('/api/generate-timetable', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-lowprizo-api-key': effectiveApiKey,
-        ...(options?.disableLlm ? { 'x-disable-llm': '1' } : {}),
-      },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-lowprizo-api-key': effectiveApiKey,
+        },
+
       body: JSON.stringify({ ...payload, apiKey: effectiveApiKey }),
     })
 
@@ -33,12 +32,12 @@ export async function generateTimetableWithAI(
 
   const response = await fetch('/api/generate-timetable', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      'x-lowprizo-api-key': effectiveApiKey,
-      ...(options?.disableLlm ? { 'x-disable-llm': '1' } : {}),
-    },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        'x-lowprizo-api-key': effectiveApiKey,
+      },
+
     body: JSON.stringify({ ...payload, apiKey: effectiveApiKey }),
   })
 

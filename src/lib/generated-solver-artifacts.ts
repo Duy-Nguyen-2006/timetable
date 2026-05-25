@@ -63,8 +63,9 @@ export function persistGeneratedSolverArtifact(
   requestId?: string,
 ): GeneratedSolverArtifact {
   const workspace = getGeneratedSolverWorkspace(requestId)
-  writeFileSync(workspace.artifactPath, input.solverCode, 'utf8')
-  writeFileSync(workspace.logPath, '', 'utf8')
+    writeFileSync(workspace.artifactPath, input.solverCode, { encoding: 'utf8', mode: 0o600 })
+    writeFileSync(workspace.logPath, '', { encoding: 'utf8', mode: 0o600 })
+
 
   return {
     path: workspace.artifactPath,

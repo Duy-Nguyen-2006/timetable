@@ -32,8 +32,9 @@ function createSSEStream() {
 
 function resolveApiKey(input: SolverRequestPayload, request: Request) {
   const apiKeyFromBody = input.apiKey?.trim()
-  const apiKeyFromHeader = request.headers.get('x-lowprizo-api-key')?.trim()
-  return apiKeyFromHeader || apiKeyFromBody || ''
+  const apiKeyFromLowprizoHeader = request.headers.get('x-lowprizo-api-key')?.trim()
+  const apiKeyFromAuthorization = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim()
+  return apiKeyFromLowprizoHeader || apiKeyFromAuthorization || apiKeyFromBody || ''
 }
 
 function resolveModel(request: Request) {
@@ -48,11 +49,11 @@ export async function POST(request: Request) {
     const apiKey = resolveApiKey(input, request)
     const model = resolveModel(request)
 
-    const requestId = randomUUID()
-    const disableLlm = request.headers.get('x-disable-llm') === '1'
+      const requestId = randomUUID()
 
-    if (!acceptSSE) {
-        const result = await runPiOrchestratedLoop(input, apiKey, model, undefined, requestId, disableLlm)
+      if (!acceptSSE) {
+          const result = await runPiOrchestratedLoop(input, apiKey, model, undefined, requestId)
+
 
       return NextResponse.json(result, {
         status: result.status === 'error' ? 503 : 200,
@@ -60,11 +61,12 @@ export async function POST(request: Request) {
       })
     }
 
-    const { stream, send, close } = createSSEStream()
+      const { stream, send, close } = createSSEStream()
 
-      runPiOrchestratedLoop(input, apiKey, model, send, requestId, disableLlm)
+        runPiOrchestratedLoop(input, apiKey, model, send, requestId)
 
-      .then((result) => {
+        .then((result) => {
+
 
         send({ type: 'result', data: result })
         close()

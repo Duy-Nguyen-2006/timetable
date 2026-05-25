@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
+import OpenAI from 'openai'
+
 import type {
   AgentEvent,
   AgentLifecycleEvent,
@@ -24,8 +26,7 @@ import { validateTimetableResult } from '@/lib/timetable-validator'
 
 const PI_MAX_ATTEMPTS = 3
 const DEFAULT_PI_MODEL = 'devstral-latest'
-const DEFAULT_PI_DEV_BASE_URL = 'https://api.pi.dev'
-const DEFAULT_PI_DEV_GENERATE_PATH = '/chat/completions'
+const DEFAULT_LOWPRIZO_BASE_URL = 'https://api.lowprizo.com/v1'
 const LOWPRIZO_RESPONSE_FORMAT_INSTRUCTION = [
   'Return exactly one JSON object and no markdown fences.',
   'The JSON must match this schema:',
@@ -116,16 +117,17 @@ function buildHardViolations(report: DeterministicValidationReport): ConstraintV
 }
 
 function buildCheckerReport(report: DeterministicValidationReport): CheckerReport {
-  const hardFailures = report.checks.filter((check) => !check.passed && (check.severity === 'base' || check.severity === 'hard'))
-  const softFailures = report.checks.filter((check) => !check.passed && check.severity === 'soft')
+    const hardFailures = report.checks.filter((check) => !check.passed && (check.severity === 'base' || check.severity === 'hard'))
+    const softFailures = report.checks.filter((check) => !check.passed && check.severity === 'soft')
+  
+    if (hardFailures.length > 0) {
+      return {
+        verdict: 'retry',
+        baseConstraintPass: report.baseConstraintPass,
+        hardConstraintPass: report.hardConstraintPass,
+        softConstraintScore: report.softConstraintScore,
+        summary: 'Checker yêu cầu coder agent sửa lại vì vẫn còn base/hard constraints chưa đạt.',
 
-  if (hardFailures.length > 0) {
-    return {
-      verdict: 'retry',
-      baseConstraintPass: report.baseConstraintPass,
-      hardConstraintPass: report.hardConstraintPass,
-      softConstraintScore: report.softConstraintScore,
-      summary: 'Checker yêu cầu Pi.dev code lại vì vẫn còn base/hard constraints chưa đạt.',
       retryInstructions: hardFailures.map((item) => item.suggestion ?? `${item.constraintId}: ${item.reason}`),
       violations: hardFailures,
       userSoftWarnings: softFailures,
@@ -155,15 +157,20 @@ function buildUserIntentSummary(payload: SolverRequestPayload) {
   ].join(', ')
 }
 
-function getPiDevBaseUrl() {
-  return (process.env.PI_DEV_BASE_URL || process.env.LOWPRIZO_API_BASE_URL || DEFAULT_PI_DEV_BASE_URL).trim()
+function getLowPrizoBaseUrl() {
+  return (process.env.PI_DEV_BASE_URL || process.env.LOWPRIZO_API_BASE_URL || DEFAULT_LOWPRIZO_BASE_URL).trim()
 }
 
-function getPiDevGenerateUrl() {
-  const baseUrl = getPiDevBaseUrl().replace(/\/$/, '')
-  const rawPath = (process.env.PI_DEV_GENERATE_PATH || DEFAULT_PI_DEV_GENERATE_PATH).trim() || DEFAULT_PI_DEV_GENERATE_PATH
-  const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`
-  return `${baseUrl}${path}`
+function getLowPrizoChatCompletionsUrl() {
+  const baseUrl = getLowPrizoBaseUrl().replace(/\/$/, '')
+  return `${baseUrl}/chat/completions`
+}
+
+function createPiSdkClient(apiKey: string) {
+  return new OpenAI({
+    apiKey,
+    baseURL: getLowPrizoBaseUrl(),
+  })
 }
 
 function buildRuntimeProblem(context: SolverProblemContext) {
@@ -428,9 +435,10 @@ function buildLifecycleEvents(runtimeAttempts: PiRuntimeAttemptRecord[], checker
       buildLifecycleEvent({
         phase: 'coding',
         title: `Coder generated attempt ${attempt.attempt}`,
-        detail: attempt.checkerFeedback.length > 0
-          ? 'Pi.dev coder đã code lại dựa trên feedback từ checker.'
-          : 'Pi.dev coder đã sinh candidate solver artifact đầu tiên.',
+          detail: attempt.checkerFeedback.length > 0
+            ? 'Coder agent đã code lại dựa trên feedback từ checker.'
+            : 'Coder agent đã sinh candidate solver artifact đầu tiên.',
+
         status: attempt.executionStatus === 'error' ? 'failed' : 'completed',
         attempt: attempt.attempt,
         artifactPath: attempt.artifactPath,
@@ -522,7 +530,8 @@ function buildInfeasibleResult(
       attemptHistorySummary: runtimeAttempts.map((attempt) => buildAttemptSummary(
         attempt.attempt,
         'coder',
-        `Pi attempt ${attempt.attempt} kết thúc với trạng thái ${attempt.executionStatus}.`,
+          `Coder attempt ${attempt.attempt} kết thúc với trạng thái ${attempt.executionStatus}.`,
+
         attempt.executionStatus === 'error' ? 'failed' : 'retry',
         attempt.diagnostics,
         attempt.artifactPath,
@@ -549,7 +558,8 @@ function buildRetryResult(args: {
     status: 'error',
     verdict: 'retry',
     requestId: args.requestId,
-    message: 'Checker đã phản hồi để Pi.dev code lại do còn vi phạm base/hard constraints.',
+      message: 'Checker đã phản hồi để coder agent code lại do còn vi phạm base/hard constraints.',
+
     diagnostics: args.execution.diagnostics,
     cells: args.execution.cells,
     executionErrors: args.execution.executionErrors,
@@ -569,7 +579,8 @@ function buildRetryResult(args: {
         ...args.runtimeAttempts.map((attempt) => buildAttemptSummary(
           attempt.attempt,
           'coder',
-          `Pi attempt ${attempt.attempt} đã chạy xong.`,
+            `Coder attempt ${attempt.attempt} đã chạy xong.`,
+
           attempt.executionStatus === 'solved' ? 'success' : attempt.executionStatus === 'error' ? 'failed' : 'retry',
           attempt.diagnostics,
           attempt.artifactPath,
@@ -628,7 +639,8 @@ function buildSuccessResult(args: {
         ...args.runtimeAttempts.map((attempt) => buildAttemptSummary(
           attempt.attempt,
           'coder',
-          `Pi attempt ${attempt.attempt} đã chạy xong.`,
+            `Coder attempt ${attempt.attempt} đã chạy xong.`,
+
           attempt.executionStatus === 'solved' ? 'success' : attempt.executionStatus === 'error' ? 'failed' : 'retry',
           attempt.diagnostics,
           attempt.artifactPath,
@@ -664,11 +676,12 @@ async function executePiRuntimeAttempt(args: {
   attempt: number
   context: SolverProblemContext
 }): Promise<SolverExecutionOutput & { generatedArtifact?: GeneratedSolverArtifact | null }> {
-  if (!args.apiKey.trim()) {
-    return {
-      status: 'error',
-      message: 'Thiếu API key để gọi pi.dev runtime.',
-      diagnostics: ['Missing x-lowprizo-api-key / apiKey for pi.dev runtime request.'],
+    if (!args.apiKey.trim()) {
+      return {
+        status: 'error',
+        message: 'Thiếu API key để gọi LowPrizo runtime.',
+        diagnostics: ['Missing x-lowprizo-api-key / apiKey for LowPrizo runtime request.'],
+
       cells: [],
       iisConstraintIds: [],
       executionErrors: [],
@@ -681,28 +694,40 @@ async function executePiRuntimeAttempt(args: {
     }
   }
 
-  const url = getPiDevGenerateUrl()
-  const fallbackSummary = `Pi.dev runtime attempt ${args.attempt} using model ${args.model || DEFAULT_PI_MODEL}.`
+    const url = getLowPrizoChatCompletionsUrl()
+    const fallbackSummary = `LowPrizo runtime attempt ${args.attempt} using model ${args.model || DEFAULT_PI_MODEL}.`
 
-  let response: Response
+
+  const client = createPiSdkClient(args.apiKey)
+
+  let rawBody: unknown
   try {
-    response = await fetch(url, {
-      method: 'POST',
+    rawBody = await client.chat.completions.create(buildPiDevRequestBody(args) as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, {
       headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${args.apiKey}`,
         'x-api-key': args.apiKey,
         'x-request-id': args.requestId,
       },
-      body: JSON.stringify(buildPiDevRequestBody(args)),
-      cache: 'no-store',
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown pi.dev network error'
+      const message = error instanceof Error ? error.message : 'Unknown LowPrizo network error'
+
+    const status = typeof error === 'object' && error && 'status' in error ? String(error.status) : null
+    const responseText = typeof error === 'object' && error && 'response' in error
+      ? JSON.stringify(error.response).slice(0, 2000)
+      : null
+
     return {
       status: 'error',
-      message: 'Không thể kết nối tới pi.dev runtime.',
-      diagnostics: [`pi.dev request failed: ${message}`, `url=${url}`],
+        message: 'Không thể kết nối tới LowPrizo runtime qua SDK.',
+        diagnostics: [
+          `Coder prompt length: ${args.coderPrompt.length}`,
+          `Checker feedback count: ${args.checkerFeedback.length}`,
+          `LowPrizo sdk request failed: ${message}`,
+
+        status ? `status=${status}` : null,
+        responseText ? `response=${responseText}` : null,
+        `url=${url}`,
+      ].filter((value): value is string => Boolean(value)),
       cells: [],
       iisConstraintIds: [],
       executionErrors: [],
@@ -715,47 +740,18 @@ async function executePiRuntimeAttempt(args: {
     }
   }
 
-  const contentType = response.headers.get('content-type') || ''
-  const rawBody = contentType.includes('application/json') ? await response.json() : await response.text()
-
-  if (!response.ok) {
-    const bodyText = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody)
-    const errorMessage = typeof rawBody === 'object' && rawBody && 'error' in rawBody
-      ? JSON.stringify(rawBody.error)
-      : `pi.dev runtime returned HTTP ${response.status}`
-
-    return {
-      status: 'error',
-      message: errorMessage,
-      diagnostics: [
-        `Pi coder prompt length: ${args.coderPrompt.length}`,
-        `Pi checker feedback count: ${args.checkerFeedback.length}`,
-        `pi.dev url: ${url}`,
-        `upstream body: ${bodyText.slice(0, 2000)}`,
-      ],
-      cells: [],
-      iisConstraintIds: [],
-      executionErrors: [],
-      validationErrors: [],
-      violations: [],
-      solverStats: null,
-      loadError: errorMessage,
-      runtimeError: errorMessage,
-      generatedArtifact: null,
-    }
-  }
-
   const completionText = extractChatCompletionText(rawBody)
   if (!completionText) {
     return {
       status: 'error',
       message: 'LowPrizo did not return assistant content.',
-      diagnostics: [
-        `Pi coder prompt length: ${args.coderPrompt.length}`,
-        `Pi checker feedback count: ${args.checkerFeedback.length}`,
-        `pi.dev url: ${url}`,
-        `upstream body: ${JSON.stringify(rawBody).slice(0, 2000)}`,
-      ],
+        diagnostics: [
+          `Coder prompt length: ${args.coderPrompt.length}`,
+          `Checker feedback count: ${args.checkerFeedback.length}`,
+          `LowPrizo url: ${url}`,
+          `upstream body: ${JSON.stringify(rawBody).slice(0, 2000)}`,
+        ],
+
       cells: [],
       iisConstraintIds: [],
       executionErrors: [],
@@ -776,12 +772,13 @@ async function executePiRuntimeAttempt(args: {
     return {
       status: 'error',
       message,
-      diagnostics: [
-        `Pi coder prompt length: ${args.coderPrompt.length}`,
-        `Pi checker feedback count: ${args.checkerFeedback.length}`,
-        `pi.dev url: ${url}`,
-        `completion text: ${completionText.slice(0, 2000)}`,
-      ],
+        diagnostics: [
+          `Coder prompt length: ${args.coderPrompt.length}`,
+          `Checker feedback count: ${args.checkerFeedback.length}`,
+          `LowPrizo url: ${url}`,
+          `completion text: ${completionText.slice(0, 2000)}`,
+        ],
+
       cells: [],
       iisConstraintIds: [],
       executionErrors: [],
@@ -804,13 +801,15 @@ async function executePiRuntimeAttempt(args: {
   if (!generatedArtifact) {
     return {
       status: 'error',
-      message: 'Pi.dev không trả về solver artifact để chạy trong sandbox.',
-      diagnostics: [
-        `Pi coder prompt length: ${args.coderPrompt.length}`,
-        `Pi checker feedback count: ${args.checkerFeedback.length}`,
-        `pi.dev url: ${url}`,
-        `completion text: ${completionText.slice(0, 2000)}`,
-      ],
+        message: 'LowPrizo không trả về solver artifact để chạy trong sandbox.',
+
+        diagnostics: [
+          `Coder prompt length: ${args.coderPrompt.length}`,
+          `Checker feedback count: ${args.checkerFeedback.length}`,
+          `LowPrizo url: ${url}`,
+          `completion text: ${completionText.slice(0, 2000)}`,
+        ],
+
       cells: [],
       iisConstraintIds: [],
       executionErrors: [],
@@ -830,10 +829,11 @@ async function executePiRuntimeAttempt(args: {
   })
 
   const workspace = getGeneratedSolverWorkspace(args.requestId)
-  const mergedDiagnostics = [
-    `Pi coder prompt length: ${args.coderPrompt.length}`,
-    `Pi checker feedback count: ${args.checkerFeedback.length}`,
-    `pi.dev url: ${url}`,
+    const mergedDiagnostics = [
+      `Coder prompt length: ${args.coderPrompt.length}`,
+      `Checker feedback count: ${args.checkerFeedback.length}`,
+      `LowPrizo url: ${url}`,
+
     `sandbox artifact path: ${generatedArtifact.path}`,
     `sandbox log path: ${workspace.logPath}`,
     ...(Array.isArray(body.diagnostics) ? body.diagnostics : []),
@@ -842,7 +842,8 @@ async function executePiRuntimeAttempt(args: {
   if (!sandboxExecution.success) {
     return {
       status: 'error',
-      message: 'Sandbox không chạy được solver artifact mà Pi.dev vừa sinh.',
+        message: 'Sandbox không chạy được solver artifact mà coder agent vừa sinh.',
+
       diagnostics: [...mergedDiagnostics, sandboxExecution.error],
       cells: [],
       iisConstraintIds: [],
@@ -862,7 +863,8 @@ async function executePiRuntimeAttempt(args: {
     status: sandboxResult.status === 'solved' || sandboxResult.status === 'infeasible' ? sandboxResult.status : 'error',
     message: typeof sandboxResult.message === 'string' && sandboxResult.message.trim().length > 0
       ? sandboxResult.message
-      : 'Sandbox đã chạy solver artifact của Pi.dev.',
+        : 'Sandbox đã chạy solver artifact của coder agent.',
+
     diagnostics: [...mergedDiagnostics, ...sandboxResult.diagnostics],
     cells: normalizeRuntimeCells(sandboxResult.cells, args.context),
     iisConstraintIds: Array.isArray(sandboxResult.iisConstraintIds) ? sandboxResult.iisConstraintIds : [],
@@ -883,7 +885,6 @@ export async function runPiOrchestratedLoop(
   model: string,
   emit?: ProgressEmitter,
   requestId = randomUUID(),
-  _disableLlm = false,
   deps: PiRuntimeDependencies = {},
 ): Promise<TimetableSolveResult> {
   const startedAt = Date.now()
@@ -893,7 +894,8 @@ export async function runPiOrchestratedLoop(
   let checkerFeedback: string[] = []
   let finalExecution: SolverExecutionOutput | null = null
 
-  emit?.({ type: 'status', message: 'Khởi tạo pipeline pi.dev + checker...', iteration: 1, maxIterations: PI_MAX_ATTEMPTS })
+    emit?.({ type: 'status', message: 'Khởi tạo pipeline coder + checker...', iteration: 1, maxIterations: PI_MAX_ATTEMPTS })
+
 
   for (let attempt = 1; attempt <= PI_MAX_ATTEMPTS; attempt += 1) {
     const coderPrompt = buildPiCoderPrompt({
@@ -905,13 +907,14 @@ export async function runPiOrchestratedLoop(
     emit?.({
       type: 'phase',
       phase: 'pi_coder',
-      message: checkerFeedback.length === 0
-        ? 'Pi.dev coder agent đang tạo solver candidate...'
-        : 'Pi.dev coder agent đang code lại theo feedback từ checker...',
+        message: checkerFeedback.length === 0
+          ? 'Coder agent đang tạo solver candidate...'
+          : 'Coder agent đang code lại theo feedback từ checker...',
+
       iteration: attempt,
       maxIterations: PI_MAX_ATTEMPTS,
     })
-    emit?.({ type: 'pi_coder_started', attempt, message: `Pi.dev coder bắt đầu attempt ${attempt}.` })
+    emit?.({ type: 'pi_coder_started', attempt, message: `Coder agent bắt đầu attempt ${attempt}.` })
     emit?.({ type: 'debug', message: buildPiCoderSystemPrompt(), detail: coderPrompt })
 
     const execution = await (deps.execute ?? executePiRuntimeAttempt)({
@@ -928,7 +931,8 @@ export async function runPiOrchestratedLoop(
     emit?.({
       type: 'pi_coder_finished',
       attempt,
-      message: `Pi.dev coder đã sinh artifact cho attempt ${attempt}.`,
+        message: `Coder agent đã sinh artifact cho attempt ${attempt}.`,
+
       artifactPath: execution.artifactPath,
       sourceHash: execution.generatedArtifact?.sourceHash ?? execution.artifactPath,
     })
@@ -971,15 +975,16 @@ export async function runPiOrchestratedLoop(
 
       if (execution.status !== 'solved' || execution.cells.length === 0) {
         if (execution.loadError === 'missing_api_key' || execution.runtimeError === 'missing_api_key') {
-          emit?.({ type: 'pi_runtime_missing', message: 'Thiếu cấu hình/API key để gọi pi.dev runtime.' })
-        } else {
-          emit?.({ type: 'checker_infeasible', attempt, message: 'Checker xác nhận Pi.dev chưa tạo được thời khóa biểu.' })
-        }
-        return buildInfeasibleResult(
+            emit?.({ type: 'pi_runtime_missing', message: 'Thiếu cấu hình/API key để gọi LowPrizo runtime.' })
+          } else {
+            emit?.({ type: 'checker_infeasible', attempt, message: 'Checker xác nhận coder agent chưa tạo được thời khóa biểu.' })
+          }
+          return buildInfeasibleResult(
+  
+          requestId,
+          startedAt,
+          'Coder agent không tạo ra được timetable candidate hợp lệ.',
 
-        requestId,
-        startedAt,
-        'Pi.dev không tạo ra được timetable candidate hợp lệ.',
         execution.diagnostics.length > 0 ? execution.diagnostics : [execution.message],
         runtimeAttempts,
         generatedArtifacts,
@@ -998,7 +1003,8 @@ export async function runPiOrchestratedLoop(
       emit?.({
         type: 'checker_retry_requested',
         attempt,
-        message: 'Checker phát hiện base/hard constraints chưa đạt. Pi.dev cần code lại.',
+          message: 'Checker phát hiện base/hard constraints chưa đạt. Coder agent cần code lại.',
+
         retryInstructions: checkerReport.retryInstructions,
       })
 
@@ -1039,7 +1045,8 @@ export async function runPiOrchestratedLoop(
   return buildInfeasibleResult(
     requestId,
     startedAt,
-    'Pi.dev đã dùng hết số lần retry nhưng vẫn không tạo được kết quả đạt base/hard constraints.',
+      'Coder agent đã dùng hết số lần retry nhưng vẫn không tạo được kết quả đạt base/hard constraints.',
+
     finalExecution?.diagnostics ?? ['Hết số lần retry.'],
     runtimeAttempts,
     generatedArtifacts,
