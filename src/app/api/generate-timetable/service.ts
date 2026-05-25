@@ -51,25 +51,53 @@ const LOWPRIZO_RESPONSE_FORMAT_INSTRUCTION = [
 
 type ProgressEmitter = (event: AgentEvent) => void
 
-const SOLVER_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
-  type: 'function',
-  function: {
-    name: 'submit_solver_code',
-    description: 'Submit Python OR-Tools solver code for execution in sandbox. The code MUST define a solve_timetable(problem) function that uses timetable_solver.base_solver_template. Returns execution result JSON.',
-    parameters: {
-      type: 'object',
-      properties: {
-        code: {
-          type: 'string',
-          description: 'Complete Python source code defining solve_timetable(problem)',
+const AGENT_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'bash',
+      description: 'Execute a bash command and return stdout+stderr. Use this to run Python scripts, install packages, check files, etc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'The bash command to execute' },
         },
+        required: ['command'],
       },
-      required: ['code'],
     },
   },
-}
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: 'Write content to a file. Creates the file if it does not exist, overwrites if it does.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative file path within workspace' },
+          content: { type: 'string', description: 'File content to write' },
+        },
+        required: ['path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read the content of a file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative file path within workspace' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+]
 
-const MAX_TOOL_ITERATIONS = 3
+const MAX_AGENT_TURNS = 15
 
 
 type PiRuntimeDependencies = {
@@ -704,74 +732,137 @@ async function executePiRuntimeAttempt(args: {
       status: 'error',
       message: 'Thiếu API key để gọi LowPrizo runtime.',
       diagnostics: ['Missing x-lowprizo-api-key / apiKey for LowPrizo runtime request.'],
-      cells: [],
-      iisConstraintIds: [],
-      executionErrors: [],
-      validationErrors: [],
-      violations: [],
-      solverStats: null,
-      loadError: 'missing_api_key',
-      runtimeError: 'missing_api_key',
-      generatedArtifact: null,
+      cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
+      violations: [], solverStats: null, loadError: 'missing_api_key',
+      runtimeError: 'missing_api_key', generatedArtifact: null,
     }
   }
 
+  const { execSync } = await import('node:child_process')
+  const { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync } = await import('node:fs')
+  const pathMod = await import('node:path')
+
   const client = createPiSdkClient(args.apiKey)
   const runtimeProblem = buildRuntimeProblem(args.context)
-  const fallbackSummary = `Tool-calling attempt ${args.attempt} using model ${args.model || DEFAULT_PI_MODEL}.`
+  const workspace = getGeneratedSolverWorkspace(args.requestId)
+  const workDir = workspace.rootDir
+
+  // Setup workspace: copy Python templates + write problem data
+  const solverDir = pathMod.default.join(workDir, 'timetable_solver')
+  if (!existsSync(solverDir)) mkdirSync(solverDir, { recursive: true })
+
+  const pythonSrcDir = pathMod.default.join(process.cwd(), 'python', 'timetable_solver')
+  for (const f of ['__init__.py', 'base_solver_template.py', 'template_solver.py', 'runner.py']) {
+    const src = pathMod.default.join(pythonSrcDir, f)
+    if (existsSync(src)) {
+      writeFileSync(pathMod.default.join(solverDir, f), readFileSync(src, 'utf8'))
+    }
+  }
+
+  // Write problem data
+  writeFileSync(pathMod.default.join(workDir, 'problem.json'), JSON.stringify(args.context.problem, null, 2))
+  // Write runner input
+  const runnerInput = {
+    problem: args.context.problem,
+    solverArtifactPath: pathMod.default.join(workDir, 'generated_solver.py'),
+    entrypoint: 'solve_timetable',
+  }
+  writeFileSync(pathMod.default.join(workDir, 'runner_input.json'), JSON.stringify(runnerInput))
+
+  const pythonBin = existsSync('/usr/bin/python3') ? 'python3' : 'python'
+
+  // Agent tool execution
+  function executeTool(name: string, toolArgs: Record<string, string>): string {
+    try {
+      if (name === 'bash') {
+        const cmd = toolArgs.command || ''
+        const result = execSync(cmd, {
+          cwd: workDir,
+          timeout: 60_000,
+          maxBuffer: 5 * 1024 * 1024,
+          env: { ...process.env, PYTHONPATH: workDir, PYTHONDONTWRITEBYTECODE: '1' },
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        return typeof result === 'string' ? result.slice(0, 10000) : ''
+      }
+      if (name === 'write_file') {
+        const filePath = pathMod.default.resolve(workDir, toolArgs.path || 'output.txt')
+        writeFileSync(filePath, toolArgs.content || '')
+        return `File written: ${toolArgs.path} (${(toolArgs.content || '').length} bytes)`
+      }
+      if (name === 'read_file') {
+        const filePath = pathMod.default.resolve(workDir, toolArgs.path || '')
+        if (!existsSync(filePath)) return `Error: File not found: ${toolArgs.path}`
+        return readFileSync(filePath, 'utf8').slice(0, 15000)
+      }
+      return `Unknown tool: ${name}`
+    } catch (err: unknown) {
+      const e = err as { stderr?: string; stdout?: string; message?: string }
+      return `Error: ${(e.stderr || e.stdout || e.message || 'Unknown error').slice(0, 5000)}`
+    }
+  }
+
+  // Build agent system prompt
+  const systemPrompt = buildPiCoderSystemPrompt()
+
+  // Build user message
+  const userContent = [
+    'You are a coding agent with bash, write_file, and read_file tools.',
+    'Your workspace has:',
+    '- timetable_solver/template_solver.py — WORKING reference solver that handles ALL constraint types',
+    '- timetable_solver/base_solver_template.py — Base OR-Tools model',
+    '- timetable_solver/runner.py — Execution runner',
+    '- problem.json — The timetable problem data',
+    '- runner_input.json — Input for the runner',
+    '',
+    'TASK:',
+    '1. Copy the template solver as your starting point: cp timetable_solver/template_solver.py generated_solver.py',
+    '2. Test by running: cat runner_input.json | ' + pythonBin + ' timetable_solver/runner.py',
+    '3. Check if the output JSON has status "solved" or "infeasible"',
+    '4. If there are errors, read the error, fix generated_solver.py and retry',
+    '5. Once you get valid output, write the complete JSON output to result.json using write_file',
+    '',
+    'IMPORTANT: template_solver.py already handles parsedHard and parsedSoft constraint types correctly.',
+    'It should work directly for most problems. Only modify if there are specific runtime errors.',
+    ...(args.checkerFeedback.length > 0 ? ['', 'CHECKER FEEDBACK (fix these issues in the solver):', ...args.checkerFeedback] : []),
+    '',
+    'Problem: ' + JSON.stringify({
+      slots: args.context.problem.slots.length,
+      assignments: args.context.problem.assignments.length,
+      hardConstraints: args.context.problem.hardConstraints.length,
+      softConstraints: args.context.problem.softConstraints.length,
+    }),
+  ].join('\n')
 
   const messages: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam> = [
-    {
-      role: 'system' as const,
-      content: buildPiCoderSystemPrompt(),
-    },
-    {
-      role: 'user' as const,
-      content: JSON.stringify({
-        task: 'Generate OR-Tools solver code for this timetable problem. Submit via submit_solver_code tool. Study the reference solver and adapt it for the specific constraints in this problem.',
-        problem: runtimeProblem,
-        checkerFeedback: args.checkerFeedback.length > 0 ? args.checkerFeedback : undefined,
-      }),
-    },
+    { role: 'system' as const, content: systemPrompt },
+    { role: 'user' as const, content: userContent },
   ]
 
   let lastArtifact: GeneratedSolverArtifact | null = null
-  let lastSandboxSuccess = false
-  let lastSandboxData: SolverExecutionOutput | null = null
-  let lastSandboxError: string | null = null
+  let solverOutputJson: string | null = null
+  let totalToolCalls = 0
 
-  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-    args.emit?.({ type: 'status', message: `Tool-calling iteration ${iteration + 1}/${MAX_TOOL_ITERATIONS}: Gọi LLM để sinh solver code...`, iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
+  args.emit?.({ type: 'status', message: 'Coding agent bắt đầu...', iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
 
+  for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
     let completion: OpenAI.Chat.Completions.ChatCompletion
     try {
       completion = await client.chat.completions.create({
         model: args.model || DEFAULT_PI_MODEL,
         messages,
-        tools: [SOLVER_TOOL],
-        tool_choice: iteration === 0
-          ? { type: 'function' as const, function: { name: 'submit_solver_code' } }
-          : 'auto' as const,
+        tools: AGENT_TOOLS,
+        tool_choice: 'auto' as const,
         temperature: 0.2,
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown LowPrizo network error'
-      const status = typeof error === 'object' && error && 'status' in error ? String(error.status) : null
+      const msg = error instanceof Error ? error.message : 'Unknown error'
       return {
-        status: 'error',
-        message: 'Không thể kết nối tới LowPrizo runtime qua SDK.',
-        diagnostics: [
-          `Tool-calling SDK request failed: ${message}`,
-          status ? `status=${status}` : null,
-        ].filter((v): v is string => Boolean(v)),
-        cells: [],
-        iisConstraintIds: [],
-        executionErrors: [],
-        validationErrors: [],
-        violations: [],
-        solverStats: null,
-        loadError: message,
-        runtimeError: message,
+        status: 'error', message: 'Không thể kết nối tới LowPrizo runtime.',
+        diagnostics: [`Agent SDK request failed at turn ${turn}: ${msg}`],
+        cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
+        violations: [], solverStats: null, loadError: msg, runtimeError: msg,
         generatedArtifact: lastArtifact,
       }
     }
@@ -782,176 +873,105 @@ async function executePiRuntimeAttempt(args: {
     const assistantMsg = choice.message
     messages.push(assistantMsg as OpenAI.Chat.Completions.ChatCompletionMessageParam)
 
+    // No tool calls = agent is done talking
     if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
       break
     }
 
-    const toolCall = assistantMsg.tool_calls[0]
-    if (toolCall.function.name !== 'submit_solver_code') {
-      messages.push({
-        role: 'tool' as const,
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({ error: `Unknown tool: ${toolCall.function.name}. Use submit_solver_code.` }),
+    // Process ALL tool calls in this turn
+    for (const toolCall of assistantMsg.tool_calls) {
+      totalToolCalls++
+      let toolArgs: Record<string, string> = {}
+      try { toolArgs = JSON.parse(toolCall.function.arguments) } catch { toolArgs = {} }
+
+      args.emit?.({
+        type: 'status',
+        message: `Agent [turn ${turn+1}] gọi ${toolCall.function.name}${toolCall.function.name === 'bash' ? ': ' + (toolArgs.command || '').slice(0, 80) : ''}`,
+        iteration: args.attempt,
+        maxIterations: PI_MAX_ATTEMPTS,
       })
-      continue
-    }
 
-    let code: string
-    try {
-      const toolArgs = JSON.parse(toolCall.function.arguments)
-      code = toolArgs.code
-    } catch {
-      messages.push({
-        role: 'tool' as const,
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({ error: 'Invalid tool arguments JSON. Provide {code: "...python code..."}.' }),
-      })
-      continue
-    }
-
-    if (!code || typeof code !== 'string' || code.trim().length === 0) {
-      messages.push({
-        role: 'tool' as const,
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({ error: 'Empty solver code submitted. Provide valid Python code.' }),
-      })
-      continue
-    }
-
-    const artifact = normalizeGeneratedArtifact(
-      { solverCode: code, entrypoint: 'solve_timetable', summary: fallbackSummary, assumptions: args.checkerFeedback },
-      args.requestId,
-      fallbackSummary,
-      args.checkerFeedback,
-    )
-
-    if (!artifact) {
-      messages.push({
-        role: 'tool' as const,
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({ error: 'Failed to persist solver artifact to disk.' }),
-      })
-      continue
-    }
-
-    lastArtifact = artifact
-
-    args.emit?.({ type: 'sandbox_started', attempt: args.attempt, message: `Sandbox đang chạy solver code (iteration ${iteration + 1})...`, artifactPath: artifact.path })
-
-    const sandboxResult = await runSolverDirect({
-      problem: args.context.problem,
-      solverArtifactPath: artifact.path,
-      entrypoint: artifact.entrypoint,
-    })
-
-    if (sandboxResult.success) {
-      const data = sandboxResult.data
-      lastSandboxSuccess = true
-      lastSandboxData = data as SolverExecutionOutput
-      lastSandboxError = null
-
-      args.emit?.({ type: 'sandbox_finished', attempt: args.attempt,
-        message: data.status === 'solved'
-          ? `Sandbox thành công! Tạo được ${(data.cells || []).filter((c: { entries?: unknown[] }) => (c.entries || []).length > 0).length} ô tiết.`
-          : data.status === 'infeasible'
-            ? 'Sandbox xác nhận: bài toán không có nghiệm.'
-            : `Sandbox gặp lỗi: ${data.message?.slice(0, 100)}`,
-        artifactPath: lastArtifact?.path,
-        status: data.status as SolverExecutionOutput['status'],
-      })
+      const result = executeTool(toolCall.function.name, toolArgs)
 
       messages.push({
         role: 'tool' as const,
         tool_call_id: toolCall.id,
-        content: JSON.stringify({
-          execution_status: 'success',
-          solver_status: data.status,
-          message: data.message,
-          cell_count: (data.cells || []).length,
-          filled_cells: (data.cells || []).filter((c: { entries?: unknown[] }) => (c.entries || []).length > 0).length,
-          diagnostics: (data.diagnostics || []).slice(0, 5),
-          execution_errors: (data.executionErrors || []).slice(0, 5),
-          iis_constraint_ids: data.iisConstraintIds || [],
-        }),
+        content: result,
       })
 
-      if (data.status === 'solved' || data.status === 'infeasible') {
-        break
+      // Track if solver was written
+      if (toolCall.function.name === 'write_file' && (toolArgs.path || '').includes('generated_solver')) {
+        lastArtifact = normalizeGeneratedArtifact(
+          { solverCode: toolArgs.content || '', entrypoint: 'solve_timetable',
+            summary: `Agent turn ${turn+1}`, assumptions: args.checkerFeedback },
+          args.requestId,
+          `Agent attempt ${args.attempt} turn ${turn+1}`,
+          args.checkerFeedback,
+        )
       }
-    } else {
-      lastSandboxSuccess = false
-      lastSandboxData = null
-      lastSandboxError = sandboxResult.error
 
-      args.emit?.({ type: 'sandbox_finished', attempt: args.attempt,
-        message: `Sandbox lỗi (iteration ${iteration + 1}): ${(sandboxResult.error || '').slice(0, 150)}. LLM sẽ fix code...`,
-        artifactPath: lastArtifact?.path,
-        status: 'error',
-      })
+      // Track if result.json was written
+      if (toolCall.function.name === 'write_file' && (toolArgs.path || '').includes('result.json')) {
+        solverOutputJson = toolArgs.content || null
+      }
 
-      messages.push({
-        role: 'tool' as const,
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({
-          execution_status: 'error',
-          error: (sandboxResult.error || '').slice(0, 3000),
-          hint: 'Fix the Python code and resubmit. Make sure to import from timetable_solver.base_solver_template and define solve_timetable(problem).',
-        }),
-      })
+      // Also check bash output for solver JSON
+      if (toolCall.function.name === 'bash' && result.includes('"status"') && (result.includes('"solved"') || result.includes('"infeasible"'))) {
+        try {
+          JSON.parse(result.trim())
+          solverOutputJson = result.trim()
+        } catch { /* not valid JSON */ }
+      }
+    }
+
+    // Check if result.json exists in workspace
+    const resultPath = pathMod.default.join(workDir, 'result.json')
+    if (existsSync(resultPath) && !solverOutputJson) {
+      try { solverOutputJson = readFileSync(resultPath, 'utf8') } catch { /* ignore */ }
+    }
+
+    // If we have solver output, we can stop
+    if (solverOutputJson) {
+      args.emit?.({ type: 'status', message: `Agent hoàn thành sau ${totalToolCalls} tool calls!`, iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
+      break
     }
   }
 
-  if (!lastSandboxSuccess || !lastSandboxData) {
-    const workspace = lastArtifact ? getGeneratedSolverWorkspace(args.requestId) : null
-    return {
-      status: 'error',
-      message: lastSandboxError
-        ? 'Sandbox không chạy được solver artifact mà coder agent vừa sinh.'
-        : 'LLM không gọi submit_solver_code tool hoặc không tạo được solver code.',
-      diagnostics: [
-        lastSandboxError || 'No successful tool call execution.',
-        `Coder prompt length: ${args.coderPrompt.length}`,
-        `Checker feedback count: ${args.checkerFeedback.length}`,
-        workspace ? `sandbox log path: ${workspace.logPath}` : null,
-      ].filter((v): v is string => Boolean(v)),
-      cells: [],
-      iisConstraintIds: [],
-      executionErrors: [],
-      validationErrors: [],
-      violations: [],
-      solverStats: null,
-      artifactPath: lastArtifact?.path,
-      loadError: lastSandboxError || 'no_tool_call',
-      runtimeError: lastSandboxError || 'no_tool_call',
-      generatedArtifact: lastArtifact,
+  // Parse result
+  if (solverOutputJson) {
+    try {
+      const parsed = JSON.parse(solverOutputJson)
+      return {
+        status: parsed.status === 'solved' || parsed.status === 'infeasible' ? parsed.status : 'error',
+        message: parsed.message || 'Agent đã code và chạy solver thành công.',
+        diagnostics: [...(parsed.diagnostics || []), `Agent used ${totalToolCalls} tool calls`],
+        cells: normalizeRuntimeCells(parsed.cells || [], args.context),
+        iisConstraintIds: parsed.iisConstraintIds || [],
+        executionErrors: parsed.executionErrors || [],
+        validationErrors: parsed.validationErrors || [],
+        violations: parsed.violations || [],
+        solverStats: parsed.solverStats || null,
+        artifactPath: lastArtifact?.path || parsed.artifactPath,
+        loadError: null, runtimeError: null,
+        generatedArtifact: lastArtifact,
+      }
+    } catch {
+      return {
+        status: 'error', message: 'Agent output không parse được JSON.',
+        diagnostics: [`Raw output: ${solverOutputJson.slice(0, 500)}`, `Tool calls: ${totalToolCalls}`],
+        cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
+        violations: [], solverStats: null, loadError: 'invalid_json', runtimeError: 'invalid_json',
+        generatedArtifact: lastArtifact,
+      }
     }
   }
-
-  const workspace = getGeneratedSolverWorkspace(args.requestId)
-  const mergedDiagnostics = [
-    `Coder prompt length: ${args.coderPrompt.length}`,
-    `Checker feedback count: ${args.checkerFeedback.length}`,
-    `LowPrizo url: ${getLowPrizoBaseUrl()}`,
-    `sandbox artifact path: ${lastArtifact?.path ?? 'N/A'}`,
-    `sandbox log path: ${workspace.logPath}`,
-    ...(Array.isArray(lastSandboxData.diagnostics) ? lastSandboxData.diagnostics : []),
-  ]
 
   return {
-    status: lastSandboxData.status === 'solved' || lastSandboxData.status === 'infeasible' ? lastSandboxData.status : 'error',
-    message: typeof lastSandboxData.message === 'string' && lastSandboxData.message.trim().length > 0
-      ? lastSandboxData.message
-      : 'Sandbox đã chạy solver artifact của coder agent.',
-    diagnostics: mergedDiagnostics,
-    cells: normalizeRuntimeCells(lastSandboxData.cells, args.context),
-    iisConstraintIds: Array.isArray(lastSandboxData.iisConstraintIds) ? lastSandboxData.iisConstraintIds : [],
-    executionErrors: Array.isArray(lastSandboxData.executionErrors) ? lastSandboxData.executionErrors : [],
-    validationErrors: Array.isArray(lastSandboxData.validationErrors) ? lastSandboxData.validationErrors : [],
-    violations: Array.isArray(lastSandboxData.violations) ? lastSandboxData.violations : [],
-    solverStats: lastSandboxData.solverStats ?? null,
-    artifactPath: lastSandboxData.artifactPath ?? lastArtifact?.path,
-    loadError: lastSandboxData.loadError ?? null,
-    runtimeError: lastSandboxData.runtimeError ?? null,
+    status: 'error',
+    message: 'Coding agent không tạo được kết quả sau ' + totalToolCalls + ' tool calls.',
+    diagnostics: [`Total turns used. Tool calls: ${totalToolCalls}`],
+    cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
+    violations: [], solverStats: null, loadError: 'no_result', runtimeError: 'no_result',
     generatedArtifact: lastArtifact,
   }
 }
