@@ -843,8 +843,22 @@ export default function App({ onBackToLanding }) {
     const constraintConfirmations = constraintList.map((c) => ({
       id: c.id,
       original: c.text,
-      interpreted: c.text,
+      interpreted: c.type === 'preferred' && c.weight != null
+        ? `${c.text} [preferred:${c.weight}]`
+        : `${c.text} [required]`,
       accepted: true,
+    }))
+
+    const requestConstraints = constraintList.map((constraint) => ({
+      type: constraint.type === 'required' ? 'required' : 'preferred',
+      text: constraint.text,
+      ...(constraint.type === 'preferred'
+        ? {
+            weight: constraint.weight === 8 || constraint.weight === 5 || constraint.weight === 3
+              ? constraint.weight
+              : 5,
+          }
+        : {}),
     }))
     const needConfirm = constraintConfirmations.length > 0
     if (needConfirm) {
@@ -870,19 +884,20 @@ export default function App({ onBackToLanding }) {
       setAgentElapsed((prev) => prev + 1)
     }, 1000)
 
-    try {
-      const result = await generateTimetableWithAI(
-        {
-          apiKey,
-          days: selectedSpreadsheetDays,
-          sessions: selectedSessionData,
-          periodCounts: periods,
-          deletedPeriods,
-          assignments: assignmentList,
-          constraints: constraintList,
-          constraintConfirmations,
-        },
-        apiKey ?? undefined,
+      try {
+        const result = await generateTimetableWithAI(
+          {
+            apiKey,
+            days: selectedSpreadsheetDays,
+            sessions: selectedSessionData,
+            periodCounts: periods,
+            deletedPeriods,
+            assignments: assignmentList,
+            constraints: requestConstraints,
+            constraintConfirmations,
+          },
+          apiKey ?? undefined,
+
         (event: AgentEvent) => {
           switch (event.type) {
             case 'status':
