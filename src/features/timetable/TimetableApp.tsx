@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
   ArrowLeft,
   BookOpen,
@@ -9,10 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
-  Code,
   Download,
-  Eye,
-  EyeOff,
   Hash,
   Loader2,
   Minus,
@@ -30,7 +28,13 @@ import * as XLSX from 'xlsx'
 
 import { generateTimetableWithAI } from './ai/client'
 import { useApiKeyStore } from './ai/api-key-store'
-import type { AgentEvent, TimetableSolveResult } from './ai/types'
+import type {
+  AgentEvent,
+  CheckerReport,
+  ConstraintCheckItem,
+  DeterministicValidationReport,
+  TimetableSolveResult,
+} from './ai/types'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -57,6 +61,121 @@ import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically
 const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
+
+const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
+
+function formatDuration(ms: number) {
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(ms >= 10_000 ? 0 : 1)}s`
+}
+
+function formatNullableNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) return '—'
+  return value.toLocaleString('vi-VN')
+}
+
+function getVerdictBadge(verdict: TimetableSolveResult['verdict']) {
+  switch (verdict) {
+    case 'accept':
+      return {
+        label: 'Accepted',
+        className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+      }
+    case 'retry':
+      return {
+        label: 'Retry',
+        className: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
+      }
+    case 'infeasible':
+      return {
+        label: 'Infeasible',
+        className: 'border-red-400/30 bg-red-400/10 text-red-300',
+      }
+    default:
+      return {
+        label: 'Error',
+        className: 'border-white/15 bg-white/[0.04] text-white/70',
+      }
+  }
+}
+
+function getCheckSeverityBadge(severity: ConstraintCheckItem['severity']) {
+  switch (severity) {
+    case 'base':
+      return 'border-red-400/25 bg-red-400/10 text-red-300'
+    case 'hard':
+      return 'border-amber-400/25 bg-amber-400/10 text-amber-300'
+    default:
+      return 'border-sky-400/25 bg-sky-400/10 text-sky-300'
+  }
+}
+
+function getCheckStatusBadge(passed: boolean) {
+  return passed
+    ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300'
+    : 'border-red-400/25 bg-red-400/10 text-red-300'
+}
+
+function renderList(items: string[] | undefined | null, emptyLabel = 'Không có') {
+  if (!items?.length) return <span className="text-white/35">{emptyLabel}</span>
+  return (
+    <ul className="space-y-1">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`} className="text-xs text-white/60">
+          • {item}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function buildReportRows(
+  title: string,
+  report: DeterministicValidationReport | CheckerReport | null | undefined,
+): string[][] {
+  if (!report) return [[title, 'Không có dữ liệu']]
+
+  const rows: string[][] = [
+    [title, report.summary],
+    ['Base constraint pass', report.baseConstraintPass ? 'Yes' : 'No'],
+    ['Hard constraint pass', report.hardConstraintPass ? 'Yes' : 'No'],
+    ['Soft score', String(report.softConstraintScore)],
+  ]
+
+  if ('valid' in report) {
+    rows.push(['Overall valid', report.valid ? 'Yes' : 'No'])
+    rows.push(['Unchecked constraints', report.uncheckedConstraintIds.join(' | ') || 'None'])
+  }
+
+  if ('verdict' in report) {
+    rows.push(['Verdict', report.verdict])
+    rows.push(['Retry instructions', report.retryInstructions.join(' | ') || 'None'])
+  }
+
+  rows.push([])
+  rows.push(['constraintId', 'severity', 'passed', 'reason', 'suggestion', 'original'])
+  report.checks.forEach((check) => {
+    rows.push([
+      check.constraintId,
+      check.severity,
+      check.passed ? 'Yes' : 'No',
+      check.reason,
+      check.suggestion ?? '',
+      check.original,
+    ])
+  })
+
+  return rows
+}
+
+function MetricCard({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className={`${panelMutedClass} p-3`}>
+      <p className="text-[10px] uppercase tracking-widest text-white/35">{label}</p>
+      <div className="mt-1 text-sm text-white/70">{value}</div>
+    </div>
+  )
+}
 
 function loadStoredLowprizoApiKey() {
   if (typeof window === 'undefined') return ''
@@ -333,7 +452,6 @@ export default function App({ onBackToLanding }) {
   const [agentMaxIterations, setAgentMaxIterations] = useState(5)
   const [agentElapsed, setAgentElapsed] = useState(0)
   const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [expandedConstraintIds, setExpandedConstraintIds] = useState<Set<string>>(new Set())
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
   const [lowprizoApiKey, setLowprizoApiKey] = useState('')
 
@@ -708,7 +826,7 @@ export default function App({ onBackToLanding }) {
     setConstraintList((current) => current.filter((constraint) => constraint.id !== id))
   }
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (disableLlm = false) => {
     const apiKey = lowprizoApiKey.trim()
     if (!apiKey) {
       setAiError('Vui lòng nhập Lowprizo API key trước khi xếp lịch.')
@@ -740,63 +858,134 @@ export default function App({ onBackToLanding }) {
     setAiLoading(true)
     setAiError(null)
     setAiResult(null)
+    setShowTechnicalErrors(false)
     setAgentStatus('Đang khởi tạo...')
     setAgentStep('thinking')
     setAgentIteration(0)
+    setAgentMaxIterations(6)
     setAgentElapsed(0)
 
-    // Start elapsed timer
     if (agentTimerRef.current) clearInterval(agentTimerRef.current)
     agentTimerRef.current = setInterval(() => {
-      setAgentElapsed(prev => prev + 1)
+      setAgentElapsed((prev) => prev + 1)
     }, 1000)
 
     try {
-      const result = await generateTimetableWithAI({
-        apiKey,
-        days: selectedSpreadsheetDays,
-        sessions: selectedSessionData,
-        periodCounts: periods,
-        deletedPeriods,
-        assignments: assignmentList,
-        constraints: constraintList,
-        constraintConfirmations,
-      }, apiKey ?? undefined, (event: AgentEvent) => {
-        switch (event.type) {
-          case 'status':
-            setAgentStatus(event.message)
-            setAgentIteration(event.iteration)
-            setAgentMaxIterations(event.maxIterations)
-            if (event.message.includes('kiểm tra')) {
-              setAgentStep('checking')
-            } else if (event.message.includes('sửa')) {
-              setAgentStep('fixing')
-            } else {
-              setAgentStep('coding')
-            }
-            break
-          case 'code_fix':
-            setAgentStep('running')
-            setAgentStatus(`Lỗi khi chạy code, đang sửa (lần ${event.attempt})...`)
-            break
-          case 'verified':
-            if (event.allSatisfied) {
-              setAgentStep('checking')
-              setAgentStatus('Tất cả ràng buộc thỏa mãn!')
-            } else {
-              const hardCount = event.violations.filter((v: { violated: boolean }) => v.violated).length
-              if (hardCount > 0) {
-                setAgentStep('fixing')
-                setAgentStatus(`Phát hiện ${hardCount} vi phạm cứng, đang sửa...`)
-              } else {
+      const result = await generateTimetableWithAI(
+        {
+          apiKey,
+          days: selectedSpreadsheetDays,
+          sessions: selectedSessionData,
+          periodCounts: periods,
+          deletedPeriods,
+          assignments: assignmentList,
+          constraints: constraintList,
+          constraintConfirmations,
+        },
+        apiKey ?? undefined,
+        (event: AgentEvent) => {
+          switch (event.type) {
+            case 'status':
+            case 'phase': {
+              setAgentStatus(event.message)
+              setAgentIteration(event.iteration)
+              setAgentMaxIterations(event.maxIterations)
+              if (event.phase === 'deterministic_validation') {
                 setAgentStep('checking')
-                setAgentStatus(`Có ${event.violations.length} ràng buộc mềm chưa tối ưu, hoàn thành...`)
+              } else if (event.phase === 'normalize_input') {
+                setAgentStep('thinking')
+              } else if (event.message.includes('kiểm tra')) {
+                setAgentStep('checking')
+              } else if (event.message.includes('sửa')) {
+                setAgentStep('fixing')
+              } else {
+                setAgentStep('coding')
               }
+              break
             }
-            break
-        }
-      })
+            case 'loop_progress':
+              setAgentIteration(event.attempt)
+              setAgentMaxIterations(event.maxIterations)
+              setAgentStatus(event.message)
+              setAgentStep('coding')
+              break
+            case 'coder_started':
+              setAgentIteration(event.attempt)
+              setAgentStatus(event.message)
+              setAgentStep('coding')
+              break
+            case 'coder_artifact_generated':
+              setAgentIteration(event.attempt)
+              setAgentStatus(`Đã tạo solver artifact cho attempt ${event.attempt}.`)
+              setAgentStep('coding')
+              break
+            case 'coder_run_started':
+              setAgentIteration(event.attempt)
+              setAgentStatus(event.message)
+              setAgentStep('running')
+              break
+            case 'coder_run_failed':
+            case 'coder_runtime_error':
+            case 'coder_schema_error':
+            case 'code_fix':
+              setAgentIteration(event.attempt)
+              setAgentStatus('Solver gặp lỗi, đang chuẩn bị vòng sửa tiếp theo...')
+              setAgentStep('fixing')
+              break
+            case 'checker_started':
+              setAgentIteration(event.attempt)
+              setAgentStatus(event.message)
+              setAgentStep('checking')
+              break
+            case 'checker_retry_requested':
+              setAgentIteration(event.attempt)
+              setAgentStatus(event.message)
+              setAgentStep('fixing')
+              break
+            case 'checker_accepted':
+              setAgentIteration(event.attempt)
+              setAgentStatus(event.message)
+              setAgentStep('checking')
+              break
+            case 'checker_infeasible':
+              setAgentIteration(event.attempt)
+              setAgentStatus(event.message)
+              setAgentStep('checking')
+              break
+            case 'verified':
+              if (event.allSatisfied) {
+                setAgentStep('checking')
+                setAgentStatus('Tất cả ràng buộc thỏa mãn!')
+              } else {
+                const hardCount = event.violations.filter((v: { violated: boolean }) => v.violated).length
+                if (hardCount > 0) {
+                  setAgentStep('fixing')
+                  setAgentStatus(`Phát hiện ${hardCount} vi phạm cứng, đang sửa...`)
+                } else {
+                  setAgentStep('checking')
+                  setAgentStatus(`Có ${event.violations.length} ràng buộc mềm chưa tối ưu, hoàn thành...`)
+                }
+              }
+              break
+            case 'debug':
+              setAgentStatus(event.message)
+              break
+            case 'result':
+              setAgentStatus(event.data.message)
+              setAgentStep(event.data.status === 'solved' ? 'checking' : 'idle')
+              break
+            case 'error':
+              setAgentStatus(event.message)
+              setAgentStep('fixing')
+              break
+          }
+        },
+        { disableLlm },
+      )
       setAiResult(result)
+      setAgentIteration(result.telemetry?.totalAttempts ?? agentIteration)
+      setAgentMaxIterations(result.telemetry?.totalAttempts ?? agentMaxIterations)
+      setAgentStatus(result.message)
       if (result.status !== 'solved') {
         setAiError(result.message || result.overallAssessment || RESULT_NOT_FOUND_MESSAGE)
       }
@@ -804,8 +993,6 @@ export default function App({ onBackToLanding }) {
       setAiError(err instanceof Error ? err.message : RESULT_NOT_FOUND_MESSAGE)
     } finally {
       setAiLoading(false)
-      setAgentStatus(null)
-      setAgentStep('idle')
       if (agentTimerRef.current) {
         clearInterval(agentTimerRef.current)
         agentTimerRef.current = null
@@ -813,61 +1000,102 @@ export default function App({ onBackToLanding }) {
     }
   }
 
-    const handleDownloadExcel = useCallback(() => {
-      if (!aiResult || aiResult.status !== 'solved') return
+  const handleDownloadExcel = useCallback(() => {
+    if (!aiResult || aiResult.status !== 'solved') return
 
-      const headerRow: string[] = ['Thứ', 'Tiết']
-      resultTableClassColumns.forEach((className, index) => {
-        headerRow.push(className || `Lớp ${index + 1}`)
-        headerRow.push('GV Dạy')
-      })
+    const headerRow: string[] = ['Thứ', 'Tiết']
+    resultTableClassColumns.forEach((className, index) => {
+      headerRow.push(className || `Lớp ${index + 1}`)
+      headerRow.push('GV Dạy')
+    })
 
-      const rows: string[][] = [headerRow]
+    const rows: string[][] = [headerRow]
 
-      fixedResultTableSections.forEach((section, sectionIndex) => {
-        if (sectionIndex > 0 && section.divider) {
-          const dividerRow = [section.divider, ...Array(headerRow.length - 1).fill('')]
-          rows.push(dividerRow)
-        }
+    fixedResultTableSections.forEach((section, sectionIndex) => {
+      if (sectionIndex > 0 && section.divider) {
+        const dividerRow = [section.divider, ...Array(headerRow.length - 1).fill('')]
+        rows.push(dividerRow)
+      }
 
-        section.rows.forEach((group) => {
-          group.rows.forEach((row, rowIndex) => {
-            const cellKey = getCellKey(row.day.id, row.session.id, row.period)
-            const dataRow: string[] = []
+      section.rows.forEach((group) => {
+        group.rows.forEach((row, rowIndex) => {
+          const cellKey = getCellKey(row.day.id, row.session.id, row.period)
+          const dataRow: string[] = []
 
-            if (rowIndex === 0) {
-              dataRow.push(group.label)
-            } else {
-              dataRow.push('')
-            }
-            dataRow.push(String(row.period))
+          dataRow.push(rowIndex === 0 ? group.label : '')
+          dataRow.push(String(row.period))
 
-            resultTableClassColumns.forEach((className) => {
-              const entry = className
-                ? solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
-                : null
-              dataRow.push(entry?.subject ?? '')
-              dataRow.push(entry?.teacher ?? '')
-            })
-
-            rows.push(dataRow)
+          resultTableClassColumns.forEach((className) => {
+            const entry = className
+              ? solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
+              : null
+            dataRow.push(entry?.subject ?? '')
+            dataRow.push(entry?.teacher ?? '')
           })
+
+          rows.push(dataRow)
         })
       })
+    })
 
-      const ws = XLSX.utils.aoa_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    const timetableSheet = XLSX.utils.aoa_to_sheet(rows)
+    timetableSheet['!cols'] = [
+      { wch: 12 },
+      { wch: 6 },
+      ...resultTableClassColumns.flatMap(() => [{ wch: 18 }, { wch: 18 }]),
+    ]
 
-      // Set column widths
-      ws['!cols'] = [
-        { wch: 12 }, // Thứ
-        { wch: 6 },  // Tiết
-        ...resultTableClassColumns.flatMap(() => [{ wch: 18 }, { wch: 18 }]),
-      ]
+    const checkerRows = buildReportRows('Checker report', aiResult.checkerReport)
+    const deterministicRows = buildReportRows('Deterministic validation', aiResult.deterministicReport)
+    const diagnosticsRows: string[][] = [
+      ['Field', 'Value'],
+      ['Status', aiResult.status],
+      ['Verdict', aiResult.verdict],
+      ['Message', aiResult.message],
+      ['Final reason', aiResult.finalReason ?? ''],
+      ['Overall assessment', aiResult.overallAssessment ?? ''],
+      ['Artifact path', aiResult.artifactSummary?.path ?? ''],
+      ['Artifact entrypoint', aiResult.artifactSummary?.entrypoint ?? ''],
+      ['Artifact source hash', aiResult.artifactSummary?.sourceHash ?? ''],
+      ['Artifact summary', aiResult.artifactSummary?.summary ?? ''],
+      ['Artifact assumptions', aiResult.artifactSummary?.assumptions.join(' | ') ?? ''],
+      ['Diagnostics', aiResult.diagnostics.join(' | ') || ''],
+      ['Execution errors', aiResult.executionErrors.map((item) => `${item.constraintId}: ${item.error}`).join(' | ')],
+      ['Validation errors', aiResult.validationErrors.map((item) => `${item.constraintId}: ${item.error}`).join(' | ')],
+      ['IIS constraint ids', aiResult.iisConstraintIds.join(' | ')],
+      ['Conflicting constraints', aiResult.conflictingConstraints.map((item) => `${item.id}: ${item.text}`).join(' | ')],
+      ['Telemetry duration', String(aiResult.telemetry?.totalDurationMs ?? '')],
+      ['Telemetry compile attempts', String(aiResult.telemetry?.compileAttempts ?? '')],
+      ['Telemetry repair attempts', String(aiResult.telemetry?.repairAttempts ?? '')],
+      ['Telemetry solver attempts', String(aiResult.telemetry?.solverAttempts ?? '')],
+      ['Telemetry llm calls', String(aiResult.telemetry?.llmCallCount ?? '')],
+      ['Telemetry total attempts', String(aiResult.telemetry?.totalAttempts ?? '')],
+      ['Telemetry chars in', String(aiResult.telemetry?.tokenEstimateCharsIn ?? '')],
+      ['Telemetry chars out', String(aiResult.telemetry?.tokenEstimateCharsOut ?? '')],
+      ['Telemetry no progress count', String(aiResult.telemetry?.noProgressCount ?? '')],
+      ['Telemetry guardrail stop reason', aiResult.telemetry?.guardrailStopReason ?? ''],
+      [],
+      ['Attempt', 'Phase', 'Status', 'Summary', 'Details', 'Artifact Path', 'Source Hash', 'Started At', 'Finished At'],
+      ...(aiResult.attemptHistorySummary ?? []).map((attempt) => [
+        String(attempt.attempt),
+        attempt.phase,
+        attempt.status,
+        attempt.summary,
+        attempt.details?.join(' | ') ?? '',
+        attempt.artifactPath ?? '',
+        attempt.sourceHash ?? '',
+        attempt.startedAt ?? '',
+        attempt.finishedAt ?? '',
+      ]),
+    ]
 
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, 'Thời khóa biểu')
-      XLSX.writeFile(wb, 'thoi-khoa-bieu.xlsx')
-    }, [aiResult, fixedResultTableSections, resultTableClassColumns, solvedCellMap])
+    XLSX.utils.book_append_sheet(wb, timetableSheet, 'Thời khóa biểu')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(checkerRows), 'Checker report')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deterministicRows), 'Validation report')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagnosticsRows), 'Diagnostics')
+    XLSX.writeFile(wb, 'thoi-khoa-bieu.xlsx')
+  }, [aiResult, fixedResultTableSections, resultTableClassColumns, solvedCellMap])
 
     const activePeriodCount = useMemo(
     () =>
@@ -2133,7 +2361,7 @@ export default function App({ onBackToLanding }) {
                     </button>
                     <button
                       type="button"
-                      onClick={handleGenerate}
+                      onClick={() => handleGenerate()}
                       disabled={aiLoading || !lowprizoApiKey.trim() || activePeriodCount <= 0}
                       className={`${navNextClass} disabled:cursor-not-allowed disabled:opacity-60`}
                     >
@@ -2265,6 +2493,192 @@ export default function App({ onBackToLanding }) {
                         </div>
                       </div>
 
+                      {aiResult && !aiLoading && (
+                        <div className="mb-4 space-y-4">
+                          {aiResult.telemetry && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-start justify-between gap-3">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">Telemetry & orchestration</h3>
+                                  <p className="text-xs text-white/40">Tổng quan tiến trình solver, checker và guardrail.</p>
+                                </div>
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${getVerdictBadge(aiResult.verdict).className}`}>
+                                  {getVerdictBadge(aiResult.verdict).label}
+                                </span>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                                <MetricCard label="Status" value={aiResult.status} />
+                                <MetricCard label="Verdict" value={aiResult.verdict} />
+                                <MetricCard label="Duration" value={formatDuration(aiResult.telemetry.totalDurationMs)} />
+                                <MetricCard label="Guardrail" value={aiResult.telemetry.guardrailStopReason ?? '—'} />
+                                <MetricCard label="Compile attempts" value={formatNullableNumber(aiResult.telemetry.compileAttempts)} />
+                                <MetricCard label="Repair attempts" value={formatNullableNumber(aiResult.telemetry.repairAttempts)} />
+                                <MetricCard label="Solver attempts" value={formatNullableNumber(aiResult.telemetry.solverAttempts)} />
+                                <MetricCard label="LLM calls" value={formatNullableNumber(aiResult.telemetry.llmCallCount)} />
+                                <MetricCard label="Chars in" value={formatNullableNumber(aiResult.telemetry.tokenEstimateCharsIn)} />
+                                <MetricCard label="Chars out" value={formatNullableNumber(aiResult.telemetry.tokenEstimateCharsOut)} />
+                                <MetricCard label="Loop attempts" value={formatNullableNumber(aiResult.telemetry.totalAttempts)} />
+                                <MetricCard label="No-progress count" value={formatNullableNumber(aiResult.telemetry.noProgressCount)} />
+                              </div>
+                            </section>
+                          )}
+
+                          {(aiResult.artifactSummary || aiResult.solverStats) && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <Hash size={16} strokeWidth={1.5} className="text-sky-300" />
+                                </span>
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">Artifact & solver runtime</h3>
+                                  <p className="text-xs text-white/40">Thông tin artifact Python và thống kê solve lần cuối.</p>
+                                </div>
+                              </div>
+                              <div className="grid gap-2 lg:grid-cols-2">
+                                <div className={`${panelMutedClass} space-y-2 p-3`}>
+                                  <p className="text-[10px] uppercase tracking-widest text-white/35">Artifact summary</p>
+                                  <p className="text-sm text-white/70">{aiResult.artifactSummary?.summary ?? 'Không có artifact summary.'}</p>
+                                  <div className="space-y-1 text-xs text-white/45">
+                                    <p><span className="text-white/30">Path:</span> {aiResult.artifactSummary?.path ?? '—'}</p>
+                                    <p><span className="text-white/30">Entrypoint:</span> {aiResult.artifactSummary?.entrypoint ?? '—'}</p>
+                                    <p><span className="text-white/30">Source hash:</span> {aiResult.artifactSummary?.sourceHash ?? '—'}</p>
+                                  </div>
+                                  <div>
+                                    <p className="mb-1 text-[10px] uppercase tracking-widest text-white/35">Assumptions</p>
+                                    {renderList(aiResult.artifactSummary?.assumptions, 'Không có assumptions')}
+                                  </div>
+                                </div>
+                                <div className={`${panelMutedClass} p-3`}>
+                                  <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Solver stats</p>
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    <MetricCard label="Wall time (s)" value={formatNullableNumber(aiResult.solverStats?.wallTimeSeconds)} />
+                                    <MetricCard label="Objective" value={formatNullableNumber(aiResult.solverStats?.objectiveValue)} />
+                                    <MetricCard label="Best bound" value={formatNullableNumber(aiResult.solverStats?.bestBound)} />
+                                    <MetricCard label="Conflicts" value={formatNullableNumber(aiResult.solverStats?.numConflicts)} />
+                                    <MetricCard label="Branches" value={formatNullableNumber(aiResult.solverStats?.numBranches)} />
+                                    <MetricCard label="Request ID" value={aiResult.requestId ?? '—'} />
+                                  </div>
+                                </div>
+                              </div>
+                            </section>
+                          )}
+
+                          {aiResult.deterministicReport && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center justify-between gap-3">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">Deterministic validation</h3>
+                                  <p className="text-xs text-white/40">Layer kiểm tra base/hard/soft constraints sau solver run.</p>
+                                </div>
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${aiResult.deterministicReport.valid ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-red-400/30 bg-red-400/10 text-red-300'}`}>
+                                  {aiResult.deterministicReport.valid ? 'Valid' : 'Invalid'}
+                                </span>
+                              </div>
+                              <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                                <MetricCard label="Base constraints" value={aiResult.deterministicReport.baseConstraintPass ? 'Pass' : 'Fail'} />
+                                <MetricCard label="Hard constraints" value={aiResult.deterministicReport.hardConstraintPass ? 'Pass' : 'Fail'} />
+                                <MetricCard label="Soft score" value={formatNullableNumber(aiResult.deterministicReport.softConstraintScore)} />
+                                <MetricCard label="Unchecked" value={formatNullableNumber(aiResult.deterministicReport.uncheckedConstraintIds.length)} />
+                              </div>
+                              <p className="mb-3 text-sm text-white/65">{aiResult.deterministicReport.summary}</p>
+                              <div className="space-y-2">
+                                {aiResult.deterministicReport.checks.map((check) => (
+                                  <div key={`det-${check.constraintId}`} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckSeverityBadge(check.severity)}`}>{check.severity}</span>
+                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckStatusBadge(check.passed)}`}>{check.passed ? 'Pass' : 'Fail'}</span>
+                                      <span className="text-xs text-white/35">{check.constraintId}</span>
+                                    </div>
+                                    <p className="text-sm text-white/75">{check.original}</p>
+                                    <p className="mt-1 text-xs text-white/45">{check.reason}</p>
+                                    {check.suggestion ? <p className="mt-1 text-xs text-sky-300/70">Gợi ý: {check.suggestion}</p> : null}
+                                  </div>
+                                ))}
+                              </div>
+                              {aiResult.deterministicReport.uncheckedConstraintIds.length > 0 ? (
+                                <div className="mt-3 rounded-md border border-amber-400/15 bg-amber-400/[0.04] p-3 text-xs text-amber-200/80">
+                                  Chưa kiểm tra được: {aiResult.deterministicReport.uncheckedConstraintIds.join(', ')}
+                                </div>
+                              ) : null}
+                            </section>
+                          )}
+
+                          {aiResult.checkerReport && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center justify-between gap-3">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">Checker report</h3>
+                                  <p className="text-xs text-white/40">Kết luận cuối cùng từ lớp checker sau deterministic validation.</p>
+                                </div>
+                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${getVerdictBadge(aiResult.checkerReport.verdict === 'accept' ? 'accept' : aiResult.checkerReport.verdict === 'infeasible' ? 'infeasible' : aiResult.checkerReport.verdict === 'retry' ? 'retry' : 'error').className}`}>
+                                  {aiResult.checkerReport.verdict}
+                                </span>
+                              </div>
+                              <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                                <MetricCard label="Base constraints" value={aiResult.checkerReport.baseConstraintPass ? 'Pass' : 'Fail'} />
+                                <MetricCard label="Hard constraints" value={aiResult.checkerReport.hardConstraintPass ? 'Pass' : 'Fail'} />
+                                <MetricCard label="Soft score" value={formatNullableNumber(aiResult.checkerReport.softConstraintScore)} />
+                                <MetricCard label="Violations" value={formatNullableNumber(aiResult.checkerReport.violations.length)} />
+                              </div>
+                              <p className="mb-3 text-sm text-white/65">{aiResult.checkerReport.summary}</p>
+                              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+                                <div className="space-y-2">
+                                  {aiResult.checkerReport.violations.map((check) => (
+                                    <div key={`checker-${check.constraintId}`} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
+                                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckSeverityBadge(check.severity)}`}>{check.severity}</span>
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckStatusBadge(check.passed)}`}>{check.passed ? 'Pass' : 'Fail'}</span>
+                                        <span className="text-xs text-white/35">{check.constraintId}</span>
+                                      </div>
+                                      <p className="text-sm text-white/75">{check.original}</p>
+                                      <p className="mt-1 text-xs text-white/45">{check.reason}</p>
+                                      {check.suggestion ? <p className="mt-1 text-xs text-sky-300/70">Gợi ý: {check.suggestion}</p> : null}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className={`${panelMutedClass} p-3`}>
+                                  <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Retry instructions</p>
+                                  {renderList(aiResult.checkerReport.retryInstructions, 'Checker không yêu cầu retry')}
+                                </div>
+                              </div>
+                            </section>
+                          )}
+
+                          {(aiResult.attemptHistorySummary?.length ?? 0) > 0 && (
+                            <section className={`${panelClass} p-4`}>
+                              <div className="mb-4 flex items-center gap-2.5">
+                                <span className={iconShellClass}>
+                                  <ClipboardList size={16} strokeWidth={1.5} className="text-violet-300" />
+                                </span>
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">Attempt history</h3>
+                                  <p className="text-xs text-white/40">Dấu vết coder/checker/validation cho từng vòng lặp.</p>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {aiResult.attemptHistorySummary?.map((attempt, index) => (
+                                  <div key={`${attempt.phase}-${attempt.attempt}-${index}`} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/70">Attempt {attempt.attempt}</span>
+                                      <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">{attempt.phase}</span>
+                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${attempt.status === 'success' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : attempt.status === 'retry' ? 'border-amber-400/25 bg-amber-400/10 text-amber-300' : attempt.status === 'failed' ? 'border-red-400/25 bg-red-400/10 text-red-300' : 'border-white/15 bg-white/[0.04] text-white/70'}`}>{attempt.status}</span>
+                                    </div>
+                                    <p className="text-sm text-white/75">{attempt.summary}</p>
+                                    {attempt.details?.length ? <div className="mt-2">{renderList(attempt.details)}</div> : null}
+                                    <div className="mt-2 grid gap-1 text-xs text-white/35 sm:grid-cols-2">
+                                      <p>Artifact: {attempt.artifactPath ?? '—'}</p>
+                                      <p>Source hash: {attempt.sourceHash ?? '—'}</p>
+                                      <p>Started: {attempt.startedAt ?? '—'}</p>
+                                      <p>Finished: {attempt.finishedAt ?? '—'}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+                        </div>
+                      )}
+
                       {/* Hard violations — red, serious */}
                       {aiResult && aiResult.violations && aiResult.violations.filter(v => v.violated).length > 0 && (
                         <div className="mb-4 rounded-md border border-red-500/20 bg-red-500/[0.04] p-4">
@@ -2274,7 +2688,7 @@ export default function App({ onBackToLanding }) {
                               <span>{aiResult.violations.filter(v => v.violated).length} ràng buộc cứng bị vi phạm</span>
                             </div>
                             <button
-                              onClick={handleGenerate}
+                              onClick={() => handleGenerate()}
                               disabled={aiLoading}
                               className="flex items-center gap-1.5 rounded-md bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white disabled:opacity-50"
                             >
@@ -2444,98 +2858,60 @@ export default function App({ onBackToLanding }) {
                         </section>
                       )}
 
-                      {/* ========== AI Constraint Compilation Results ========== */}
+                      {aiResult && !aiLoading && aiResult.status === 'error' && aiResult.message.includes('Coder không tạo được') && (
+                        <section className={`${panelClass} p-4`}>
+                          <div className="mb-3 flex items-center gap-2.5">
+                            <span className={iconShellClass}>
+                              <AlertTriangle size={16} strokeWidth={1.5} className="text-amber-400" />
+                            </span>
+                            <div>
+                              <h2 className="text-sm font-semibold text-white">Lỗi xếp lịch</h2>
+                              <p className="text-xs text-white/40">{aiResult.message}</p>
+                            </div>
+                          </div>
+                          <div className="mb-3 max-h-48 space-y-2 overflow-auto">
+                            {aiResult.diagnostics.map((diagnostic, index) => (
+                              <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-xs text-white/55">
+                                {diagnostic}
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleGenerate(true)}
+                            className="inline-flex items-center gap-2 rounded-md border border-white/[0.12] bg-white/[0.04] px-4 py-2 text-sm font-medium text-white/70 transition-colors hover:bg-white/[0.08]"
+                          >
+                            <RotateCcw size={16} strokeWidth={1.5} />
+                            Thử lại bằng template
+                          </button>
+                        </section>
+                      )}
+
+                      {/* ========== Solve / Verification Results ========== */}
                       {aiResult && !aiLoading && (
                         <>
-                          {/* a) How AI understood constraints */}
-                          {aiResult.compiledConstraints && aiResult.compiledConstraints.length > 0 && (
+                          {aiResult.telemetry && (
                             <section className={`${panelClass} p-4`}>
                               <div className="mb-4 flex items-center gap-2.5">
                                 <span className={iconShellClass}>
-                                  <Code size={16} strokeWidth={1.5} />
+                                  <Check size={16} strokeWidth={1.5} className="text-[#4DB848]" />
                                 </span>
                                 <div>
-                                  <h2 className="text-sm font-semibold text-white">Hệ thống hiểu ràng buộc của bạn như sau</h2>
-                                  <p className="text-xs text-white/40">Nếu có điểm nào không đúng ý, hãy chỉnh sửa ràng buộc và tạo lại</p>
+                                  <h2 className="text-sm font-semibold text-white">Quá trình xếp lịch</h2>
+                                  <p className="text-xs text-white/40">{aiResult.message}</p>
                                 </div>
                               </div>
-                              <div className="space-y-2">
-                                {aiResult.compiledConstraints.map((c) => {
-                                  const isExpanded = expandedConstraintIds.has(c.id)
-                                  return (
-                                    <div key={c.id} className="rounded-md border border-white/[0.08] bg-[#0a0a0a] p-3">
-                                      <div className="flex items-start justify-between gap-2">
-                                        <div className="flex-1 min-w-0">
-                                          <p className="text-sm text-white/80">{c.description}</p>
-                                          <p className="mt-1 text-xs text-white/30 truncate">"{c.original}"</p>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${c.priority === 'hard' ? 'border-red-400/25 bg-red-400/10 text-red-300' : 'border-blue-400/25 bg-blue-400/10 text-blue-300'}`}>
-                                            {c.priority === 'hard' ? 'Bắt buộc' : 'Nên có'}
-                                          </span>
-                                          {c.priority === 'soft' && c.weight != null && (
-                                            <span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] text-white/40">
-                                              w={c.weight}
-                                            </span>
-                                          )}
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setExpandedConstraintIds((prev) => {
-                                                const next = new Set(prev)
-                                                if (next.has(c.id)) next.delete(c.id)
-                                                else next.add(c.id)
-                                                return next
-                                              })
-                                            }}
-                                            className="rounded p-1 text-white/30 hover:text-white/60 hover:bg-white/[0.04] transition-colors"
-                                            title={isExpanded ? 'Ẩn code' : 'Xem code'}
-                                          >
-                                            {isExpanded ? <EyeOff size={14} strokeWidth={1.5} /> : <Eye size={14} strokeWidth={1.5} />}
-                                          </button>
-                                        </div>
-                                      </div>
-                                      {isExpanded && (
-                                        <pre className="mt-3 overflow-auto rounded border border-white/[0.06] bg-[#111] p-3 text-[11px] leading-5 text-green-300/70 font-mono">
-                                          {c.code}
-                                        </pre>
-                                      )}
-                                    </div>
-                                  )
-                                })}
+                              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Duration</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.totalDurationMs}ms</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">LLM calls</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.llmCallCount}</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Solver attempts</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.solverAttempts}</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Status</p><p className="mt-1 text-sm text-white/70">{aiResult.status}</p></div>
+                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Chars in</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.tokenEstimateCharsIn}</p></div>
                               </div>
                             </section>
                           )}
 
-                          {/* b) Unparsed constraints */}
-                          {aiResult.unparsedConstraints && aiResult.unparsedConstraints.length > 0 && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-amber-400" />
-                                </span>
-                                <div>
-                                  <h2 className="text-sm font-semibold text-white">Ràng buộc chưa hiểu được</h2>
-                                  <p className="text-xs text-white/40">AI không thể biên dịch các ràng buộc sau</p>
-                                </div>
-                              </div>
-                              <div className="space-y-2">
-                                {aiResult.unparsedConstraints.map((u) => (
-                                  <div key={u.id} className="rounded-md border border-amber-400/15 bg-amber-400/[0.03] p-3">
-                                    <div className="flex items-start gap-2">
-                                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" strokeWidth={1.5} />
-                                      <div className="min-w-0">
-                                        <p className="text-sm text-white/70">"{u.original}"</p>
-                                        <p className="mt-1 text-xs text-white/35">{u.reason}</p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </section>
-                          )}
-
-                          {/* c) Hard violations detail panel */}
+                          {/* a) Hard violations detail panel */}
                           {aiResult.violations && aiResult.violations.filter((v) => v.violated).length > 0 && (
                             <section className={`${panelClass} p-4`}>
                               <div className="mb-4 flex items-center gap-2.5">
@@ -2792,7 +3168,7 @@ export default function App({ onBackToLanding }) {
                             <p className="mt-2 text-sm text-white/50">{aiError}</p>
                             <button
                               type="button"
-                              onClick={handleGenerate}
+                              onClick={() => handleGenerate()}
                               className={ghostButtonClass + ' mt-3'}
                             >
                               <RotateCcw size={14} strokeWidth={1.5} />
@@ -2802,7 +3178,7 @@ export default function App({ onBackToLanding }) {
                         )}
 
                         {aiResult && !aiLoading && (() => {
-                          const currentResult = aiResult
+                          const currentResult = aiResult as TimetableSolveResult
                           const currentSolverStats = currentResult.solverStats
 
                           return (
@@ -2819,15 +3195,18 @@ export default function App({ onBackToLanding }) {
                                 </span>
                               </div>
 
-                              {currentSolverStats && (
+                              {currentSolverStats ? (() => {
+                                const stats = currentSolverStats!
+                                return (
                                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Wall time</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.wallTimeSeconds.toFixed(3)}s</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Objective</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.objectiveValue ?? '—'}</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Best bound</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.bestBound ?? '—'}</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Conflicts</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.numConflicts}</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Branches</p><p className="mt-1 text-sm text-white/70">{currentSolverStats.numBranches}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Wall time</p><p className="mt-1 text-sm text-white/70">{stats.wallTimeSeconds.toFixed(3)}s</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Objective</p><p className="mt-1 text-sm text-white/70">{stats.objectiveValue ?? '—'}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Best bound</p><p className="mt-1 text-sm text-white/70">{stats.bestBound ?? '—'}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Conflicts</p><p className="mt-1 text-sm text-white/70">{stats.numConflicts}</p></div>
+                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Branches</p><p className="mt-1 text-sm text-white/70">{stats.numBranches}</p></div>
                                 </div>
-                              )}
+                                )
+                              })() : null}
 
                               {currentResult.diagnostics?.length ? (
                                 <div className="space-y-2">
@@ -2841,16 +3220,6 @@ export default function App({ onBackToLanding }) {
                                 <p className="text-sm text-white/45">Không có chẩn đoán bổ sung.</p>
                               )}
 
-                              <div className="grid gap-4 xl:grid-cols-2">
-                                <div className={`${panelMutedClass} p-3`}>
-                                  <p className="text-xs font-medium text-white/70">Compiled constraints</p>
-                                  <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(currentResult.compiledConstraints, null, 2)}</pre>
-                                </div>
-                                <div className={`${panelMutedClass} p-3`}>
-                                  <p className="text-xs font-medium text-white/70">Request preview gửi model</p>
-                                  <pre className="mt-2 overflow-auto text-[11px] leading-5 text-white/45">{JSON.stringify(currentResult.modelRequestPreview, null, 2)}</pre>
-                                </div>
-                              </div>
                             </div>
                           )
                         })()}

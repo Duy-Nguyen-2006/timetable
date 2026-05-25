@@ -1,8 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync, writeFileSync, unlinkSync } from 'node:fs'
-import os from 'node:os'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
 
 const SANDBOX_TIMEOUT_MS = 120_000
 
@@ -37,85 +35,6 @@ function resolvePythonBin(): string {
   return existsSync('/usr/bin/python3') ? 'python3' : 'python'
 }
 
-export type SandboxResult =
-  | { success: true; data: SandboxOutput }
-  | { success: false; error: string }
-
-export type SandboxOutput = {
-  status: 'ok' | 'infeasible' | 'error'
-  cells: Array<{ assignmentId: string; slotId: string }>
-  objective: number | null
-  iisConstraintIds: string[]
-  errorMessage: string | null
-}
-
-export function runCodeInSandbox(code: string, payload: unknown): Promise<SandboxResult> {
-  return new Promise((resolve) => {
-    const tmpFile = path.join(os.tmpdir(), `timetable_${randomUUID()}.py`)
-
-    try {
-      writeFileSync(tmpFile, code, 'utf8')
-    } catch (e) {
-      resolve({ success: false, error: `Failed to write temp file: ${e}` })
-      return
-    }
-
-    const pythonBin = resolvePythonBin()
-    const child = spawn(pythonBin, [tmpFile], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-
-    const timeoutId = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-      resolve({ success: false, error: `Sandbox timed out after ${SANDBOX_TIMEOUT_MS / 1000}s` })
-    }, SANDBOX_TIMEOUT_MS)
-
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-
-    child.on('error', (error: Error) => {
-      clearTimeout(timeoutId)
-      try { unlinkSync(tmpFile) } catch { /* ignore */ }
-      resolve({ success: false, error: error.message })
-    })
-
-    child.on('close', () => {
-      clearTimeout(timeoutId)
-      try { unlinkSync(tmpFile) } catch { /* ignore */ }
-      if (timedOut) return
-
-      const output = stdout.trim()
-      if (!output) {
-        resolve({ success: false, error: `No output from sandbox.\nstderr: ${stderr}` })
-        return
-      }
-
-      // Find the last line that looks like JSON (LLM code might print debug info)
-      const lines = output.split('\n')
-      const jsonLine = [...lines].reverse().find(l => l.trim().startsWith('{'))
-      if (!jsonLine) {
-        resolve({ success: false, error: `No JSON found in output:\n${output}\nstderr: ${stderr}` })
-        return
-      }
-
-      try {
-        const parsed = JSON.parse(jsonLine) as SandboxOutput
-        resolve({ success: true, data: parsed })
-      } catch {
-        resolve({ success: false, error: `Invalid JSON output: ${jsonLine}\nstderr: ${stderr}` })
-      }
-    })
-
-    child.stdin.write(JSON.stringify(payload))
-    child.stdin.end()
-  })
-}
-
 export type SolverProblem = {
   slots: Array<{
     slotId: string
@@ -137,13 +56,6 @@ export type SolverProblem = {
   }>
   hardConstraints: Array<{ id: string; text: string }>
   softConstraints: Array<{ id: string; text: string; weight: number }>
-  aiCompiledConstraints?: Array<{
-    id: string
-    code: string
-    priority: 'hard' | 'soft'
-    original?: string
-    checkerCode?: string
-  }>
   solverConfig: {
     maxTimeSeconds: number
     numWorkers: number

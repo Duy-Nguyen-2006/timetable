@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: python -m venv .venv
+      - run: ./.venv/bin/pip install -U pip pytest ortools
+      - run: npm run lint
+      - run: npm run build
+      - run: ./.venv/bin/pytest python/tests
+      - name: Dataset API tests
+        env:
+          LOWPRIZO_API_KEY: ${{ secrets.LOWPRIZO_API_KEY }}
+        run: |
+          if [ -z "$LOWPRIZO_API_KEY" ]; then
+            ./.venv/bin/pytest test_datasets.py -rs
+          else
+            npm run dev &
+            server_pid=$!
+            trap 'kill $server_pid' EXIT
+            for i in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:3000 >/dev/null; then break; fi
+              sleep 1
+            done
+            ./.venv/bin/pytest test_datasets.py
+          fi

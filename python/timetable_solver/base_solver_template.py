@@ -129,6 +129,9 @@ def create_base_model(problem):
 
 def solve_base_model(problem, extra_setup=None):
     slots, assignments, solver_config = normalize_problem(problem)
+    max_time_seconds = float(solver_config.get("maxTimeSeconds", 20))
+    if max_time_seconds < 5:
+        raise ValueError("solverConfig.maxTimeSeconds must be at least 5 for debuggable CP-SAT runs.")
 
     if not slots:
         return build_empty_result(
@@ -171,8 +174,8 @@ def solve_base_model(problem, extra_setup=None):
         model.Maximize(sum(objective_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = float(solver_config.get("maxTimeSeconds", 20))
-    solver.parameters.num_search_workers = int(solver_config.get("numWorkers", 4))
+    solver.parameters.max_time_in_seconds = max_time_seconds
+    solver.parameters.num_search_workers = min(max(int(solver_config.get("numWorkers", 4)), 1), 4)
     solver.parameters.random_seed = int(solver_config.get("randomSeed", 1))
 
     status = solver.Solve(model)

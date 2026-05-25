@@ -3,9 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import type { AgentEvent, GenerateTimetableRequest } from '@/features/timetable/ai/types'
-import { db } from '@/lib/db'
-import { cleanupSolverArtifact } from '@/lib/generated-solver-artifacts'
-import { detectModel } from '@/lib/llm-client'
 import { buildInputPayload } from '@/lib/timetable-prompt'
 import { runAgenticLoop } from './service'
 
@@ -34,44 +31,46 @@ function createSSEStream() {
   return { stream, send, close }
 }
 
+function resolveApiKey(input: GenerateTimetableRequest, request: Request) {
+  const apiKeyFromBody = input.apiKey?.trim()
+  const apiKeyFromHeader = request.headers.get('x-lowprizo-api-key')?.trim()
+  return apiKeyFromHeader || apiKeyFromBody || ''
+}
+
+function resolveModel(request: Request) {
+  return request.headers.get('x-model')?.trim() || 'devstral-latest'
+}
+
 export async function POST(request: Request) {
   const acceptSSE = request.headers.get('accept')?.includes('text/event-stream')
 
   try {
     const input = await request.json() as GenerateTimetableRequest
-
-    const apiKeyFromBody = typeof input?.apiKey === 'string' ? input.apiKey.trim() : ''
-    let apiKey = apiKeyFromBody || request.headers.get('x-lowprizo-api-key')?.trim() || ''
-    if (!apiKey) {
-      const record = await db.apiKey.findFirst({ orderBy: { createdAt: 'desc' } })
-      apiKey = record?.key ?? ''
-    }
-    if (!apiKey) {
-      return NextResponse.json({ error: 'Vui lòng nhập Lowprizo API key.' }, { status: 400 })
-    }
-
-    const model = await detectModel(apiKey)
     const payload = buildInputPayload(input)
+    const apiKey = resolveApiKey(input, request)
+    const model = resolveModel(request)
     const requestId = randomUUID()
-    if (payload.slots.length === 0) {
-      return NextResponse.json(
-        { error: 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.' },
-        { status: 400 },
-      )
+    const disableLlm = request.headers.get('x-disable-llm') === '1'
+
+    const requestInput = {
+      constraintConfirmations: input.constraintConfirmations,
+      days: input.days,
+      sessions: input.sessions,
+      assignments: input.assignments,
+      constraints: input.constraints,
     }
 
     if (!acceptSSE) {
-      try {
-        const result = await runAgenticLoop(payload, apiKey, model, undefined, requestId)
-        return NextResponse.json(result)
-      } finally {
-        cleanupSolverArtifact(requestId)
-      }
+      const result = await runAgenticLoop(payload, apiKey, model, undefined, requestId, disableLlm, requestInput)
+      return NextResponse.json(result, {
+        status: result.status === 'error' ? 503 : 200,
+        headers: { 'x-request-id': requestId },
+      })
     }
 
     const { stream, send, close } = createSSEStream()
 
-    runAgenticLoop(payload, apiKey, model, send, requestId)
+    runAgenticLoop(payload, apiKey, model, send, requestId, disableLlm, requestInput)
       .then((result) => {
         send({ type: 'result', data: result })
         close()
@@ -80,15 +79,14 @@ export async function POST(request: Request) {
         send({ type: 'error', message: err instanceof Error ? err.message : 'Unknown error' })
         close()
       })
-      .finally(() => {
-        cleanupSolverArtifact(requestId)
-      })
 
     return new Response(stream, {
+      status: 200,
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
+        'x-request-id': requestId,
       },
     })
   } catch (error) {

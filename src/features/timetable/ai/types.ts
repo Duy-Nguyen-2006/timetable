@@ -13,44 +13,14 @@ export type TimetableSolveCell = {
   entries: TimetableSolveEntry[]
 }
 
-// ---------------------------------------------------------------------------
-// New AI-compiled constraint types
-// ---------------------------------------------------------------------------
-
-export type AICompiledConstraint = {
-  id: string
-  description: string   // short Vietnamese explanation
-  original: string      // user's original text
-  priority: 'hard' | 'soft'
-  weight?: number       // 1-10, required if priority='soft'
-  code: string          // Python OR-Tools code
-  checkerCode?: string  // pure Python post-solve checker: cells_map → result=(bool, str)
-}
-
-export type AIUnparsedConstraint = {
-  id: string
-  original: string
-  reason: string
-}
-
-export type CompilerResult = {
-  constraints: AICompiledConstraint[]
-  unparsed: AIUnparsedConstraint[]
-}
-
 export type ConstraintViolation = {
   constraintId: string
   original: string
-  violated: boolean     // true = hard constraint violated; false = soft constraint not fully met
+  violated: boolean
   reason: string
   confidence: number
-  conflictsWith?: string  // which constraint causes the conflict
-  suggestion?: string     // how to resolve (mainly for soft violations)
-}
-
-export type VerifierResult = {
-  violations: ConstraintViolation[]
-  overallAssessment: string
+  conflictsWith?: string
+  suggestion?: string
 }
 
 export type ExecutionError = { constraintId: string; error: string }
@@ -63,6 +33,40 @@ export type GeneratedSolverArtifact = {
   summary: string
   assumptions: string[]
   sourceHash?: string
+}
+
+export type SolverStats = {
+  wallTimeSeconds: number
+  objectiveValue: number | null
+  bestBound: number | null
+  numConflicts: number
+  numBranches: number
+}
+
+export type ConstraintConfirmationItem = {
+  id: string
+  original: string
+  interpreted: string
+  accepted: boolean
+}
+
+export type GenerateTimetableRequest = {
+  apiKey?: string
+  days: Array<{ id: string; label: string }>
+  sessions: Array<{ id: string; label: string }>
+  periodCounts: Record<string, number>
+  deletedPeriods: Record<string, boolean>
+  assignments: Array<{
+    teacher: string
+    subject: string
+    className: string
+    weeklyPeriods: number | string
+  }>
+  constraints: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }>
+  constraintConfirmations?: ConstraintConfirmationItem[]
+  debug?: boolean
+  trace?: boolean
+  userNotes?: string
 }
 
 export type SolverExecutionOutput = {
@@ -89,64 +93,48 @@ export type VerifierAssessment = {
   confidentlyInfeasible: boolean
 }
 
-// ---------------------------------------------------------------------------
-// Common types
-// ---------------------------------------------------------------------------
-
-export type SolverStats = {
-  wallTimeSeconds: number
-  objectiveValue: number | null
-  bestBound: number | null
-  numConflicts: number
-  numBranches: number
+export type AttemptSummary = {
+  attempt: number
+  phase: 'coder' | 'checker' | 'validation' | 'system'
+  status: 'running' | 'success' | 'retry' | 'failed' | 'skipped'
+  summary: string
+  details?: string[]
+  artifactPath?: string
+  sourceHash?: string
+  startedAt?: string
+  finishedAt?: string
 }
 
-export type ModelRequestPreview = {
-  model: string
-  temperature: number
-  messages: Array<{
-    role: 'system' | 'user'
-    content: string | Record<string, unknown>
-  }>
-  response_format?: Record<string, unknown>
-}
-
-export type ConstraintConfirmationItem = {
-  id: string
+export type ConstraintCheckItem = {
+  constraintId: string
   original: string
-  interpreted: string
-  accepted: boolean
+  passed: boolean
+  severity: 'base' | 'hard' | 'soft'
+  reason: string
+  suggestion?: string
 }
 
-export type GenerateTimetableRequest = {
-  apiKey?: string
-  days: Array<{ id: string; label: string }>
-  sessions: Array<{ id: string; label: string }>
-  periodCounts: Record<string, number>
-  deletedPeriods: Record<string, boolean>
-  assignments: Array<{
-    teacher: string
-    subject: string
-    className: string
-    weeklyPeriods: number | string
-  }>
-  constraints: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }>
-  constraintConfirmations?: ConstraintConfirmationItem[]
+export type DeterministicValidationReport = {
+  valid: boolean
+  baseConstraintPass: boolean
+  hardConstraintPass: boolean
+  softConstraintScore: number
+  summary: string
+  checks: ConstraintCheckItem[]
+  uncheckedConstraintIds: string[]
 }
 
-export type AgentEvent =
-  | { type: 'status'; message: string; iteration: number; maxIterations: number }
-  | { type: 'code_fix'; attempt: number; error: string }
-  | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
-  | { type: 'debug'; message: string; detail?: string }
-  | { type: 'result'; data: TimetableSolveResult }
-  | { type: 'error'; message: string }
+export type CheckerReport = {
+  verdict: 'accept' | 'retry' | 'infeasible' | 'error'
+  baseConstraintPass: boolean
+  hardConstraintPass: boolean
+  softConstraintScore: number
+  summary: string
+  retryInstructions: string[]
+  violations: ConstraintCheckItem[]
+}
 
-// ---------------------------------------------------------------------------
-// Updated solve result type
-// ---------------------------------------------------------------------------
-
-export type PipelineTelemetry = {
+export type SolveTelemetry = {
   totalDurationMs: number
   compileAttempts: number
   repairAttempts: number
@@ -155,15 +143,19 @@ export type PipelineTelemetry = {
   tokenEstimateCharsIn: number
   tokenEstimateCharsOut: number
   inputRejected: boolean
+  requestId?: string
+  totalAttempts?: number
+  noProgressCount?: number
+  guardrailStopReason?: string | null
 }
 
 export type TimetableSolveResult = {
   status: 'solved' | 'infeasible' | 'error'
+  verdict: 'accept' | 'retry' | 'infeasible' | 'error'
+  requestId?: string
   message: string
   diagnostics: string[]
   cells: TimetableSolveCell[]
-  compiledConstraints: AICompiledConstraint[]
-  unparsedConstraints: AIUnparsedConstraint[]
   executionErrors: ExecutionError[]
   validationErrors: ValidationError[]
   iisConstraintIds: string[]
@@ -171,6 +163,36 @@ export type TimetableSolveResult = {
   violations: ConstraintViolation[]
   overallAssessment: string | null
   solverStats: SolverStats | null
-  modelRequestPreview: ModelRequestPreview | null
-  telemetry?: PipelineTelemetry
+  artifactSummary?: {
+    path?: string
+    entrypoint?: string
+    summary: string
+    assumptions: string[]
+    sourceHash?: string
+  } | null
+  checkerReport?: CheckerReport | null
+  deterministicReport?: DeterministicValidationReport | null
+  attemptHistorySummary?: AttemptSummary[]
+  finalReason?: string | null
+  telemetry?: SolveTelemetry
 }
+
+export type AgentEvent =
+  | { type: 'status'; message: string; iteration: number; maxIterations: number }
+  | { type: 'phase'; phase: string; message: string; iteration: number; maxIterations: number }
+  | { type: 'coder_started'; attempt: number; message: string }
+  | { type: 'coder_artifact_generated'; attempt: number; summary: string; artifactPath?: string; sourceHash?: string }
+  | { type: 'coder_run_started'; attempt: number; message: string }
+  | { type: 'coder_run_failed'; attempt: number; error: string }
+  | { type: 'coder_runtime_error'; attempt: number; error: string }
+  | { type: 'coder_schema_error'; attempt: number; error: string }
+  | { type: 'checker_started'; attempt: number; message: string }
+  | { type: 'checker_retry_requested'; attempt: number; message: string; retryInstructions: string[] }
+  | { type: 'checker_accepted'; attempt: number; message: string }
+  | { type: 'checker_infeasible'; attempt: number; message: string }
+  | { type: 'loop_progress'; attempt: number; maxIterations: number; message: string }
+  | { type: 'code_fix'; attempt: number; error: string }
+  | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
+  | { type: 'debug'; message: string; detail?: string }
+  | { type: 'result'; data: TimetableSolveResult }
+  | { type: 'error'; message: string }

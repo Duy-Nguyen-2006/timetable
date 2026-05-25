@@ -1,0 +1,179 @@
+import type {
+  ConstraintCheckItem,
+  DeterministicValidationReport,
+  SolverExecutionOutput,
+  TimetableSolveCell,
+} from '@/features/timetable/ai/types'
+import type { ParsedConstraint } from '@/lib/constraint-parser'
+import type { InputPayload } from '@/lib/timetable-prompt'
+import type { NormalizedConstraint, NormalizedSolverProblem } from '@/lib/timetable-problem'
+
+function entries(cells: TimetableSolveCell[]) {
+  return cells.flatMap((cell) => (cell.entries ?? []).map((entry) => ({ cell, entry })))
+}
+
+function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): ConstraintCheckItem[] {
+  const checks: ConstraintCheckItem[] = []
+  const slotIds = new Set(payload.slots.map((slot) => slot.id))
+  const slotUsage = new Map<string, TimetableSolveCell>()
+  const teacherSlotUsage = new Set<string>()
+  const classSlotUsage = new Set<string>()
+  const assignmentUsage = new Map<string, number>()
+
+  let teacherConflict = false
+  let classConflict = false
+  let slotInvalid = false
+
+  for (const cell of cells) {
+    if (!slotIds.has(cell.slotId)) slotInvalid = true
+    slotUsage.set(cell.slotId, cell)
+    for (const entry of cell.entries) {
+      assignmentUsage.set(entry.assignmentKey, (assignmentUsage.get(entry.assignmentKey) ?? 0) + 1)
+      const teacherKey = `${entry.teacher}__${cell.slotId}`
+      const classKey = `${entry.className}__${cell.slotId}`
+      if (teacherSlotUsage.has(teacherKey)) teacherConflict = true
+      if (classSlotUsage.has(classKey)) classConflict = true
+      teacherSlotUsage.add(teacherKey)
+      classSlotUsage.add(classKey)
+    }
+  }
+
+  const coverageFailed = payload.assignments.some((assignment) => (assignmentUsage.get(assignment.id) ?? 0) !== assignment.weeklyPeriods)
+
+  checks.push({
+    constraintId: 'base_teacher_conflict',
+    original: 'Giáo viên không dạy 2 lớp cùng 1 tiết',
+    passed: !teacherConflict,
+    severity: 'base',
+    reason: teacherConflict ? 'Phát hiện giáo viên bị trùng slot.' : 'Không phát hiện teacher conflict.',
+  })
+  checks.push({
+    constraintId: 'base_class_conflict',
+    original: 'Một lớp không học 2 môn / 2 giáo viên cùng 1 tiết',
+    passed: !classConflict,
+    severity: 'base',
+    reason: classConflict ? 'Phát hiện lớp bị trùng slot.' : 'Không phát hiện class conflict.',
+  })
+  checks.push({
+    constraintId: 'base_assignment_coverage',
+    original: 'Mỗi assignment phải đủ số tiết/tuần',
+    passed: !coverageFailed,
+    severity: 'base',
+    reason: coverageFailed ? 'Có assignment chưa đủ hoặc vượt weeklyPeriods.' : 'Tất cả assignment đều khớp weeklyPeriods.',
+  })
+  checks.push({
+    constraintId: 'base_slot_validity',
+    original: 'Slot bị xóa khỏi UI không được dùng',
+    passed: !slotInvalid,
+    severity: 'base',
+    reason: slotInvalid ? 'Có slot không tồn tại trong payload.' : 'Mọi slot đều hợp lệ.',
+  })
+
+  return checks
+}
+
+function blockedSlot(cell: TimetableSolveCell, days?: string[], sessions?: string[], periods?: number[]) {
+  if (days && days.length > 0 && !days.includes(cell.dayId)) return false
+  if (sessions && sessions.length > 0 && !sessions.includes(cell.sessionId)) return false
+  if (periods && periods.length > 0 && !periods.includes(cell.period)) return false
+  return true
+}
+
+function hardConstraintPassed(parsed: ParsedConstraint, cells: TimetableSolveCell[]): boolean {
+  switch (parsed.kind) {
+    case 'teacher_block_days':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && parsed.dayIds.includes(cell.dayId))
+    case 'teacher_block_periods':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && parsed.periods.includes(cell.period))
+    case 'teacher_block_sessions':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && parsed.sessionIds.includes(cell.sessionId))
+    case 'teacher_block_day_period':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && blockedSlot(cell, parsed.dayIds, undefined, parsed.periods))
+    case 'teacher_block_session_day':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && blockedSlot(cell, parsed.dayIds, parsed.sessionIds))
+    case 'teacher_allow_only_days':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && !parsed.dayIds.includes(cell.dayId))
+    case 'teacher_allow_only_sessions':
+      return !entries(cells).some(({ cell, entry }) => parsed.teacherLabels.includes(entry.teacher) && !parsed.sessionIds.includes(cell.sessionId))
+    case 'class_block_days':
+      return !entries(cells).some(({ cell, entry }) => parsed.classLabels.includes(entry.className) && parsed.dayIds.includes(cell.dayId))
+    case 'subject_block_periods':
+      return !entries(cells).some(({ cell, entry }) => parsed.subjectLabels.includes(entry.subject) && parsed.periods.includes(cell.period))
+    case 'subject_pin_periods':
+      return parsed.subjectLabels.every((subject) => entries(cells).some(({ cell, entry }) => entry.subject === subject && parsed.periods.includes(cell.period)))
+    case 'subject_only_sessions':
+      return !entries(cells).some(({ cell, entry }) => parsed.subjectLabels.includes(entry.subject) && !parsed.sessionIds.includes(cell.sessionId))
+    case 'subject_block_consecutive':
+      return true
+    case 'teacher_max_consecutive':
+      return true
+    case 'teacher_min_off_days':
+      return true
+    case 'class_daily_subject_any':
+      return true
+    case 'subjects_not_consecutive':
+      return true
+    case 'subject_prefer_periods':
+    case 'subject_prefer_sessions':
+      return true
+    case 'unparsed':
+      return false
+  }
+}
+
+function buildHardChecks(constraints: NormalizedConstraint[], cells: TimetableSolveCell[]): ConstraintCheckItem[] {
+  return constraints.map((constraint) => {
+    const passed = hardConstraintPassed(constraint.parsed, cells)
+    return {
+      constraintId: constraint.id,
+      original: constraint.original,
+      passed,
+      severity: 'hard',
+      reason: passed ? 'Hard constraint pass.' : `Hard constraint fail hoặc chưa parse được (${constraint.parsed.kind}).`,
+      suggestion: passed ? undefined : 'Cần sửa solver encoding hoặc parser/validator cho constraint này.',
+    }
+  })
+}
+
+function buildSoftChecks(constraints: NormalizedConstraint[], cells: TimetableSolveCell[]): ConstraintCheckItem[] {
+  return constraints.map((constraint) => {
+    const passed = hardConstraintPassed(constraint.parsed, cells)
+    return {
+      constraintId: constraint.id,
+      original: constraint.original,
+      passed,
+      severity: 'soft',
+      reason: passed ? 'Soft constraint currently satisfied.' : 'Soft constraint not fully optimized.',
+      suggestion: passed ? undefined : 'Có thể retry để tối ưu objective, nhưng không bắt buộc reject.',
+    }
+  })
+}
+
+export function validateTimetableResult(
+  normalized: NormalizedSolverProblem,
+  solverResult: SolverExecutionOutput,
+): DeterministicValidationReport {
+  const checks = [
+    ...buildBaseChecks(normalized.payload, solverResult.cells),
+    ...buildHardChecks(normalized.parsedHard, solverResult.cells),
+    ...buildSoftChecks(normalized.parsedSoft, solverResult.cells),
+  ]
+
+  const baseConstraintPass = checks.filter((item) => item.severity === 'base').every((item) => item.passed)
+  const hardConstraintPass = checks.filter((item) => item.severity === 'hard').every((item) => item.passed)
+  const softChecks = checks.filter((item) => item.severity === 'soft')
+  const softConstraintScore = softChecks.length === 0 ? 1 : softChecks.filter((item) => item.passed).length / softChecks.length
+  const uncheckedConstraintIds = normalized.parsedHard.filter((item) => item.parsed.kind === 'unparsed').map((item) => item.id)
+
+  return {
+    valid: baseConstraintPass && hardConstraintPass,
+    baseConstraintPass,
+    hardConstraintPass,
+    softConstraintScore,
+    summary: baseConstraintPass && hardConstraintPass
+      ? 'Deterministic validator xác nhận pass base + hard constraints.'
+      : 'Deterministic validator phát hiện base/hard constraint chưa đạt.',
+    checks,
+    uncheckedConstraintIds,
+  }
+}

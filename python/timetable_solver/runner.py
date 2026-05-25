@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from timetable_solver.solver import solve_timetable as default_solve_timetable
+from timetable_solver.template_solver import solve_timetable as default_solve_timetable
 
 
 def _load_solver_entrypoint(artifact_path: str | None, entrypoint: str | None):
