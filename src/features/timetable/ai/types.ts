@@ -50,19 +50,56 @@ export type ConstraintConfirmationItem = {
   accepted: boolean
 }
 
+export type RawAssignment = {
+  teacher: string
+  subject: string
+  className: string
+  weeklyPeriods: number | string
+}
+
+export type NormalizedAssignment = {
+  id: string
+  teacher: {
+    id: string
+    label: string
+  }
+  subject: {
+    id: string
+    label: string
+  }
+  class: {
+    id: string
+    label: string
+  }
+  weeklyPeriods: number
+}
+
+export type SolverConstraint =
+  | { type: 'required'; text: string }
+  | { type: 'preferred'; text: string; weight: 8 | 5 | 3 }
+
 export type GenerateTimetableRequest = {
   apiKey?: string
   days: Array<{ id: string; label: string }>
   sessions: Array<{ id: string; label: string }>
   periodCounts: Record<string, number>
   deletedPeriods: Record<string, boolean>
-  assignments: Array<{
-    teacher: string
-    subject: string
-    className: string
-    weeklyPeriods: number | string
-  }>
+  assignments: RawAssignment[]
   constraints: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }>
+  constraintConfirmations?: ConstraintConfirmationItem[]
+  debug?: boolean
+  trace?: boolean
+  userNotes?: string
+}
+
+export type SolverRequestPayload = {
+  apiKey?: string
+  days: Array<{ id: string; label: string }>
+  sessions: Array<{ id: string; label: string }>
+  periodCounts: Record<string, number>
+  deletedPeriods: Record<string, boolean>
+  assignments: NormalizedAssignment[]
+  constraints: SolverConstraint[]
   constraintConfirmations?: ConstraintConfirmationItem[]
   debug?: boolean
   trace?: boolean

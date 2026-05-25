@@ -33,6 +33,7 @@ import type {
   CheckerReport,
   ConstraintCheckItem,
   DeterministicValidationReport,
+  SolverRequestPayload,
   TimetableSolveResult,
 } from './ai/types'
 import {
@@ -57,6 +58,7 @@ import {
   teacherColors,
 } from './constants'
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
+import { normalizeAssignments } from '@/lib/timetable-prompt'
 
 const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
@@ -849,18 +851,23 @@ export default function App({ onBackToLanding }) {
       accepted: true,
     }))
 
-    const requestConstraints = constraintList.map((constraint) => ({
-      type: constraint.type === 'required' ? 'required' : 'preferred',
-      text: constraint.text,
-      ...(constraint.type === 'preferred'
-        ? {
-            weight: constraint.weight === 8 || constraint.weight === 5 || constraint.weight === 3
-              ? constraint.weight
-              : 5,
-          }
-        : {}),
-    }))
-    const needConfirm = constraintConfirmations.length > 0
+      const requestConstraints: SolverRequestPayload['constraints'] = constraintList.map((constraint) => (
+        constraint.type === 'required'
+          ? {
+              type: 'required',
+              text: constraint.text,
+            }
+          : {
+              type: 'preferred',
+              text: constraint.text,
+              weight: constraint.weight === 8 || constraint.weight === 5 || constraint.weight === 3
+                ? constraint.weight
+                : 5,
+            }
+      ))
+      const normalizedAssignments = normalizeAssignments(assignmentList)
+      const needConfirm = constraintConfirmations.length > 0
+
     if (needConfirm) {
       const ok = window.confirm('Vui lòng xác nhận: hệ thống đang hiểu ràng buộc đúng như bạn đã nhập. Nhấn OK để tiếp tục xếp lịch.')
       if (!ok) {
@@ -891,9 +898,10 @@ export default function App({ onBackToLanding }) {
             days: selectedSpreadsheetDays,
             sessions: selectedSessionData,
             periodCounts: periods,
-            deletedPeriods,
-            assignments: assignmentList,
-            constraints: requestConstraints,
+              deletedPeriods,
+              assignments: normalizedAssignments,
+              constraints: requestConstraints,
+
             constraintConfirmations,
           },
           apiKey ?? undefined,

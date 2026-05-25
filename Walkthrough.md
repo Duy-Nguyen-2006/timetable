@@ -102,30 +102,30 @@ Flow mong muốn:
 - route [`POST`](src/app/api/generate-timetable/route.ts:31) nhận payload thật
 - route mở SSE stream nếu client yêu cầu stream progress
 
-## 3.2 Normalize input
+## 3.2 Request contract mới
 
-Backend cần chuyển payload FE thành problem chuẩn dùng chung cho toàn pipeline.
+Backend sẽ không còn public normalize pipeline kiểu cũ nữa.
 
-Nên tách lớp này thành module riêng, ví dụ:
-- [`src/lib/timetable-problem.ts`](src/lib/timetable-problem.ts)
+Request từ FE gửi sang API sẽ giữ gần như nguyên cấu trúc UI, chỉ có **assignments được chuẩn hóa** trước khi gửi.
 
-Module này nên:
-- reuse [`buildInputPayload()`](src/lib/timetable-prompt.ts:24)
-- bổ sung `meta`
-- bổ sung lookup/index để cả Coder lẫn Checker dùng được
+Payload mới gồm:
+- `days`
+- `sessions`
+- `periodCounts`
+- `deletedPeriods`
+- `assignments` đã normalize thành object có `id`, `teacher`, `subject`, `class`, `weeklyPeriods`
+- `constraints` giữ chung một mảng với:
+  - `required`
+  - `preferred` + `weight`
+- `constraintConfirmations` nếu có
 
-`meta` nên có:
-- `teacherToAsgIds`
-- `classToAsgIds`
-- `subjectToAsgIds`
-- `assignmentMap`
-- `slotMap`
-- `slotsByDayId`
-- `slotsBySessionId`
-- `slotsByPeriod`
-- `slotsByDayPeriod`
-- `slotsByDaySession`
-- `slotsBySessionPeriod`
+Backend không còn yêu cầu FE build sẵn:
+- `slots`
+- `hardConstraints`
+- `softConstraints`
+- `NormalizedSolverProblem`
+
+Nếu solver/checker cần thêm dữ liệu dẫn xuất như slot list, lookup map, parsed constraints, thì backend sẽ tự derive nội bộ từ request này.
 
 ## 3.3 Coder Agent loop
 

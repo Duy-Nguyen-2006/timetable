@@ -5,24 +5,22 @@ import type {
   TimetableSolveCell,
 } from '@/features/timetable/ai/types'
 import type { ParsedConstraint } from '@/lib/constraint-parser'
-import type { InputPayload } from '@/lib/timetable-prompt'
-import type { NormalizedConstraint, NormalizedSolverProblem } from '@/lib/timetable-problem'
+import type { NormalizedConstraint, SolverProblemContext } from '@/lib/timetable-problem'
 
 function entries(cells: TimetableSolveCell[]) {
   return cells.flatMap((cell) => (cell.entries ?? []).map((entry) => ({ cell, entry })))
 }
 
-function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): ConstraintCheckItem[] {
+function buildBaseChecks(context: SolverProblemContext, cells: TimetableSolveCell[]): ConstraintCheckItem[] {
   const checks: ConstraintCheckItem[] = []
-  const slotIds = new Set(payload.slots.map((slot) => slot.id))
-  const slotUsage = new Map<string, TimetableSolveCell>()
+  const slotIds = new Set(context.payload.slots.map((slot) => slot.id))
   const teacherSlotUsage = new Set<string>()
   const classSlotUsage = new Set<string>()
   const assignmentUsage = new Map<string, number>()
   const assignmentFallbackIndex = new Map<string, string[]>()
-  const assignmentIds = new Set(payload.assignments.map((assignment) => assignment.id))
+  const assignmentIds = new Set(context.payload.assignments.map((assignment) => assignment.id))
 
-  for (const assignment of payload.assignments) {
+  for (const assignment of context.payload.assignments) {
     const key = `${assignment.teacherLabel}__${assignment.subjectLabel}__${assignment.classLabel}`
     assignmentFallbackIndex.set(key, [...(assignmentFallbackIndex.get(key) ?? []), assignment.id])
   }
@@ -36,7 +34,6 @@ function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): Co
 
   for (const cell of cells) {
     if (!slotIds.has(cell.slotId)) slotInvalid = true
-    slotUsage.set(cell.slotId, cell)
     for (const entry of cell.entries) {
       const directAssignmentKey = typeof entry.assignmentKey === 'string' ? entry.assignmentKey : ''
       let resolvedAssignmentKey = assignmentIds.has(directAssignmentKey) ? directAssignmentKey : null
@@ -65,7 +62,7 @@ function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): Co
     }
   }
 
-  const mismatchedAssignments = payload.assignments.filter(
+  const mismatchedAssignments = context.payload.assignments.filter(
     (assignment) => (assignmentUsage.get(assignment.id) ?? 0) !== assignment.weeklyPeriods,
   )
   const coverageFailed = mismatchedAssignments.length > 0
@@ -195,7 +192,7 @@ function buildSoftChecks(constraints: NormalizedConstraint[], cells: TimetableSo
 }
 
 export function validateTimetableResult(
-  normalized: NormalizedSolverProblem,
+  context: SolverProblemContext,
   solverResult: SolverExecutionOutput,
 ): DeterministicValidationReport {
   console.error('[timetable-validator] validateTimetableResult start', {
@@ -218,16 +215,16 @@ export function validateTimetableResult(
   })
 
   const checks = [
-    ...buildBaseChecks(normalized.payload, solverResult.cells),
-    ...buildHardChecks(normalized.parsedHard, solverResult.cells),
-    ...buildSoftChecks(normalized.parsedSoft, solverResult.cells),
+    ...buildBaseChecks(context, solverResult.cells),
+    ...buildHardChecks(context.parsedHard, solverResult.cells),
+    ...buildSoftChecks(context.parsedSoft, solverResult.cells),
   ]
 
   const baseConstraintPass = checks.filter((item) => item.severity === 'base').every((item) => item.passed)
   const hardConstraintPass = checks.filter((item) => item.severity === 'hard').every((item) => item.passed)
   const softChecks = checks.filter((item) => item.severity === 'soft')
   const softConstraintScore = softChecks.length === 0 ? 1 : softChecks.filter((item) => item.passed).length / softChecks.length
-  const uncheckedConstraintIds = normalized.parsedHard.filter((item) => item.parsed.kind === 'unparsed').map((item) => item.id)
+  const uncheckedConstraintIds = context.parsedHard.filter((item) => item.parsed.kind === 'unparsed').map((item) => item.id)
 
   return {
     valid: baseConstraintPass && hardConstraintPass,

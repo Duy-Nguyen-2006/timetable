@@ -1,8 +1,8 @@
 import type { DeterministicValidationReport, SolverExecutionOutput } from '@/features/timetable/ai/types'
-import type { NormalizedSolverProblem } from '@/lib/timetable-problem'
+import type { SolverProblemContext } from '@/lib/timetable-problem'
 
 export type CheckerPromptInput = {
-  normalized: NormalizedSolverProblem
+  normalized: SolverProblemContext
   solverResult: SolverExecutionOutput
   deterministicReport: DeterministicValidationReport
   artifactSummary?: string | null

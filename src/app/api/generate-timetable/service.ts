@@ -10,6 +10,7 @@ import type {
   DeterministicValidationReport,
   GeneratedSolverArtifact,
   SolverExecutionOutput,
+  SolverRequestPayload,
   TimetableSolveResult,
 } from '@/features/timetable/ai/types'
 import { buildCheckerPrompt, buildCheckerSystemPrompt } from '@/lib/agent-prompts/checker'
@@ -21,9 +22,8 @@ import {
   readBaseSolverTemplate,
 } from '@/lib/generated-solver-artifacts'
 import { runSolverDirect } from '@/lib/sandbox'
-import type { InputPayload } from '@/lib/timetable-prompt'
-import { buildNormalizedSolverProblem } from '@/lib/timetable-problem'
-import type { NormalizedSolverProblem } from '@/lib/timetable-problem'
+import { buildSolverProblemContext } from '@/lib/timetable-problem'
+import type { SolverProblemContext } from '@/lib/timetable-problem'
 import { validateTimetableResult } from '@/lib/timetable-validator'
 
 const LOOP_PROGRESS_WINDOW = 3
@@ -160,7 +160,7 @@ function createBaseFallbackSolverCode() {
 }
 
 function buildFallbackArtifact(args: {
-  normalized: NormalizedSolverProblem
+  normalized: SolverProblemContext
   attempt: number
   checkerFeedback: string[]
   fallbackReason?: string
@@ -278,7 +278,7 @@ async function generateSolverCodeWithLowprizo(args: {
 }
 
 async function runCoderAttempt(
-  normalized: NormalizedSolverProblem,
+  normalized: SolverProblemContext,
   attempt: number,
   checkerFeedback: string[],
   previousArtifact: GeneratedSolverArtifact | null,
@@ -390,7 +390,7 @@ async function runCoderAttempt(
 }
 
 async function executeSolver(
-  normalized: NormalizedSolverProblem,
+  normalized: SolverProblemContext,
   artifact: GeneratedSolverArtifact,
   attempt: number,
   emit?: (event: AgentEvent) => void,
@@ -497,7 +497,8 @@ function finalizeResult(input: {
   verdict: TimetableSolveResult['verdict']
   message: string
   diagnostics: string[]
-  normalized: NormalizedSolverProblem
+    normalized: SolverProblemContext
+
   artifact: GeneratedSolverArtifact | null
   solverResult: SolverExecutionOutput | null
   deterministicReport: DeterministicValidationReport | null
@@ -535,13 +536,12 @@ function finalizeResult(input: {
 }
 
 export async function runAgenticLoop(
-  payload: InputPayload,
+  requestPayload: SolverRequestPayload,
   apiKey: string,
   model: string,
   emit?: (event: AgentEvent) => void,
   requestId = 'request-pending',
   disableLlm = false,
-  requestInput?: { constraintConfirmations?: Array<{ id: string; original: string; interpreted: string; accepted: boolean }>; days?: Array<{ id: string; label: string }>; sessions?: Array<{ id: string; label: string }>; assignments?: Array<{ teacher: string; subject: string; className: string; weeklyPeriods: number | string }>; constraints?: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }> },
 ): Promise<TimetableSolveResult> {
   const startedAt = Date.now()
   let totalChars = 0
@@ -554,16 +554,7 @@ export async function runAgenticLoop(
   const attempts: AttemptSummary[] = []
   const diagnostics: string[] = []
 
-  const normalized = buildNormalizedSolverProblem({
-    apiKey: '',
-    days: requestInput?.days ?? [],
-    sessions: requestInput?.sessions ?? [],
-    periodCounts: {},
-    deletedPeriods: {},
-    assignments: requestInput?.assignments ?? [],
-    constraints: requestInput?.constraints ?? [],
-    constraintConfirmations: requestInput?.constraintConfirmations,
-  }, payload, requestId)
+  const normalized = buildSolverProblemContext(requestPayload, requestId)
 
   emit?.({
     type: 'phase',

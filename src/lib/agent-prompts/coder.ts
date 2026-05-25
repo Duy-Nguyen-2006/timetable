@@ -1,7 +1,7 @@
-import type { NormalizedSolverProblem } from '@/lib/timetable-problem'
+import type { SolverProblemContext } from '@/lib/timetable-problem'
 
 export type CoderPromptInput = {
-  normalized: NormalizedSolverProblem
+  normalized: SolverProblemContext
   baseTemplatePath: string
   previousDiagnostics?: string[]
   checkerFeedback?: string[]

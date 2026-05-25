@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import { NextResponse } from 'next/server'
 
-import type { AgentEvent, GenerateTimetableRequest } from '@/features/timetable/ai/types'
-import { buildInputPayload } from '@/lib/timetable-prompt'
+import type { AgentEvent, SolverRequestPayload } from '@/features/timetable/ai/types'
 import { runAgenticLoop } from './service'
 
 function createSSEStream() {
@@ -31,7 +30,7 @@ function createSSEStream() {
   return { stream, send, close }
 }
 
-function resolveApiKey(input: GenerateTimetableRequest, request: Request) {
+function resolveApiKey(input: SolverRequestPayload, request: Request) {
   const apiKeyFromBody = input.apiKey?.trim()
   const apiKeyFromHeader = request.headers.get('x-lowprizo-api-key')?.trim()
   return apiKeyFromHeader || apiKeyFromBody || ''
@@ -45,23 +44,15 @@ export async function POST(request: Request) {
   const acceptSSE = request.headers.get('accept')?.includes('text/event-stream')
 
   try {
-    const input = await request.json() as GenerateTimetableRequest
-    const payload = buildInputPayload(input)
+    const input = await request.json() as SolverRequestPayload
     const apiKey = resolveApiKey(input, request)
     const model = resolveModel(request)
+
     const requestId = randomUUID()
     const disableLlm = request.headers.get('x-disable-llm') === '1'
 
-    const requestInput = {
-      constraintConfirmations: input.constraintConfirmations,
-      days: input.days,
-      sessions: input.sessions,
-      assignments: input.assignments,
-      constraints: input.constraints,
-    }
-
     if (!acceptSSE) {
-      const result = await runAgenticLoop(payload, apiKey, model, undefined, requestId, disableLlm, requestInput)
+      const result = await runAgenticLoop(input, apiKey, model, undefined, requestId, disableLlm)
       return NextResponse.json(result, {
         status: result.status === 'error' ? 503 : 200,
         headers: { 'x-request-id': requestId },
@@ -70,8 +61,9 @@ export async function POST(request: Request) {
 
     const { stream, send, close } = createSSEStream()
 
-    runAgenticLoop(payload, apiKey, model, send, requestId, disableLlm, requestInput)
+    runAgenticLoop(input, apiKey, model, send, requestId, disableLlm)
       .then((result) => {
+
         send({ type: 'result', data: result })
         close()
       })

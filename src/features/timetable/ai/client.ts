@@ -1,9 +1,9 @@
-import type { TimetableSolveResult, AgentEvent, GenerateTimetableRequest } from './types'
+import type { TimetableSolveResult, AgentEvent, SolverRequestPayload } from './types'
 
 export type AgentProgressCallback = (event: AgentEvent) => void
 
 export async function generateTimetableWithAI(
-  payload: GenerateTimetableRequest,
+  payload: SolverRequestPayload,
   apiKey?: string,
   onProgress?: AgentProgressCallback,
   options?: { disableLlm?: boolean },

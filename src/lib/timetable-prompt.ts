@@ -1,86 +1,63 @@
-export type InputPayload = {
-  slots: Array<{
-    id: string
-    dayId: string
-    dayLabel: string
-    sessionId: string
-    sessionLabel: string
-    period: number
-  }>
-  assignments: Array<{
-    id: string
-    teacherId: string
-    teacherLabel: string
-    classId: string
-    classLabel: string
-    subjectId: string
-    subjectLabel: string
-    weeklyPeriods: number
-  }>
-  hardConstraints: Array<{ id: string; text: string }>
-  softConstraints: Array<{ id: string; text: string; weight: number }>
-}
+import type { GenerateTimetableRequest, NormalizedAssignment } from '@/features/timetable/ai/types'
 
-export function buildInputPayload(input: {
-  days: Array<{ id: string; label: string }>
-  sessions: Array<{ id: string; label: string }>
-  periodCounts: Record<string, number>
-  deletedPeriods: Record<string, boolean>
-  assignments: Array<{ teacher: string; subject: string; className: string; weeklyPeriods: number | string }>
-  constraints: Array<{ type: 'required' | 'preferred'; text: string; weight?: number }>
-}): InputPayload {
-  const { days, sessions, periodCounts, deletedPeriods, assignments, constraints } = input
-
-  const slots: InputPayload['slots'] = []
-  for (const day of days) {
-    for (const session of sessions) {
-      const count = periodCounts[session.id] ?? 0
-      for (let i = 0; i < count; i++) {
-        const period = i + 1
-        const key = `${day.id}-${session.id}-${period}`
-        if (deletedPeriods[key]) continue
-        slots.push({ id: key, dayId: day.id, dayLabel: day.label, sessionId: session.id, sessionLabel: session.label, period })
-      }
-    }
-  }
-
+export function normalizeAssignments(
+  assignments: GenerateTimetableRequest['assignments'],
+): NormalizedAssignment[] {
   const teacherToId = new Map<string, string>()
   const subjectToId = new Map<string, string>()
   const classToId = new Map<string, string>()
 
-  const builtAssignments: InputPayload['assignments'] = assignments.map((assignment, index) => {
-    if (!teacherToId.has(assignment.teacher)) teacherToId.set(assignment.teacher, `T${teacherToId.size + 1}`)
-    if (!subjectToId.has(assignment.subject)) subjectToId.set(assignment.subject, `S${subjectToId.size + 1}`)
-    if (!classToId.has(assignment.className)) classToId.set(assignment.className, `C${classToId.size + 1}`)
+  return assignments.map((assignment, index) => {
+    const teacherLabel = assignment.teacher.trim()
+    const subjectLabel = assignment.subject.trim()
+    const classLabel = assignment.className.trim()
+
+    if (!teacherToId.has(teacherLabel)) teacherToId.set(teacherLabel, `T${teacherToId.size + 1}`)
+    if (!subjectToId.has(subjectLabel)) subjectToId.set(subjectLabel, `S${subjectToId.size + 1}`)
+    if (!classToId.has(classLabel)) classToId.set(classLabel, `C${classToId.size + 1}`)
 
     return {
       id: `asg_${index}`,
-      teacherId: teacherToId.get(assignment.teacher)!,
-      teacherLabel: assignment.teacher,
-      classId: classToId.get(assignment.className)!,
-      classLabel: assignment.className,
-      subjectId: subjectToId.get(assignment.subject)!,
-      subjectLabel: assignment.subject,
+      teacher: {
+        id: teacherToId.get(teacherLabel)!,
+        label: teacherLabel,
+      },
+      subject: {
+        id: subjectToId.get(subjectLabel)!,
+        label: subjectLabel,
+      },
+      class: {
+        id: classToId.get(classLabel)!,
+        label: classLabel,
+      },
       weeklyPeriods: Number(assignment.weeklyPeriods),
     }
   })
-
-  const hardConstraints: InputPayload['hardConstraints'] = []
-  const softConstraints: InputPayload['softConstraints'] = []
-
-  constraints.forEach((constraint, index) => {
-    if (constraint.type === 'required') {
-      hardConstraints.push({ id: `hc_${index + 1}`, text: constraint.text })
-    } else {
-      softConstraints.push({ id: `sc_${index + 1}`, text: constraint.text, weight: constraint.weight ?? 5 })
-    }
-  })
-
-  return { slots, assignments: builtAssignments, hardConstraints, softConstraints }
 }
 
-export function estimateSolverConfig(payload: InputPayload): { maxTimeSeconds: number; numWorkers: number; randomSeed: number } {
-  const complexity = payload.slots.length * payload.assignments.length
+export function estimateSolverConfig(args: {
+  days: Array<{ id: string; label: string }>
+  sessions: Array<{ id: string; label: string }>
+  periodCounts: Record<string, number>
+  deletedPeriods: Record<string, boolean>
+  assignments: Array<{ weeklyPeriods: number }>
+}): { maxTimeSeconds: number; numWorkers: number; randomSeed: number } {
+  const slotCount = args.days.reduce((daySum, day) => {
+    const sessionCount = args.sessions.reduce((sessionSum, session) => {
+      const count = args.periodCounts[session.id] ?? 0
+      let activePeriods = 0
+      for (let i = 0; i < count; i += 1) {
+        const period = i + 1
+        if (!args.deletedPeriods[`${day.id}-${session.id}-${period}`]) {
+          activePeriods += 1
+        }
+      }
+      return sessionSum + activePeriods
+    }, 0)
+    return daySum + sessionCount
+  }, 0)
+
+  const complexity = slotCount * args.assignments.length
   let numWorkers = 4
   if (complexity <= 700) numWorkers = 2
   else if (complexity <= 2500) numWorkers = 3
