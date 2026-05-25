@@ -41,7 +41,13 @@ Return format:
   "solverStats": {"wallTimeSeconds": float, "objectiveValue": float | None, "numConflicts": int, "numBranches": int}
 }
 
-A complete reference implementation is provided below. You may use it directly, adapt it, or write your own solution.
+IMPORTANT rules:
+- The reference implementation below already handles all common constraint kinds. Default to returning it as-is.
+- Only write custom code if a constraint type in parsedHard/parsedSoft is genuinely not handled by the reference.
+- NEVER rebuild or reconstruct the problem dict. Always pass the original `problem` argument directly to solve_base_model or any helper — never create a new dict that strips out fields like slots, assignments, meta, etc.
+- Do not hardcode slot IDs, assignment IDs, or any data from the problem JSON into the code.
+
+A complete reference implementation is provided below.
 Output ONLY valid Python source code. No markdown fences.`
 }
 
