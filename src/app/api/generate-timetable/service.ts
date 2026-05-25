@@ -147,9 +147,6 @@ function composeArtifactSummary(artifact: GeneratedSolverArtifact | null) {
 }
 
 function createBaseFallbackSolverCode() {
-  const diagnostics = resolveFallbackTemplateDiagnostics()
-  console.error('[generate-timetable] fallback template resolution', diagnostics)
-
   const resolvedPath = resolveFallbackTemplatePath()
   if (existsSync(resolvedPath)) {
     return readFileSync(resolvedPath, 'utf8')
@@ -157,7 +154,7 @@ function createBaseFallbackSolverCode() {
 
   console.error(
     '[generate-timetable] fallback template not found; falling back to base solver template',
-    diagnostics,
+    resolveFallbackTemplateDiagnostics(),
   )
   return readBaseSolverTemplate()
 }
