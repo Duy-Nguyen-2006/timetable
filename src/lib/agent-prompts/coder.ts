@@ -44,7 +44,7 @@ Return format:
 IMPORTANT rules:
 - The reference implementation below already handles all common constraint kinds. Default to returning it as-is.
 - Only write custom code if a constraint type in parsedHard/parsedSoft is genuinely not handled by the reference.
-- NEVER rebuild or reconstruct the problem dict. Always pass the original `problem` argument directly to solve_base_model or any helper — never create a new dict that strips out fields like slots, assignments, meta, etc.
+- NEVER rebuild or reconstruct the problem dict. Always pass the original problem argument directly to solve_base_model or any helper — never create a new dict that strips out fields like slots, assignments, meta, etc.
 - Do not hardcode slot IDs, assignment IDs, or any data from the problem JSON into the code.
 
 A complete reference implementation is provided below.
