@@ -18,17 +18,28 @@ This repository currently contains **two UI app variants**:
 - Use the legacy Vite app only for historical reference or migration comparison.
 
 ## Generate timetable flow (current)
-- Client call: [`generateTimetableWithAI()`](src/features/timetable/ai/client.ts:13)
-- Route handler: [`POST`](src/app/api/generate-timetable/route.ts:32)
-- Service loop: [`runAgenticLoop()`](src/app/api/generate-timetable/service.ts:137)
-- Python bridge: [`runSolverDirect()`](src/lib/sandbox.ts:157)
-- Python runner: [`main()`](python/timetable_solver/runner.py:10)
+- Client call: [`generateTimetableWithAI()`](src/features/timetable/ai/client.ts:5)
+- Route handler: [`POST`](src/app/api/generate-timetable/route.ts:43)
+- Service orchestrator: [`runPiOrchestratedLoop()`](src/app/api/generate-timetable/service.ts:215)
+- Deterministic checker: [`validateTimetableResult()`](src/lib/timetable-validator.ts:194)
+- Python runner: [`main()`](python/timetable_solver/runner.py:33)
+
+## Current architecture status
+- Legacy in-repo agent loop has been removed.
+- The backend is now scaffolded for a **`pi.dev + checker`** architecture.
+- Until a real pi.dev runtime adapter is integrated, the API returns a deterministic scaffold response explaining that pi.dev is not configured yet.
+
+## Final decision rules for the new pipeline
+1. If Pi does **not** produce a timetable candidate, return: **`Không tạo được thời khóa biểu.`**
+2. If Pi produces a timetable and base + hard constraints pass:
+   - if all soft constraints pass, return: **`Tất cả ràng buộc đều thỏa mãn.`**
+   - if some soft constraints fail, still return a solved timetable and surface those soft warnings to the user.
+3. If base or hard constraints fail, the checker must ask Pi to code again.
 
 ## Local verification notes
-- Focused lint for changed files:
-  - `npx eslint src/features/timetable/ai/types.ts src/features/timetable/ai/client.ts src/app/api/generate-timetable/route.ts src/app/api/generate-timetable/service.ts`
-- API smoke/integration check script:
-  - [`scripts_test_generate_timetable.sh`](scripts_test_generate_timetable.sh)
+- Lint: `npm run lint`
+- API smoke test: `curl -X POST http://127.0.0.1:3000/api/generate-timetable ...`
+- `npm run build` is blocked in this environment for Next.js projects, so build verification could not be executed here.
 
 ## Security note
 - Do not commit real API keys/tokens.

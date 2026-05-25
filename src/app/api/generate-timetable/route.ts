@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import type { AgentEvent, SolverRequestPayload } from '@/features/timetable/ai/types'
-import { runAgenticLoop } from './service'
+import { runPiOrchestratedLoop } from './service'
 
 function createSSEStream() {
   const encoder = new TextEncoder()
@@ -52,7 +52,8 @@ export async function POST(request: Request) {
     const disableLlm = request.headers.get('x-disable-llm') === '1'
 
     if (!acceptSSE) {
-      const result = await runAgenticLoop(input, apiKey, model, undefined, requestId, disableLlm)
+        const result = await runPiOrchestratedLoop(input, apiKey, model, undefined, requestId, disableLlm)
+
       return NextResponse.json(result, {
         status: result.status === 'error' ? 503 : 200,
         headers: { 'x-request-id': requestId },
@@ -61,7 +62,8 @@ export async function POST(request: Request) {
 
     const { stream, send, close } = createSSEStream()
 
-    runAgenticLoop(input, apiKey, model, send, requestId, disableLlm)
+      runPiOrchestratedLoop(input, apiKey, model, send, requestId, disableLlm)
+
       .then((result) => {
 
         send({ type: 'result', data: result })

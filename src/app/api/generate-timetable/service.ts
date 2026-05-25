@@ -1,749 +1,304 @@
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 import type {
   AgentEvent,
   AttemptSummary,
   CheckerReport,
-  ConstraintCheckItem,
   ConstraintViolation,
   DeterministicValidationReport,
-  GeneratedSolverArtifact,
+  SolveTelemetry,
   SolverExecutionOutput,
   SolverRequestPayload,
   TimetableSolveResult,
 } from '@/features/timetable/ai/types'
-import { buildCheckerPrompt, buildCheckerSystemPrompt } from '@/lib/agent-prompts/checker'
-import { buildCoderPrompt, buildCoderSystemPrompt } from '@/lib/agent-prompts/coder'
-import {
-  cleanupSolverArtifact,
-  getBaseSolverTemplatePath,
-  persistGeneratedSolverArtifact,
-  readBaseSolverTemplate,
-} from '@/lib/generated-solver-artifacts'
-import { runSolverDirect } from '@/lib/sandbox'
 import { buildSolverProblemContext } from '@/lib/timetable-problem'
-import type { SolverProblemContext } from '@/lib/timetable-problem'
 import { validateTimetableResult } from '@/lib/timetable-validator'
 
-const LOOP_PROGRESS_WINDOW = 3
-const REQUEST_TIMEOUT_MS = 120_000
-const NO_PROGRESS_LIMIT = 2
-const TOKEN_BUDGET_CHARS = 250_000
-const LOWPRIZO_API_TIMEOUT_MS = 45_000
-const LOWPRIZO_API_BASE_URL = process.env.LOWPRIZO_API_BASE_URL || 'https://api.lowprizo.com/v1'
-const LOWPRIZO_MODEL = process.env.LOWPRIZO_MODEL || 'devstral-latest'
+const PI_RUNTIME_NOT_CONFIGURED_MESSAGE = 'Pi.dev runtime chưa được tích hợp trong codebase hiện tại.'
 
-const FALLBACK_TEMPLATE_PATH = 'python/timetable_solver/template_solver.py'
+type ProgressEmitter = (event: AgentEvent) => void
 
-function resolveFallbackTemplatePath() {
-  const cwdCandidate = path.join(process.cwd(), FALLBACK_TEMPLATE_PATH)
-  if (existsSync(cwdCandidate)) return cwdCandidate
-
-  const runnerDir = process.env.TIMETABLE_PYTHON_RUNNER_DIR
-  if (runnerDir) {
-    const packagedCandidate = path.resolve(runnerDir, '..', 'python-src', 'timetable_solver', 'template_solver.py')
-    if (existsSync(packagedCandidate)) return packagedCandidate
-  }
-
-  return cwdCandidate
-}
-
-function resolveFallbackTemplateDiagnostics() {
-  const cwdCandidate = path.join(process.cwd(), FALLBACK_TEMPLATE_PATH)
-  const runnerDir = process.env.TIMETABLE_PYTHON_RUNNER_DIR
-  const packagedCandidate = runnerDir
-    ? path.resolve(runnerDir, '..', 'python-src', 'timetable_solver', 'template_solver.py')
-    : null
-  const resolvedPath = resolveFallbackTemplatePath()
-
-  return {
-    cwd: process.cwd(),
-    fallbackTemplatePath: FALLBACK_TEMPLATE_PATH,
-    cwdCandidate,
-    cwdCandidateExists: existsSync(cwdCandidate),
-    runnerDir: runnerDir ?? null,
-    packagedCandidate,
-    packagedCandidateExists: packagedCandidate ? existsSync(packagedCandidate) : false,
-    resolvedPath,
-    resolvedPathExists: existsSync(resolvedPath),
-  }
+type PiRuntimeDependencies = {
+  execute?: (args: { payload: SolverRequestPayload; requestId: string; apiKey: string; model: string }) => Promise<SolverExecutionOutput>
 }
 
 function nowIso() {
   return new Date().toISOString()
 }
 
-function elapsedMs(startedAt: number) {
-  return Date.now() - startedAt
+function buildAttemptSummary(summary: string, status: AttemptSummary['status'], details?: string[]): AttemptSummary {
+  return {
+    attempt: 1,
+    phase: 'system',
+    status,
+    summary,
+    details,
+    startedAt: nowIso(),
+    finishedAt: nowIso(),
+  }
 }
 
-function estimateTokenChars(...values: Array<string | undefined | null>) {
-  return values.filter(Boolean).join('\n').length
-}
-
-function buildConstraintViolationsFromReport(report: DeterministicValidationReport): ConstraintViolation[] {
+function buildSoftViolations(report: DeterministicValidationReport): ConstraintViolation[] {
   return report.checks
-    .filter((item) => !item.passed)
-    .map((item) => ({
-      constraintId: item.constraintId,
-      original: item.original,
-      violated: item.severity !== 'soft',
-      reason: item.reason,
-      confidence: item.severity === 'base' ? 1 : 0.85,
-      suggestion: item.suggestion,
+    .filter((check) => check.severity === 'soft' && !check.passed)
+    .map((check) => ({
+      constraintId: check.constraintId,
+      original: check.original,
+      violated: false,
+      reason: check.reason,
+      confidence: 0.7,
+      suggestion: check.suggestion,
     }))
 }
 
-function makeAttempt(
-  attempt: number,
-  phase: AttemptSummary['phase'],
-  status: AttemptSummary['status'],
-  summary: string,
-  extra?: Partial<AttemptSummary>,
-): AttemptSummary {
-  return {
-    attempt,
-    phase,
-    status,
-    summary,
-    startedAt: extra?.startedAt ?? nowIso(),
-    finishedAt: extra?.finishedAt ?? nowIso(),
-    details: extra?.details,
-    artifactPath: extra?.artifactPath,
-    sourceHash: extra?.sourceHash,
-  }
+function buildHardViolations(report: DeterministicValidationReport): ConstraintViolation[] {
+  return report.checks
+    .filter((check) => (check.severity === 'base' || check.severity === 'hard') && !check.passed)
+    .map((check) => ({
+      constraintId: check.constraintId,
+      original: check.original,
+      violated: true,
+      reason: check.reason,
+      confidence: 1,
+      suggestion: check.suggestion,
+    }))
 }
 
 function buildCheckerReport(report: DeterministicValidationReport): CheckerReport {
-  const violations = report.checks.filter((item) => !item.passed)
-  const hardOrBaseFailures = violations.filter((item) => item.severity === 'base' || item.severity === 'hard')
-  const primaryFailure = hardOrBaseFailures[0]
+  const hardFailures = report.checks.filter((check) => !check.passed && (check.severity === 'base' || check.severity === 'hard'))
+  const softFailures = report.checks.filter((check) => !check.passed && check.severity === 'soft')
+
+  if (hardFailures.length > 0) {
+    return {
+      verdict: 'retry',
+      baseConstraintPass: report.baseConstraintPass,
+      hardConstraintPass: report.hardConstraintPass,
+      softConstraintScore: report.softConstraintScore,
+      summary: 'Checker yêu cầu Pi.dev code lại vì vẫn còn base/hard constraints chưa đạt.',
+      retryInstructions: hardFailures.map((item) => item.suggestion ?? `${item.constraintId}: ${item.reason}`),
+      violations: hardFailures,
+      userSoftWarnings: softFailures,
+    }
+  }
 
   return {
-    verdict: hardOrBaseFailures.length > 0 ? 'retry' : 'accept',
-    baseConstraintPass: report.baseConstraintPass,
-    hardConstraintPass: report.hardConstraintPass,
+    verdict: 'accept',
+    baseConstraintPass: true,
+    hardConstraintPass: true,
     softConstraintScore: report.softConstraintScore,
-    summary: hardOrBaseFailures.length > 0
-      ? primaryFailure
-        ? `Checker yêu cầu retry: ${primaryFailure.original}. ${primaryFailure.reason}`
-        : 'Checker yêu cầu retry vì còn vi phạm base/hard constraints.'
-      : 'Checker accept vì pass base/hard constraints.',
-    retryInstructions: hardOrBaseFailures.map((item) => item.suggestion ?? `Sửa constraint ${item.constraintId}`),
-    violations,
+    summary: softFailures.length === 0
+      ? 'Tất cả ràng buộc đều thỏa mãn.'
+      : 'Thời khóa biểu hợp lệ với base/hard constraints; còn một số ràng buộc mềm chưa thỏa.',
+    retryInstructions: [],
+    violations: [],
+    userSoftWarnings: softFailures,
   }
 }
 
-function composeArtifactSummary(artifact: GeneratedSolverArtifact | null) {
-  if (!artifact) return null
+function buildTelemetry(startedAt: number, requestId: string): SolveTelemetry {
   return {
-    path: artifact.path,
-    entrypoint: artifact.entrypoint,
-    summary: artifact.summary,
-    assumptions: artifact.assumptions,
-    sourceHash: artifact.sourceHash,
+    totalDurationMs: Date.now() - startedAt,
+    compileAttempts: 0,
+    repairAttempts: 0,
+    solverAttempts: 0,
+    llmCallCount: 0,
+    tokenEstimateCharsIn: 0,
+    tokenEstimateCharsOut: 0,
+    inputRejected: false,
+    requestId,
+    totalAttempts: 0,
+    noProgressCount: 0,
+    guardrailStopReason: 'pi_runtime_not_configured',
   }
 }
 
-function createBaseFallbackSolverCode() {
-  const resolvedPath = resolveFallbackTemplatePath()
-  if (existsSync(resolvedPath)) {
-    return readFileSync(resolvedPath, 'utf8')
-  }
-
-  console.error(
-    '[generate-timetable] fallback template not found; falling back to base solver template',
-    resolveFallbackTemplateDiagnostics(),
-  )
-  return readBaseSolverTemplate()
-}
-
-function buildFallbackArtifact(args: {
-  normalized: SolverProblemContext
-  attempt: number
-  checkerFeedback: string[]
-  fallbackReason?: string
-}) {
-  const solverCode = createBaseFallbackSolverCode()
-  const assumptions = [
-    'Canonical template solver được dùng làm deterministic coder artifact an toàn nhất.',
-    ...args.checkerFeedback,
-  ]
-
-  if (args.fallbackReason) {
-    assumptions.unshift(`LLM coder fallback: ${args.fallbackReason}`)
-  }
-
-  const artifact = persistGeneratedSolverArtifact({
-    solverCode,
-    entrypoint: 'solve_timetable',
-    summary: args.fallbackReason
-      ? `Attempt ${args.attempt} fallback về canonical template solver sau khi LLM coder không khả dụng.`
-      : args.attempt === 1
-        ? 'Dùng canonical template solver làm coder artifact ban đầu.'
-        : `Retry attempt ${args.attempt} dùng canonical template solver với feedback checker đi kèm.`,
-    assumptions,
-  }, args.normalized.requestId)
-
+function buildRuntimeNotConfiguredResult(requestId: string, startedAt: number): TimetableSolveResult {
   return {
-    artifact,
-    promptCharsOut: solverCode.length,
+    status: 'error',
+    verdict: 'error',
+    requestId,
+    message: PI_RUNTIME_NOT_CONFIGURED_MESSAGE,
+    diagnostics: [
+      'Đã xóa agent loop cũ để chuẩn bị chuyển hẳn sang pi.dev + checker.',
+      'Cần tích hợp pi.dev runtime adapter trước khi có thể generate timetable trở lại.',
+    ],
+    cells: [],
+    executionErrors: [],
+    validationErrors: [],
+    iisConstraintIds: [],
+    conflictingConstraints: [],
+    violations: [],
+    overallAssessment: 'Hệ thống đang ở trạng thái scaffold cho kiến trúc pi.dev mới.',
+    solverStats: null,
+    artifactSummary: null,
+    checkerReport: null,
+    deterministicReport: null,
+    attemptHistorySummary: [
+      buildAttemptSummary('Pi.dev runtime chưa được cấu hình.', 'failed', [
+        'Agent loop cũ đã bị gỡ theo yêu cầu.',
+        'Bước tiếp theo là nối adapter thật sang pi.dev và checker runtime.',
+      ]),
+    ],
+    finalReason: 'pi_runtime_not_configured',
+    telemetry: buildTelemetry(startedAt, requestId),
   }
 }
 
-function extractPythonCodeBlock(content: string) {
-  const fenced = content.match(/```(?:python)?\s*([\s\S]*?)```/i)
-  if (fenced?.[1]?.trim()) return fenced[1].trim()
-  return content.trim()
-}
-
-function extractAssistantContent(payload: unknown) {
-  if (!payload || typeof payload !== 'object') return ''
-  const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> }).choices
-  const rawContent = choices?.[0]?.message?.content
-
-  if (typeof rawContent === 'string') return rawContent
-  if (Array.isArray(rawContent)) {
-    return rawContent
-      .map((item) => {
-        if (typeof item === 'string') return item
-        if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') {
-          return item.text
-        }
-        return ''
-      })
-      .join('\n')
-      .trim()
-  }
-
-  return ''
-}
-
-async function generateSolverCodeWithLowprizo(args: {
-  apiKey: string
-  model: string
-  coderSystemPrompt: string
-  coderPrompt: string
-}) {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), LOWPRIZO_API_TIMEOUT_MS)
-
-  try {
-    const response = await fetch(`${LOWPRIZO_API_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${args.apiKey}`,
-        'x-api-key': args.apiKey,
-      },
-      body: JSON.stringify({
-        model: args.model || LOWPRIZO_MODEL,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: args.coderSystemPrompt },
-          {
-            role: 'user',
-            content: [
-              args.coderPrompt,
-              '',
-              '--- Reference implementation (use as-is, adapt, or write your own) ---',
-              createBaseFallbackSolverCode(),
-            ].join('\n'),
-          },
-        ],
-      }),
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type') || ''
-      const body = contentType.includes('application/json') ? JSON.stringify(await response.json()) : await response.text()
-      throw new Error(`Lowprizo coder request failed with ${response.status}: ${body.slice(0, 500)}`)
-    }
-
-    const payload = await response.json()
-    const messageContent = extractAssistantContent(payload)
-    const solverCode = extractPythonCodeBlock(messageContent)
-
-    if (!solverCode) {
-      throw new Error('Lowprizo coder response did not contain solver source code.')
-    }
-
-    return solverCode
-  } finally {
-    clearTimeout(timeoutId)
+function buildInfeasibleResult(requestId: string, startedAt: number, reason: string, diagnostics: string[]): TimetableSolveResult {
+  return {
+    status: 'infeasible',
+    verdict: 'infeasible',
+    requestId,
+    message: 'Không tạo được thời khóa biểu.',
+    diagnostics,
+    cells: [],
+    executionErrors: [],
+    validationErrors: [],
+    iisConstraintIds: [],
+    conflictingConstraints: [],
+    violations: [],
+    overallAssessment: reason,
+    solverStats: null,
+    artifactSummary: null,
+    checkerReport: null,
+    deterministicReport: null,
+    attemptHistorySummary: [buildAttemptSummary(reason, 'failed', diagnostics)],
+    finalReason: 'no_timetable_generated',
+    telemetry: {
+      ...buildTelemetry(startedAt, requestId),
+      guardrailStopReason: null,
+    },
   }
 }
 
-async function runCoderAttempt(
-  normalized: SolverProblemContext,
-  attempt: number,
-  checkerFeedback: string[],
-  previousArtifact: GeneratedSolverArtifact | null,
+function buildSuccessResult(args: {
+  requestId: string
+  startedAt: number
+  execution: SolverExecutionOutput
+  report: DeterministicValidationReport
+  checkerReport: CheckerReport
+}): TimetableSolveResult {
+  const softViolations = buildSoftViolations(args.report)
+  return {
+    status: 'solved',
+    verdict: 'accept',
+    requestId: args.requestId,
+    message: args.checkerReport.userSoftWarnings.length === 0
+      ? 'Tất cả ràng buộc đều thỏa mãn.'
+      : 'Đã tạo được thời khóa biểu. Một số ràng buộc mềm chưa thỏa sẽ được báo cho người dùng.',
+    diagnostics: args.execution.diagnostics,
+    cells: args.execution.cells,
+    executionErrors: args.execution.executionErrors,
+    validationErrors: args.execution.validationErrors,
+    iisConstraintIds: args.execution.iisConstraintIds,
+    conflictingConstraints: [],
+    violations: softViolations,
+    overallAssessment: args.checkerReport.summary,
+    solverStats: args.execution.solverStats,
+    artifactSummary: null,
+    checkerReport: args.checkerReport,
+    deterministicReport: args.report,
+    attemptHistorySummary: [
+      buildAttemptSummary('Pi.dev tạo được timetable candidate và checker đã chốt kết quả cuối.', 'success', [
+        args.checkerReport.summary,
+      ]),
+    ],
+    finalReason: args.checkerReport.userSoftWarnings.length === 0 ? 'all_constraints_satisfied' : 'soft_constraints_pending',
+    telemetry: {
+      ...buildTelemetry(args.startedAt, args.requestId),
+      guardrailStopReason: null,
+      solverAttempts: 1,
+    },
+  }
+}
+
+export async function runPiOrchestratedLoop(
+  input: SolverRequestPayload,
   apiKey: string,
   model: string,
-  disableLlm = false,
-  emit?: (event: AgentEvent) => void,
-): Promise<{ artifact: GeneratedSolverArtifact; promptCharsIn: number; promptCharsOut: number }> {
-  emit?.({
-    type: 'coder_started',
-    attempt,
-    message: `Coder bắt đầu attempt ${attempt}.`,
-  })
+  emit?: ProgressEmitter,
+  requestId = randomUUID(),
+  _disableLlm = false,
+  deps: PiRuntimeDependencies = {},
+): Promise<TimetableSolveResult> {
+  const startedAt = Date.now()
+  const normalized = buildSolverProblemContext(input, requestId)
 
-  const coderSystemPrompt = buildCoderSystemPrompt()
-  const coderPrompt = buildCoderPrompt({
-    normalized,
-    baseTemplatePath: getBaseSolverTemplatePath(),
-    checkerFeedback,
-    previousArtifactSummary: previousArtifact?.summary ?? null,
-  })
-  const promptCharsIn = estimateTokenChars(coderSystemPrompt, coderPrompt)
+  emit?.({ type: 'status', message: 'Khởi tạo pipeline pi.dev + checker...', iteration: 1, maxIterations: 1 })
 
-  if (disableLlm || !apiKey.trim()) {
-    const fallback = buildFallbackArtifact({
-      normalized,
-      attempt,
-      checkerFeedback,
-      fallbackReason: disableLlm ? 'LLM bị tắt bởi runtime flag.' : 'Thiếu Lowprizo API key ở runtime.',
-    })
-
-    emit?.({
-      type: 'coder_artifact_generated',
-      attempt,
-      summary: fallback.artifact.summary,
-      artifactPath: fallback.artifact.path,
-      sourceHash: fallback.artifact.sourceHash,
-    })
-
-    return {
-      artifact: fallback.artifact,
-      promptCharsIn,
-      promptCharsOut: fallback.promptCharsOut,
-    }
+  if (!deps.execute) {
+    emit?.({ type: 'pi_runtime_missing', message: PI_RUNTIME_NOT_CONFIGURED_MESSAGE })
+    return buildRuntimeNotConfiguredResult(requestId, startedAt)
   }
 
-  try {
-    const solverCode = await generateSolverCodeWithLowprizo({
-      apiKey,
-      model,
-      coderSystemPrompt,
-      coderPrompt,
-    })
+  emit?.({ type: 'phase', phase: 'pi_coder', message: 'Pi.dev coder agent đang tạo hoặc sửa solver...', iteration: 1, maxIterations: 1 })
+  emit?.({ type: 'pi_coder_started', attempt: 1, message: 'Pi.dev coder bắt đầu vòng chạy đầu tiên.' })
 
-    const artifact = persistGeneratedSolverArtifact({
-      solverCode,
-      entrypoint: 'solve_timetable',
-      summary: attempt === 1
-        ? 'Lowprizo coder đã sinh solver artifact cho attempt ban đầu.'
-        : `Lowprizo coder đã sinh solver artifact cho retry attempt ${attempt}.`,
-      assumptions: [
-        'Generated qua Lowprizo OpenAI-compatible chat completions API.',
-        ...checkerFeedback,
-      ],
-    }, normalized.requestId)
+  const execution = await deps.execute({ payload: input, requestId, apiKey, model })
 
-    emit?.({
-      type: 'coder_artifact_generated',
-      attempt,
-      summary: artifact.summary,
-      artifactPath: artifact.path,
-      sourceHash: artifact.sourceHash,
-    })
-
-    return {
-      artifact,
-      promptCharsIn,
-      promptCharsOut: solverCode.length,
-    }
-  } catch (error) {
-    const fallbackReason = error instanceof Error ? error.message : 'Unknown Lowprizo coder error.'
-    emit?.({
-      type: 'debug',
-      message: 'Lowprizo coder call failed, switching to canonical fallback.',
-      detail: fallbackReason,
-    })
-
-    const fallback = buildFallbackArtifact({
-      normalized,
-      attempt,
-      checkerFeedback,
-      fallbackReason,
-    })
-
-    emit?.({
-      type: 'coder_artifact_generated',
-      attempt,
-      summary: fallback.artifact.summary,
-      artifactPath: fallback.artifact.path,
-      sourceHash: fallback.artifact.sourceHash,
-    })
-
-    return {
-      artifact: fallback.artifact,
-      promptCharsIn,
-      promptCharsOut: fallback.promptCharsOut,
-    }
+  if (execution.status !== 'solved' || execution.cells.length === 0) {
+    emit?.({ type: 'checker_infeasible', attempt: 1, message: 'Checker xác nhận Pi.dev chưa tạo được thời khóa biểu.' })
+    return buildInfeasibleResult(
+      requestId,
+      startedAt,
+      'Pi.dev không tạo ra được timetable candidate hợp lệ.',
+      execution.diagnostics.length > 0 ? execution.diagnostics : [execution.message],
+    )
   }
-}
 
-async function executeSolver(
-  normalized: SolverProblemContext,
-  artifact: GeneratedSolverArtifact,
-  attempt: number,
-  emit?: (event: AgentEvent) => void,
-): Promise<SolverExecutionOutput> {
-  emit?.({
-    type: 'coder_run_started',
-    attempt,
-    message: `Đang chạy Python solver cho attempt ${attempt}.`,
-  })
+  emit?.({ type: 'checker_started', attempt: 1, message: 'Checker đang validate base, hard và soft constraints...' })
+  const report = validateTimetableResult(normalized, execution)
+  const checkerReport = buildCheckerReport(report)
 
-  const executed = await runSolverDirect({
-    problem: normalized.problem,
-    solverArtifactPath: artifact.path,
-    entrypoint: artifact.entrypoint,
-  })
-
-  if (!executed.success) {
+  if (checkerReport.verdict === 'retry') {
     emit?.({
-      type: 'coder_run_failed',
-      attempt,
-      error: executed.error,
+      type: 'checker_retry_requested',
+      attempt: 1,
+      message: 'Checker phát hiện base/hard constraints chưa đạt. Pi.dev cần code lại.',
+      retryInstructions: checkerReport.retryInstructions,
     })
 
     return {
       status: 'error',
-      message: 'Runner không thực thi được solver artifact.',
-      diagnostics: [executed.error],
-      cells: [],
-      iisConstraintIds: [],
-      executionErrors: [{ constraintId: `runner_${attempt}`, error: executed.error }],
-      validationErrors: [],
-      violations: [],
-      solverStats: null,
-      artifactPath: artifact.path,
-      loadError: executed.error,
-      runtimeError: executed.error,
+      verdict: 'retry',
+      requestId,
+      message: 'Checker đã phản hồi để Pi.dev code lại do còn vi phạm base/hard constraints.',
+      diagnostics: execution.diagnostics,
+      cells: execution.cells,
+      executionErrors: execution.executionErrors,
+      validationErrors: execution.validationErrors,
+      iisConstraintIds: execution.iisConstraintIds,
+      conflictingConstraints: [],
+      violations: buildHardViolations(report),
+      overallAssessment: checkerReport.summary,
+      solverStats: execution.solverStats,
+      artifactSummary: null,
+      checkerReport,
+      deterministicReport: report,
+      attemptHistorySummary: [
+        buildAttemptSummary('Checker reject candidate vì base/hard constraints chưa đạt.', 'retry', checkerReport.retryInstructions),
+      ],
+      finalReason: 'checker_requested_recode',
+      telemetry: {
+        ...buildTelemetry(startedAt, requestId),
+        guardrailStopReason: null,
+        solverAttempts: 1,
+      },
     }
   }
-
-  const nonEmptyCells = executed.data.cells.filter((cell) => (cell.entries ?? []).length > 0)
-  const totalEntries = nonEmptyCells.reduce((sum, cell) => sum + (cell.entries?.length ?? 0), 0)
-  const missingAssignmentKeys = nonEmptyCells.flatMap((cell) =>
-    (cell.entries ?? [])
-      .filter((entry) => !entry.assignmentKey || typeof entry.assignmentKey !== 'string')
-      .map(() => cell.slotId),
-  )
-  console.error('[generate-timetable] solver execution summary', {
-    attempt,
-    artifactPath: artifact.path,
-    artifactSourceHash: artifact.sourceHash,
-    solverResultStatus: executed.data.status,
-    solverResultArtifactPath: executed.data.artifactPath ?? null,
-    totalCells: executed.data.cells.length,
-    nonEmptyCells: nonEmptyCells.length,
-    totalEntries,
-    missingAssignmentKeyCount: missingAssignmentKeys.length,
-    missingAssignmentKeySlots: missingAssignmentKeys.slice(0, 10),
-    sampleEntries: nonEmptyCells.slice(0, 3).map((cell) => ({
-      slotId: cell.slotId,
-      entries: (cell.entries ?? []).map((entry) => ({
-        assignmentKey: entry.assignmentKey,
-        teacher: entry.teacher,
-        subject: entry.subject,
-        className: entry.className,
-      })),
-    })),
-  })
-
-  if (executed.data.status === 'error') {
-    emit?.({
-      type: 'coder_runtime_error',
-      attempt,
-      error: executed.data.message,
-    })
-  }
-
-  return executed.data
-}
-
-function shouldContinueLoop(args: {
-  startedAt: number
-  totalChars: number
-  noProgressCount: number
-  retryInstructions: string[]
-}) {
-  if (elapsedMs(args.startedAt) > REQUEST_TIMEOUT_MS) {
-    return { continue: false, reason: 'request_timeout' }
-  }
-  if (args.totalChars > TOKEN_BUDGET_CHARS) {
-    return { continue: false, reason: 'token_budget_exceeded' }
-  }
-  if (args.noProgressCount >= NO_PROGRESS_LIMIT) {
-    return { continue: false, reason: 'no_progress' }
-  }
-  if (args.retryInstructions.length === 0) {
-    return { continue: false, reason: 'empty_retry_plan' }
-  }
-  return { continue: true as const, reason: null }
-}
-
-function finalizeResult(input: {
-  requestId: string
-  status: TimetableSolveResult['status']
-  verdict: TimetableSolveResult['verdict']
-  message: string
-  diagnostics: string[]
-    normalized: SolverProblemContext
-
-  artifact: GeneratedSolverArtifact | null
-  solverResult: SolverExecutionOutput | null
-  deterministicReport: DeterministicValidationReport | null
-  checkerReport: CheckerReport | null
-  attempts: AttemptSummary[]
-  telemetry: TimetableSolveResult['telemetry']
-  finalReason: string
-}): TimetableSolveResult {
-  const reportViolations = input.deterministicReport ? buildConstraintViolationsFromReport(input.deterministicReport) : []
-  const solverViolations = input.solverResult?.violations ?? []
-
-  return {
-    status: input.status,
-    verdict: input.verdict,
-    requestId: input.requestId,
-    message: input.message,
-    diagnostics: [...(input.solverResult?.diagnostics ?? []), ...input.diagnostics],
-    cells: input.solverResult?.cells ?? [],
-    executionErrors: input.solverResult?.executionErrors ?? [],
-    validationErrors: input.solverResult?.validationErrors ?? [],
-    iisConstraintIds: input.solverResult?.iisConstraintIds ?? [],
-    conflictingConstraints: input.normalized.payload.hardConstraints
-      .filter((item) => (input.solverResult?.iisConstraintIds ?? []).includes(item.id))
-      .map((item) => ({ id: item.id, text: item.text })),
-    violations: solverViolations.length > 0 ? solverViolations : reportViolations,
-    overallAssessment: input.checkerReport?.summary ?? input.deterministicReport?.summary ?? null,
-    solverStats: input.solverResult?.solverStats ?? null,
-    artifactSummary: composeArtifactSummary(input.artifact),
-    checkerReport: input.checkerReport,
-    deterministicReport: input.deterministicReport,
-    attemptHistorySummary: input.attempts,
-    finalReason: input.finalReason,
-    telemetry: input.telemetry,
-  }
-}
-
-export async function runAgenticLoop(
-  requestPayload: SolverRequestPayload,
-  apiKey: string,
-  model: string,
-  emit?: (event: AgentEvent) => void,
-  requestId = 'request-pending',
-  disableLlm = false,
-): Promise<TimetableSolveResult> {
-  const startedAt = Date.now()
-  let totalChars = 0
-  let noProgressCount = 0
-  let lastSourceHash: string | undefined
-  let compileAttempts = 0
-  let repairAttempts = 0
-  let solverAttempts = 0
-  let llmCallCount = 0
-  const attempts: AttemptSummary[] = []
-  const diagnostics: string[] = []
-
-  const normalized = buildSolverProblemContext(requestPayload, requestId)
 
   emit?.({
-    type: 'phase',
-    phase: 'normalize_input',
-    message: 'Đã normalize payload thành solver problem dùng chung.',
-    iteration: 1,
-    maxIterations: LOOP_PROGRESS_WINDOW,
+    type: 'verified',
+    violations: buildSoftViolations(report),
+    allSatisfied: checkerReport.userSoftWarnings.length === 0,
   })
+  emit?.({ type: 'checker_accepted', attempt: 1, message: checkerReport.summary })
 
-  let currentArtifact: GeneratedSolverArtifact | null = null
-  let finalSolverResult: SolverExecutionOutput | null = null
-  let finalDeterministicReport: DeterministicValidationReport | null = null
-  let finalCheckerReport: CheckerReport | null = null
-  let finalStatus: TimetableSolveResult['status'] = 'error'
-  let finalVerdict: TimetableSolveResult['verdict'] = 'error'
-  let finalReason = 'unknown'
-
-  try {
-    for (let attempt = 1; ; attempt += 1) {
-      emit?.({
-        type: 'loop_progress',
-        attempt,
-        maxIterations: Math.max(attempt, LOOP_PROGRESS_WINDOW),
-        message: `Bắt đầu loop attempt ${attempt}.`,
-      })
-
-      const coder = await runCoderAttempt(normalized, attempt, finalCheckerReport?.retryInstructions ?? [], currentArtifact, apiKey || process.env.LOWPRIZO_API_KEY || '', model || LOWPRIZO_MODEL, disableLlm, emit)
-      llmCallCount += 1
-      totalChars += coder.promptCharsIn + coder.promptCharsOut
-      compileAttempts += 1
-      currentArtifact = coder.artifact
-      solverAttempts += 1
-
-      if (lastSourceHash && lastSourceHash === currentArtifact.sourceHash) {
-        noProgressCount += 1
-      } else {
-        noProgressCount = 0
-      }
-      lastSourceHash = currentArtifact.sourceHash
-
-      finalSolverResult = await executeSolver(normalized, currentArtifact, attempt, emit)
-
-      if (finalSolverResult.status === 'error') {
-        repairAttempts += 1
-        attempts.push(makeAttempt(attempt, 'coder', 'failed', finalSolverResult.message, {
-          artifactPath: currentArtifact.path,
-          sourceHash: currentArtifact.sourceHash,
-          details: finalSolverResult.diagnostics,
-        }))
-
-        const decision = shouldContinueLoop({
-          startedAt,
-          totalChars,
-          noProgressCount,
-          retryInstructions: finalCheckerReport?.retryInstructions ?? ['retry_after_runtime_error'],
-        })
-        if (!decision.continue) {
-          finalStatus = 'error'
-          finalVerdict = 'error'
-          finalReason = decision.reason ?? 'coder_error_stop'
-          diagnostics.push(`Dừng loop tại coder error vì ${decision.reason}.`)
-          break
-        }
-        continue
-      }
-
-      emit?.({
-        type: 'phase',
-        phase: 'deterministic_validation',
-        message: `Đang validate deterministic cho attempt ${attempt}.`,
-        iteration: attempt,
-        maxIterations: Math.max(attempt, LOOP_PROGRESS_WINDOW),
-      })
-
-      finalDeterministicReport = validateTimetableResult(normalized, finalSolverResult)
-      finalCheckerReport = buildCheckerReport(finalDeterministicReport)
-      attempts.push(makeAttempt(attempt, 'validation', finalDeterministicReport.valid ? 'success' : 'retry', finalDeterministicReport.summary, {
-        artifactPath: currentArtifact.path,
-        sourceHash: currentArtifact.sourceHash,
-      }))
-
-      emit?.({
-        type: 'checker_started',
-        attempt,
-        message: `Checker đang đánh giá attempt ${attempt}.`,
-      })
-
-      const checkerPromptChars = estimateTokenChars(
-        buildCheckerSystemPrompt(),
-        buildCheckerPrompt({
-          normalized,
-          solverResult: finalSolverResult,
-          deterministicReport: finalDeterministicReport,
-          artifactSummary: currentArtifact.summary,
-        }),
-      )
-      totalChars += checkerPromptChars
-
-      if (finalSolverResult.status === 'infeasible') {
-        finalStatus = 'infeasible'
-        finalVerdict = 'infeasible'
-        finalReason = 'solver_infeasible'
-        attempts.push(makeAttempt(attempt, 'checker', 'success', 'Checker xác nhận infeasible từ solver result.'))
-        emit?.({
-          type: 'checker_infeasible',
-          attempt,
-          message: 'Checker kết luận infeasible.',
-        })
-        break
-      }
-
-      if (finalCheckerReport.verdict === 'accept') {
-        finalStatus = 'solved'
-        finalVerdict = 'accept'
-        finalReason = 'accepted'
-        attempts.push(makeAttempt(attempt, 'checker', 'success', finalCheckerReport.summary))
-        emit?.({
-          type: 'checker_accepted',
-          attempt,
-          message: finalCheckerReport.summary,
-        })
-        break
-      }
-
-      repairAttempts += 1
-      attempts.push(makeAttempt(attempt, 'checker', 'retry', finalCheckerReport.summary, {
-        details: finalCheckerReport.retryInstructions,
-        artifactPath: currentArtifact.path,
-        sourceHash: currentArtifact.sourceHash,
-      }))
-      emit?.({
-        type: 'checker_retry_requested',
-        attempt,
-        message: finalCheckerReport.summary,
-        retryInstructions: finalCheckerReport.retryInstructions,
-      })
-
-      const decision = shouldContinueLoop({
-        startedAt,
-        totalChars,
-        noProgressCount,
-        retryInstructions: finalCheckerReport.retryInstructions,
-      })
-      if (!decision.continue) {
-        finalStatus = 'error'
-        finalVerdict = 'error'
-        finalReason = decision.reason ?? 'retry_stop'
-        diagnostics.push(`Dừng loop sau checker retry vì ${decision.reason}.`)
-        break
-      }
-    }
-  } finally {
-    if (currentArtifact && finalStatus === 'solved') {
-      cleanupSolverArtifact(requestId)
-    }
-  }
-
-  const telemetry = {
-    totalDurationMs: elapsedMs(startedAt),
-    compileAttempts,
-    repairAttempts,
-    solverAttempts,
-    llmCallCount,
-    tokenEstimateCharsIn: totalChars,
-    tokenEstimateCharsOut: currentArtifact?.solverCode.length ?? 0,
-    inputRejected: false,
+  return buildSuccessResult({
     requestId,
-    totalAttempts: attempts.length,
-    noProgressCount,
-    guardrailStopReason: finalStatus === 'error' ? finalReason : null,
-  }
-
-  return finalizeResult({
-    requestId,
-    status: finalStatus,
-    verdict: finalVerdict,
-    message: finalStatus === 'solved'
-      ? 'Đã tạo thời khóa biểu hợp lệ.'
-      : finalStatus === 'infeasible'
-        ? 'Không thể tạo thời khóa biểu hợp lệ với ràng buộc hiện tại.'
-        : 'Pipeline generate timetable dừng do guardrail hoặc lỗi runtime.',
-    diagnostics,
-    normalized,
-    artifact: currentArtifact,
-    solverResult: finalSolverResult,
-    deterministicReport: finalDeterministicReport,
-    checkerReport: finalCheckerReport,
-    attempts,
-    telemetry,
-    finalReason,
+    startedAt,
+    execution,
+    report,
+    checkerReport,
   })
 }

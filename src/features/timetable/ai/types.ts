@@ -169,6 +169,7 @@ export type CheckerReport = {
   summary: string
   retryInstructions: string[]
   violations: ConstraintCheckItem[]
+  userSoftWarnings: ConstraintCheckItem[]
 }
 
 export type SolveTelemetry = {
@@ -217,18 +218,12 @@ export type TimetableSolveResult = {
 export type AgentEvent =
   | { type: 'status'; message: string; iteration: number; maxIterations: number }
   | { type: 'phase'; phase: string; message: string; iteration: number; maxIterations: number }
-  | { type: 'coder_started'; attempt: number; message: string }
-  | { type: 'coder_artifact_generated'; attempt: number; summary: string; artifactPath?: string; sourceHash?: string }
-  | { type: 'coder_run_started'; attempt: number; message: string }
-  | { type: 'coder_run_failed'; attempt: number; error: string }
-  | { type: 'coder_runtime_error'; attempt: number; error: string }
-  | { type: 'coder_schema_error'; attempt: number; error: string }
+  | { type: 'pi_coder_started'; attempt: number; message: string }
+  | { type: 'pi_runtime_missing'; message: string }
   | { type: 'checker_started'; attempt: number; message: string }
   | { type: 'checker_retry_requested'; attempt: number; message: string; retryInstructions: string[] }
   | { type: 'checker_accepted'; attempt: number; message: string }
   | { type: 'checker_infeasible'; attempt: number; message: string }
-  | { type: 'loop_progress'; attempt: number; maxIterations: number; message: string }
-  | { type: 'code_fix'; attempt: number; error: string }
   | { type: 'verified'; violations: ConstraintViolation[]; allSatisfied: boolean }
   | { type: 'debug'; message: string; detail?: string }
   | { type: 'result'; data: TimetableSolveResult }

@@ -929,35 +929,16 @@ export default function App({ onBackToLanding }) {
                 break
               }
 
-            case 'loop_progress':
-              setAgentIteration(event.attempt)
-              setAgentMaxIterations(event.maxIterations)
-              setAgentStatus(event.message)
-              setAgentStep('coding')
-              break
-            case 'coder_started':
-              setAgentIteration(event.attempt)
-              setAgentStatus(event.message)
-              setAgentStep('coding')
-              break
-            case 'coder_artifact_generated':
-              setAgentIteration(event.attempt)
-              setAgentStatus(`Đã tạo solver artifact cho attempt ${event.attempt}.`)
-              setAgentStep('coding')
-              break
-            case 'coder_run_started':
-              setAgentIteration(event.attempt)
-              setAgentStatus(event.message)
-              setAgentStep('running')
-              break
-            case 'coder_run_failed':
-            case 'coder_runtime_error':
-            case 'coder_schema_error':
-            case 'code_fix':
-              setAgentIteration(event.attempt)
-              setAgentStatus('Solver gặp lỗi, đang chuẩn bị vòng sửa tiếp theo...')
-              setAgentStep('fixing')
-              break
+              case 'pi_coder_started':
+                setAgentIteration(event.attempt)
+                setAgentStatus(event.message)
+                setAgentStep('coding')
+                break
+              case 'pi_runtime_missing':
+                setAgentStatus(event.message)
+                setAgentStep('fixing')
+                break
+
             case 'checker_started':
               setAgentIteration(event.attempt)
               setAgentStatus(event.message)
@@ -1077,9 +1058,21 @@ export default function App({ onBackToLanding }) {
       ...resultTableClassColumns.flatMap(() => [{ wch: 18 }, { wch: 18 }]),
     ]
 
-    const checkerRows = buildReportRows('Checker report', aiResult.checkerReport)
-    const deterministicRows = buildReportRows('Deterministic validation', aiResult.deterministicReport)
-    const diagnosticsRows: string[][] = [
+      const checkerRows = buildReportRows('Checker report', aiResult.checkerReport)
+      const deterministicRows = buildReportRows('Deterministic validation', aiResult.deterministicReport)
+      const softWarningRows: string[][] = [
+        ['constraintId', 'severity', 'passed', 'reason', 'suggestion', 'original'],
+        ...((aiResult.checkerReport?.userSoftWarnings ?? []).map((check) => [
+          check.constraintId,
+          check.severity,
+          check.passed ? 'Yes' : 'No',
+          check.reason,
+          check.suggestion ?? '',
+          check.original,
+        ])),
+      ]
+      const diagnosticsRows: string[][] = [
+
       ['Field', 'Value'],
       ['Status', aiResult.status],
       ['Verdict', aiResult.verdict],
@@ -1121,10 +1114,12 @@ export default function App({ onBackToLanding }) {
       ]),
     ]
 
-    XLSX.utils.book_append_sheet(wb, timetableSheet, 'Thời khóa biểu')
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(checkerRows), 'Checker report')
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deterministicRows), 'Validation report')
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagnosticsRows), 'Diagnostics')
+      XLSX.utils.book_append_sheet(wb, timetableSheet, 'Thời khóa biểu')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(checkerRows), 'Checker report')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deterministicRows), 'Validation report')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(softWarningRows), 'Soft warnings')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagnosticsRows), 'Diagnostics')
+
     XLSX.writeFile(wb, 'thoi-khoa-bieu.xlsx')
   }, [aiResult, fixedResultTableSections, resultTableClassColumns, solvedCellMap])
 
@@ -2667,10 +2662,28 @@ export default function App({ onBackToLanding }) {
                                     </div>
                                   ))}
                                 </div>
-                                <div className={`${panelMutedClass} p-3`}>
-                                  <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Retry instructions</p>
-                                  {renderList(aiResult.checkerReport.retryInstructions, 'Checker không yêu cầu retry')}
-                                </div>
+                                  <div className="space-y-4">
+                                    <div className={`${panelMutedClass} p-3`}>
+                                      <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Retry instructions</p>
+                                      {renderList(aiResult.checkerReport.retryInstructions, 'Checker không yêu cầu retry')}
+                                    </div>
+                                    <div className={`${panelMutedClass} p-3`}>
+                                      <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Soft warnings for user</p>
+                                      {(aiResult.checkerReport.userSoftWarnings?.length ?? 0) > 0 ? (
+                                        <ul className="space-y-2">
+                                          {aiResult.checkerReport.userSoftWarnings.map((warning) => (
+                                            <li key={`soft-warning-${warning.constraintId}`} className="text-xs text-white/60">
+                                              <span className="font-medium text-white/75">{warning.original}</span>
+                                              <span className="text-white/35"> — {warning.reason}</span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <span className="text-white/35">Không có cảnh báo ràng buộc mềm.</span>
+                                      )}
+                                    </div>
+                                  </div>
+
                               </div>
                             </section>
                           )}
@@ -2711,7 +2724,8 @@ export default function App({ onBackToLanding }) {
                       )}
 
                       {/* Hard violations — red, serious */}
-                      {aiResult && aiResult.violations && aiResult.violations.filter(v => v.violated).length > 0 && (
+                        {aiResult && aiResult.violations && aiResult.violations.filter(v => v.violated).length > 0 && aiResult.verdict === 'retry' && (
+
                         <div className="mb-4 rounded-md border border-red-500/20 bg-red-500/[0.04] p-4">
                           <div className="mb-2 flex items-center justify-between">
                             <div className="flex items-center gap-2 text-sm font-medium text-red-400">
@@ -2744,7 +2758,8 @@ export default function App({ onBackToLanding }) {
                       )}
 
                       {/* Soft violations — yellow, informational */}
-                      {aiResult && aiResult.violations && aiResult.violations.filter(v => !v.violated).length > 0 && (
+                        {aiResult && aiResult.violations && aiResult.violations.filter(v => !v.violated).length > 0 && aiResult.status === 'solved' && (
+
                         <div className="mb-4 rounded-md border border-yellow-500/20 bg-yellow-500/[0.04] p-4">
                           <div className="mb-2 flex items-center gap-2 text-sm font-medium text-yellow-400">
                             <AlertTriangle size={14} strokeWidth={2} />

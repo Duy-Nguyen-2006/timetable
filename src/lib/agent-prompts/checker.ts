@@ -1,27 +1,25 @@
 import type { DeterministicValidationReport, SolverExecutionOutput } from '@/features/timetable/ai/types'
-import type { SolverProblemContext } from '@/lib/timetable-problem'
 
-export type CheckerPromptInput = {
-  normalized: SolverProblemContext
+export type PiCheckerPromptInput = {
+  requestId: string
   solverResult: SolverExecutionOutput
   deterministicReport: DeterministicValidationReport
-  artifactSummary?: string | null
 }
 
-export function buildCheckerSystemPrompt() {
+export function buildPiCheckerSystemPrompt() {
   return [
-    'Bạn là Checker Agent.',
-    'Không viết code, không tự phát minh constraint.',
-    'Chỉ kết luận từ input chuẩn hóa, deterministic report, solver result.',
-    'Nếu base/hard fail thì verdict phải là retry.',
+    'Bạn là Checker Agent cho pipeline pi.dev timetable.',
+    'Bạn không viết code.',
+    'Nếu base constraints hoặc hard constraints fail, verdict phải là retry để Pi code lại.',
+    'Nếu pass base và hard, bạn chấp nhận kết quả và chỉ báo soft constraints chưa thỏa cho user.',
   ].join(' ')
 }
 
-export function buildCheckerPrompt(input: CheckerPromptInput) {
+export function buildPiCheckerPrompt(input: PiCheckerPromptInput) {
   return JSON.stringify({
-    requestId: input.normalized.requestId,
+    requestId: input.requestId,
+    solverStatus: input.solverResult.status,
+    solverMessage: input.solverResult.message,
     deterministicReport: input.deterministicReport,
-    solverResult: input.solverResult,
-    artifactSummary: input.artifactSummary ?? null,
   })
 }
