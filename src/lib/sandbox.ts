@@ -79,7 +79,10 @@ export type SolverExecutionRequest = {
 export type SolverDirectOutput = import('@/features/timetable/ai/types').SolverExecutionOutput
 
 function writeSandboxLog(request: SolverExecutionRequest, content: string) {
-  const workspace = getGeneratedSolverWorkspace(request.solverArtifactPath ? path.basename(path.dirname(request.solverArtifactPath)) : undefined)
+  const requestId = request.solverArtifactPath
+    ? path.basename(path.dirname(request.solverArtifactPath))
+    : `direct-${randomUUID()}`
+  const workspace = getGeneratedSolverWorkspace(requestId)
   writeFileSync(workspace.logPath, content, 'utf8')
 }
 
@@ -109,37 +112,42 @@ export function runSolverDirect(request: SolverProblem | SolverExecutionRequest)
       : { problem: request }
 
     const timeoutMs = Math.max((actualRequest.problem.solverConfig.maxTimeSeconds + 15) * 1000, 60_000)
-    const timeoutId = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-      resolve({ success: false, error: `Solver timed out after ${timeoutMs / 1000}s` })
-    }, timeoutMs)
+      const timeoutId = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+        writeSandboxLog(actualRequest, `timeout after ${timeoutMs / 1000}s`)
+        resolve({ success: false, error: `Solver timed out after ${timeoutMs / 1000}s` })
+      }, timeoutMs)
 
-    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
 
-    child.on('error', (error: Error) => {
-      clearTimeout(timeoutId)
-      resolve({ success: false, error: error.message })
-    })
+      child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
 
-    child.on('close', () => {
-      clearTimeout(timeoutId)
-      if (timedOut) return
-      const output = stdout.trim()
-      if (!output) {
-        resolve({ success: false, error: `No output from solver.\nstderr: ${stderr}` })
-        return
-      }
-      try {
-        const parsed = JSON.parse(output) as SolverDirectOutput
-        resolve({ success: true, data: parsed })
-      } catch {
-        resolve({ success: false, error: `Invalid JSON from solver: ${output.slice(0, 200)}\nstderr: ${stderr}` })
-      }
-    })
+      child.on('error', (error: Error) => {
+        clearTimeout(timeoutId)
+        writeSandboxLog(actualRequest, `spawn_error\n${error.message}`)
+        resolve({ success: false, error: error.message })
+      })
 
-    child.stdin.write(JSON.stringify(actualRequest))
-    child.stdin.end()
+      child.on('close', () => {
+        clearTimeout(timeoutId)
+        if (timedOut) return
+        const output = stdout.trim()
+        writeSandboxLog(actualRequest, [`stdout`, stdout.trim(), '', 'stderr', stderr.trim()].join('\n'))
+        if (!output) {
+          resolve({ success: false, error: `No output from solver.\nstderr: ${stderr}` })
+          return
+        }
+        try {
+          const parsed = JSON.parse(output) as SolverDirectOutput
+          resolve({ success: true, data: parsed })
+        } catch {
+          resolve({ success: false, error: `Invalid JSON from solver: ${output.slice(0, 200)}\nstderr: ${stderr}` })
+        }
+      })
+
+      child.stdin.write(JSON.stringify(actualRequest))
+      child.stdin.end()
+
   })
 }
