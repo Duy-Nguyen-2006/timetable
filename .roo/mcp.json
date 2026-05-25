@@ -17,7 +17,8 @@
 				"query",
 				"context",
 				"impact",
-				"detect_changes"
+				"detect_changes",
+				"cypher"
 			]
 		}
 	}

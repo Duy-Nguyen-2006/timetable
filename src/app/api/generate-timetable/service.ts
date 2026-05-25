@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 
 import type {
   AgentEvent,
@@ -17,6 +18,7 @@ import {
   cleanupSolverArtifact,
   getBaseSolverTemplatePath,
   persistGeneratedSolverArtifact,
+  readBaseSolverTemplate,
 } from '@/lib/generated-solver-artifacts'
 import { runSolverDirect } from '@/lib/sandbox'
 import type { InputPayload } from '@/lib/timetable-prompt'
@@ -33,6 +35,40 @@ const LOWPRIZO_API_BASE_URL = process.env.LOWPRIZO_API_BASE_URL || 'https://api.
 const LOWPRIZO_MODEL = process.env.LOWPRIZO_MODEL || 'devstral-latest'
 
 const FALLBACK_TEMPLATE_PATH = 'python/timetable_solver/template_solver.py'
+
+function resolveFallbackTemplatePath() {
+  const cwdCandidate = path.join(process.cwd(), FALLBACK_TEMPLATE_PATH)
+  if (existsSync(cwdCandidate)) return cwdCandidate
+
+  const runnerDir = process.env.TIMETABLE_PYTHON_RUNNER_DIR
+  if (runnerDir) {
+    const packagedCandidate = path.resolve(runnerDir, '..', 'python-src', 'timetable_solver', 'template_solver.py')
+    if (existsSync(packagedCandidate)) return packagedCandidate
+  }
+
+  return cwdCandidate
+}
+
+function resolveFallbackTemplateDiagnostics() {
+  const cwdCandidate = path.join(process.cwd(), FALLBACK_TEMPLATE_PATH)
+  const runnerDir = process.env.TIMETABLE_PYTHON_RUNNER_DIR
+  const packagedCandidate = runnerDir
+    ? path.resolve(runnerDir, '..', 'python-src', 'timetable_solver', 'template_solver.py')
+    : null
+  const resolvedPath = resolveFallbackTemplatePath()
+
+  return {
+    cwd: process.cwd(),
+    fallbackTemplatePath: FALLBACK_TEMPLATE_PATH,
+    cwdCandidate,
+    cwdCandidateExists: existsSync(cwdCandidate),
+    runnerDir: runnerDir ?? null,
+    packagedCandidate,
+    packagedCandidateExists: packagedCandidate ? existsSync(packagedCandidate) : false,
+    resolvedPath,
+    resolvedPathExists: existsSync(resolvedPath),
+  }
+}
 
 function nowIso() {
   return new Date().toISOString()
@@ -82,6 +118,7 @@ function makeAttempt(
 function buildCheckerReport(report: DeterministicValidationReport): CheckerReport {
   const violations = report.checks.filter((item) => !item.passed)
   const hardOrBaseFailures = violations.filter((item) => item.severity === 'base' || item.severity === 'hard')
+  const primaryFailure = hardOrBaseFailures[0]
 
   return {
     verdict: hardOrBaseFailures.length > 0 ? 'retry' : 'accept',
@@ -89,7 +126,9 @@ function buildCheckerReport(report: DeterministicValidationReport): CheckerRepor
     hardConstraintPass: report.hardConstraintPass,
     softConstraintScore: report.softConstraintScore,
     summary: hardOrBaseFailures.length > 0
-      ? 'Checker yêu cầu retry vì còn vi phạm base/hard constraints.'
+      ? primaryFailure
+        ? `Checker yêu cầu retry: ${primaryFailure.original}. ${primaryFailure.reason}`
+        : 'Checker yêu cầu retry vì còn vi phạm base/hard constraints.'
       : 'Checker accept vì pass base/hard constraints.',
     retryInstructions: hardOrBaseFailures.map((item) => item.suggestion ?? `Sửa constraint ${item.constraintId}`),
     violations,
@@ -108,7 +147,19 @@ function composeArtifactSummary(artifact: GeneratedSolverArtifact | null) {
 }
 
 function createBaseFallbackSolverCode() {
-  return readFileSync(FALLBACK_TEMPLATE_PATH, 'utf8')
+  const diagnostics = resolveFallbackTemplateDiagnostics()
+  console.error('[generate-timetable] fallback template resolution', diagnostics)
+
+  const resolvedPath = resolveFallbackTemplatePath()
+  if (existsSync(resolvedPath)) {
+    return readFileSync(resolvedPath, 'utf8')
+  }
+
+  console.error(
+    '[generate-timetable] fallback template not found; falling back to base solver template',
+    diagnostics,
+  )
+  return readBaseSolverTemplate()
 }
 
 function buildFallbackArtifact(args: {
@@ -381,6 +432,35 @@ async function executeSolver(
       runtimeError: executed.error,
     }
   }
+
+  const nonEmptyCells = executed.data.cells.filter((cell) => (cell.entries ?? []).length > 0)
+  const totalEntries = nonEmptyCells.reduce((sum, cell) => sum + (cell.entries?.length ?? 0), 0)
+  const missingAssignmentKeys = nonEmptyCells.flatMap((cell) =>
+    (cell.entries ?? [])
+      .filter((entry) => !entry.assignmentKey || typeof entry.assignmentKey !== 'string')
+      .map(() => cell.slotId),
+  )
+  console.error('[generate-timetable] solver execution summary', {
+    attempt,
+    artifactPath: artifact.path,
+    artifactSourceHash: artifact.sourceHash,
+    solverResultStatus: executed.data.status,
+    solverResultArtifactPath: executed.data.artifactPath ?? null,
+    totalCells: executed.data.cells.length,
+    nonEmptyCells: nonEmptyCells.length,
+    totalEntries,
+    missingAssignmentKeyCount: missingAssignmentKeys.length,
+    missingAssignmentKeySlots: missingAssignmentKeys.slice(0, 10),
+    sampleEntries: nonEmptyCells.slice(0, 3).map((cell) => ({
+      slotId: cell.slotId,
+      entries: (cell.entries ?? []).map((entry) => ({
+        assignmentKey: entry.assignmentKey,
+        teacher: entry.teacher,
+        subject: entry.subject,
+        className: entry.className,
+      })),
+    })),
+  })
 
   if (executed.data.status === 'error') {
     emit?.({

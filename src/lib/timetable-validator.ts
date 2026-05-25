@@ -19,16 +19,43 @@ function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): Co
   const teacherSlotUsage = new Set<string>()
   const classSlotUsage = new Set<string>()
   const assignmentUsage = new Map<string, number>()
+  const assignmentFallbackIndex = new Map<string, string[]>()
+  const assignmentIds = new Set(payload.assignments.map((assignment) => assignment.id))
+
+  for (const assignment of payload.assignments) {
+    const key = `${assignment.teacherLabel}__${assignment.subjectLabel}__${assignment.classLabel}`
+    assignmentFallbackIndex.set(key, [...(assignmentFallbackIndex.get(key) ?? []), assignment.id])
+  }
 
   let teacherConflict = false
   let classConflict = false
   let slotInvalid = false
+  let missingAssignmentKeyCount = 0
+  let fallbackMatchedCount = 0
+  let fallbackAmbiguousCount = 0
 
   for (const cell of cells) {
     if (!slotIds.has(cell.slotId)) slotInvalid = true
     slotUsage.set(cell.slotId, cell)
     for (const entry of cell.entries) {
-      assignmentUsage.set(entry.assignmentKey, (assignmentUsage.get(entry.assignmentKey) ?? 0) + 1)
+      const directAssignmentKey = typeof entry.assignmentKey === 'string' ? entry.assignmentKey : ''
+      let resolvedAssignmentKey = assignmentIds.has(directAssignmentKey) ? directAssignmentKey : null
+
+      if (!resolvedAssignmentKey) {
+        missingAssignmentKeyCount += 1
+        const fallbackKey = `${entry.teacher}__${entry.subject}__${entry.className}`
+        const matchedAssignmentIds = assignmentFallbackIndex.get(fallbackKey) ?? []
+        if (matchedAssignmentIds.length === 1) {
+          resolvedAssignmentKey = matchedAssignmentIds[0]
+          fallbackMatchedCount += 1
+        } else if (matchedAssignmentIds.length > 1) {
+          fallbackAmbiguousCount += 1
+        }
+      }
+
+      if (resolvedAssignmentKey) {
+        assignmentUsage.set(resolvedAssignmentKey, (assignmentUsage.get(resolvedAssignmentKey) ?? 0) + 1)
+      }
       const teacherKey = `${entry.teacher}__${cell.slotId}`
       const classKey = `${entry.className}__${cell.slotId}`
       if (teacherSlotUsage.has(teacherKey)) teacherConflict = true
@@ -38,7 +65,10 @@ function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): Co
     }
   }
 
-  const coverageFailed = payload.assignments.some((assignment) => (assignmentUsage.get(assignment.id) ?? 0) !== assignment.weeklyPeriods)
+  const mismatchedAssignments = payload.assignments.filter(
+    (assignment) => (assignmentUsage.get(assignment.id) ?? 0) !== assignment.weeklyPeriods,
+  )
+  const coverageFailed = mismatchedAssignments.length > 0
 
   checks.push({
     constraintId: 'base_teacher_conflict',
@@ -59,7 +89,22 @@ function buildBaseChecks(payload: InputPayload, cells: TimetableSolveCell[]): Co
     original: 'Mỗi assignment phải đủ số tiết/tuần',
     passed: !coverageFailed,
     severity: 'base',
-    reason: coverageFailed ? 'Có assignment chưa đủ hoặc vượt weeklyPeriods.' : 'Tất cả assignment đều khớp weeklyPeriods.',
+    reason: coverageFailed
+      ? [
+        'Có assignment chưa đủ hoặc vượt weeklyPeriods.',
+        missingAssignmentKeyCount > 0 ? `entries thiếu/không hợp lệ assignmentKey: ${missingAssignmentKeyCount}` : null,
+        fallbackMatchedCount > 0 ? `fallback teacher+subject+class đã map được: ${fallbackMatchedCount}` : null,
+        fallbackAmbiguousCount > 0 ? `fallback teacher+subject+class bị ambiguous: ${fallbackAmbiguousCount}` : null,
+        mismatchedAssignments.length > 0
+          ? `assignment lệch count: ${mismatchedAssignments
+            .slice(0, 5)
+            .map((assignment) => `${assignment.id}=${assignmentUsage.get(assignment.id) ?? 0}/${assignment.weeklyPeriods}`)
+            .join(', ')}`
+          : null,
+      ].filter(Boolean).join(' ')
+      : fallbackMatchedCount > 0
+        ? `Tất cả assignment đều khớp weeklyPeriods. Đã recover ${fallbackMatchedCount} entries bằng teacher+subject+class fallback.`
+        : 'Tất cả assignment đều khớp weeklyPeriods.',
   })
   checks.push({
     constraintId: 'base_slot_validity',
@@ -153,6 +198,25 @@ export function validateTimetableResult(
   normalized: NormalizedSolverProblem,
   solverResult: SolverExecutionOutput,
 ): DeterministicValidationReport {
+  console.error('[timetable-validator] validateTimetableResult start', {
+    solverStatus: solverResult.status,
+    artifactPath: solverResult.artifactPath ?? null,
+    totalCells: solverResult.cells.length,
+    nonEmptyCells: solverResult.cells.filter((cell) => (cell.entries ?? []).length > 0).length,
+    sampleEntries: solverResult.cells
+      .filter((cell) => (cell.entries ?? []).length > 0)
+      .slice(0, 3)
+      .map((cell) => ({
+        slotId: cell.slotId,
+        entries: (cell.entries ?? []).map((entry) => ({
+          assignmentKey: entry.assignmentKey,
+          teacher: entry.teacher,
+          subject: entry.subject,
+          className: entry.className,
+        })),
+      })),
+  })
+
   const checks = [
     ...buildBaseChecks(normalized.payload, solverResult.cells),
     ...buildHardChecks(normalized.parsedHard, solverResult.cells),

@@ -987,7 +987,12 @@ export default function App({ onBackToLanding }) {
       setAgentMaxIterations(result.telemetry?.totalAttempts ?? agentMaxIterations)
       setAgentStatus(result.message)
       if (result.status !== 'solved') {
-        setAiError(result.message || result.overallAssessment || RESULT_NOT_FOUND_MESSAGE)
+        const firstViolationReason = result.violations.find((item) => item.violated)?.reason
+        const surfacedError = firstViolationReason
+          || result.overallAssessment
+          || result.message
+          || RESULT_NOT_FOUND_MESSAGE
+        setAiError(surfacedError)
       }
     } catch (err) {
       setAiError(err instanceof Error ? err.message : RESULT_NOT_FOUND_MESSAGE)
