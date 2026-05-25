@@ -156,7 +156,8 @@ function buildReportRows(
 
   rows.push([])
   rows.push(['constraintId', 'severity', 'passed', 'reason', 'suggestion', 'original'])
-  report.checks.forEach((check) => {
+  const checks = 'checks' in report ? report.checks : report.violations
+  checks.forEach((check) => {
     rows.push([
       check.constraintId,
       check.severity,
@@ -907,25 +908,27 @@ export default function App({ onBackToLanding }) {
           apiKey ?? undefined,
 
         (event: AgentEvent) => {
-          switch (event.type) {
-            case 'status':
-            case 'phase': {
-              setAgentStatus(event.message)
-              setAgentIteration(event.iteration)
-              setAgentMaxIterations(event.maxIterations)
-              if (event.phase === 'deterministic_validation') {
-                setAgentStep('checking')
-              } else if (event.phase === 'normalize_input') {
-                setAgentStep('thinking')
-              } else if (event.message.includes('kiểm tra')) {
-                setAgentStep('checking')
-              } else if (event.message.includes('sửa')) {
-                setAgentStep('fixing')
-              } else {
-                setAgentStep('coding')
+            switch (event.type) {
+              case 'status':
+              case 'phase': {
+                setAgentStatus(event.message)
+                setAgentIteration(event.iteration)
+                setAgentMaxIterations(event.maxIterations)
+                const phase = event.type === 'phase' ? event.phase : null
+                if (phase === 'deterministic_validation') {
+                  setAgentStep('checking')
+                } else if (phase === 'normalize_input') {
+                  setAgentStep('thinking')
+                } else if (event.message.includes('kiểm tra')) {
+                  setAgentStep('checking')
+                } else if (event.message.includes('sửa')) {
+                  setAgentStep('fixing')
+                } else {
+                  setAgentStep('coding')
+                }
+                break
               }
-              break
-            }
+
             case 'loop_progress':
               setAgentIteration(event.attempt)
               setAgentMaxIterations(event.maxIterations)

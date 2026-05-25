@@ -2,6 +2,10 @@
 
 ## Mục tiêu cập nhật lần này
 
+- [x] Soát preprocess payload hiện tại và xác định mismatch với payload sạch mong muốn.
+- [x] Chỉnh `buildSolverProblemContext()` để `problem` khớp payload sạch: giữ `constraints`, `hardConstraints`, `softConstraints`, `solverConfig`, `meta` ; bỏ parsed constraints khỏi `problem` ; index meta dùng key id (`teacherToAssignmentIds`, `classToAssignmentIds`, `subjectToAssignmentIds`).
+- [ ] Verify typecheck/API/dev logs và đồng bộ `.orchids/orchids.json`.
+
 Tài liệu này thay thế toàn bộ nội dung cũ để chốt lại kiến trúc mong muốn cuối cùng cho luồng generate timetable mới.
 
 Yêu cầu mới đã chốt:

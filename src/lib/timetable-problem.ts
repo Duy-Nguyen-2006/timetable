@@ -57,9 +57,9 @@ export type NormalizedConstraint = {
 }
 
 export type ProblemMeta = {
-  teacherToAsgIds: Record<string, string[]>
-  classToAsgIds: Record<string, string[]>
-  subjectToAsgIds: Record<string, string[]>
+  teacherToAssignmentIds: Record<string, string[]>
+  classToAssignmentIds: Record<string, string[]>
+  subjectToAssignmentIds: Record<string, string[]>
   assignmentMap: Record<string, SolverPayload['assignments'][number]>
   slotMap: Record<string, SolverPayload['slots'][number]>
   slotsByDayId: Record<string, string[]>
@@ -103,8 +103,6 @@ export type SolverProblemContext = {
     constraints: SolverRequestPayload['constraints']
     hardConstraints: SolverHardConstraint[]
     softConstraints: SolverSoftConstraint[]
-    parsedHard: NormalizedConstraint[]
-    parsedSoft: NormalizedConstraint[]
     solverConfig: ReturnType<typeof estimateSolverConfig>
     meta: ProblemMeta
   }
@@ -172,9 +170,9 @@ function pushIndex(map: Record<string, string[]>, key: string, value: string) {
 }
 
 function summarizePayload(payload: SolverPayload): ProblemMeta {
-  const teacherToAsgIds: Record<string, string[]> = {}
-  const classToAsgIds: Record<string, string[]> = {}
-  const subjectToAsgIds: Record<string, string[]> = {}
+  const teacherToAssignmentIds: Record<string, string[]> = {}
+  const classToAssignmentIds: Record<string, string[]> = {}
+  const subjectToAssignmentIds: Record<string, string[]> = {}
   const assignmentMap: ProblemMeta['assignmentMap'] = {}
   const slotMap: ProblemMeta['slotMap'] = {}
   const slotsByDayId: Record<string, string[]> = {}
@@ -186,9 +184,9 @@ function summarizePayload(payload: SolverPayload): ProblemMeta {
 
   for (const assignment of payload.assignments) {
     assignmentMap[assignment.id] = assignment
-    pushIndex(teacherToAsgIds, assignment.teacherLabel, assignment.id)
-    pushIndex(classToAsgIds, assignment.classLabel, assignment.id)
-    pushIndex(subjectToAsgIds, assignment.subjectLabel, assignment.id)
+    pushIndex(teacherToAssignmentIds, assignment.teacherId, assignment.id)
+    pushIndex(classToAssignmentIds, assignment.classId, assignment.id)
+    pushIndex(subjectToAssignmentIds, assignment.subjectId, assignment.id)
   }
 
   for (const slot of payload.slots) {
@@ -202,9 +200,9 @@ function summarizePayload(payload: SolverPayload): ProblemMeta {
   }
 
   return {
-    teacherToAsgIds,
-    classToAsgIds,
-    subjectToAsgIds,
+    teacherToAssignmentIds,
+    classToAssignmentIds,
+    subjectToAssignmentIds,
     assignmentMap,
     slotMap,
     slotsByDayId,
@@ -303,8 +301,6 @@ export function buildSolverProblemContext(
       constraints: request.constraints,
       hardConstraints,
       softConstraints,
-      parsedHard,
-      parsedSoft,
       solverConfig,
       meta,
     },
