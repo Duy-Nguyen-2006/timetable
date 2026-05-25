@@ -78,6 +78,12 @@ export type SolverExecutionRequest = {
 
 export type SolverDirectOutput = import('@/features/timetable/ai/types').SolverExecutionOutput
 
+export function getSandboxLogPath(solverArtifactPath?: string) {
+  if (!solverArtifactPath) return null
+  const requestId = path.basename(path.dirname(solverArtifactPath))
+  return getGeneratedSolverWorkspace(requestId).logPath
+}
+
 function writeSandboxLog(request: SolverExecutionRequest, content: string) {
   const requestId = request.solverArtifactPath
     ? path.basename(path.dirname(request.solverArtifactPath))

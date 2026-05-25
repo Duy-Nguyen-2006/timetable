@@ -134,6 +134,13 @@
 - [x] Đối chiếu với flow hiện tại trong `runPiOrchestratedLoop()` và `runSolverDirect()`.
 - [x] Chốt roadmap theo hướng ít rủi ro nhất, không thêm framework mới ngoài scope hiện tại.
 
+## Mục tiêu cập nhật lần này (agent execution UX)
+
+- [x] Soát blast radius cho `handleGenerate`, `buildSuccessResult`, `executePiRuntimeAttempt` trước khi mở rộng UI lifecycle.
+- [x] Mở rộng backend result/event contract để trả lifecycle events có phase, status, artifact path, source hash và sandbox log path.
+- [x] Nâng `TimetableApp` để hiển thị timeline rõ các bước generate -> run -> check -> retry và giữ attempt history cũ như lớp chi tiết phụ.
+- [x] Verify route/UI/logs và chạy lint + Python tests.
+
 ## Câu trả lời ngắn cho câu hỏi “định dùng tech stack gì?”
 
 - **Ngay bây giờ:** Next.js App Router + TypeScript + Tailwind cho app/orchestrator, pi.dev-compatible endpoint cho model generation, Python runner cho sandbox execution, TS validator cho checker.

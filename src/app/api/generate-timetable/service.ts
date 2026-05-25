@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import type {
   AgentEvent,
+  AgentLifecycleEvent,
   AttemptSummary,
   CheckerReport,
   ConstraintViolation,
@@ -16,7 +17,7 @@ import type {
 import { buildPiCheckerPrompt, buildPiCheckerSystemPrompt } from '@/lib/agent-prompts/checker'
 import { buildPiCoderPrompt, buildPiCoderSystemPrompt } from '@/lib/agent-prompts/coder'
 import { getGeneratedSolverWorkspace, persistGeneratedSolverArtifact } from '@/lib/generated-solver-artifacts'
-import { runSolverDirect } from '@/lib/sandbox'
+import { getSandboxLogPath, runSolverDirect } from '@/lib/sandbox'
 import { buildSolverProblemContext } from '@/lib/timetable-problem'
 import type { SolverProblemContext } from '@/lib/timetable-problem'
 import { validateTimetableResult } from '@/lib/timetable-validator'
@@ -381,7 +382,109 @@ function toArtifactSummary(record: PiRuntimeAttemptRecord, artifact?: GeneratedS
     assumptions: artifact?.assumptions ?? record.checkerFeedback,
     sourceHash: artifact?.sourceHash ?? record.sourceHash,
     attempt: record.attempt,
+    logPath: record.logPath,
   }
+}
+
+function buildLifecycleEvent(args: {
+  phase: AgentLifecycleEvent['phase']
+  title: string
+  detail: string
+  status: AgentLifecycleEvent['status']
+  attempt?: number
+  artifactPath?: string
+  logPath?: string
+  sourceHash?: string
+  tags?: string[]
+}): AgentLifecycleEvent {
+  return {
+    id: randomUUID(),
+    phase: args.phase,
+    title: args.title,
+    detail: args.detail,
+    status: args.status,
+    attempt: args.attempt,
+    timestamp: nowIso(),
+    artifactPath: args.artifactPath,
+    logPath: args.logPath,
+    sourceHash: args.sourceHash,
+    tags: args.tags,
+  }
+}
+
+function buildLifecycleEvents(runtimeAttempts: PiRuntimeAttemptRecord[], checkerReport?: CheckerReport | null): AgentLifecycleEvent[] {
+  const events: AgentLifecycleEvent[] = [
+    buildLifecycleEvent({
+      phase: 'thinking',
+      title: 'Request normalized',
+      detail: 'Đã chuẩn hóa input, constraint confirmations và problem context trước khi gọi coder.',
+      status: 'completed',
+      tags: ['input', 'normalization'],
+    }),
+  ]
+
+  runtimeAttempts.forEach((attempt) => {
+    events.push(
+      buildLifecycleEvent({
+        phase: 'coding',
+        title: `Coder generated attempt ${attempt.attempt}`,
+        detail: attempt.checkerFeedback.length > 0
+          ? 'Pi.dev coder đã code lại dựa trên feedback từ checker.'
+          : 'Pi.dev coder đã sinh candidate solver artifact đầu tiên.',
+        status: attempt.executionStatus === 'error' ? 'failed' : 'completed',
+        attempt: attempt.attempt,
+        artifactPath: attempt.artifactPath,
+        logPath: attempt.logPath,
+        sourceHash: attempt.sourceHash,
+        tags: ['artifact'],
+      }),
+      buildLifecycleEvent({
+        phase: 'running',
+        title: `Sandbox executed attempt ${attempt.attempt}`,
+        detail: attempt.executionStatus === 'solved'
+          ? 'Python runner đã thực thi artifact và trả candidate timetable.'
+          : attempt.executionStatus === 'infeasible'
+            ? 'Python runner đã chạy artifact nhưng không tạo được candidate hợp lệ.'
+            : 'Python runner đã gặp runtime/load error khi thực thi artifact.',
+        status: attempt.executionStatus === 'solved' ? 'completed' : 'failed',
+        attempt: attempt.attempt,
+        artifactPath: attempt.artifactPath,
+        logPath: attempt.logPath,
+        sourceHash: attempt.sourceHash,
+        tags: ['sandbox', attempt.executionStatus],
+      }),
+    )
+  })
+
+  if (checkerReport) {
+    events.push(buildLifecycleEvent({
+      phase: 'checking',
+      title: checkerReport.verdict === 'accept' ? 'Checker accepted final candidate' : 'Checker requested another pass',
+      detail: checkerReport.summary,
+      status: checkerReport.verdict === 'accept' ? 'completed' : checkerReport.verdict === 'retry' ? 'failed' : 'completed',
+      attempt: runtimeAttempts[runtimeAttempts.length - 1]?.attempt,
+      artifactPath: runtimeAttempts[runtimeAttempts.length - 1]?.artifactPath,
+      logPath: runtimeAttempts[runtimeAttempts.length - 1]?.logPath,
+      sourceHash: runtimeAttempts[runtimeAttempts.length - 1]?.sourceHash,
+      tags: ['checker', checkerReport.verdict],
+    }))
+
+    if (checkerReport.verdict === 'retry') {
+      events.push(buildLifecycleEvent({
+        phase: 'fixing',
+        title: 'Repair loop requested',
+        detail: checkerReport.retryInstructions.join(' | ') || 'Checker yêu cầu coder sửa lại base/hard constraints.',
+        status: 'active',
+        attempt: runtimeAttempts[runtimeAttempts.length - 1]?.attempt,
+        artifactPath: runtimeAttempts[runtimeAttempts.length - 1]?.artifactPath,
+        logPath: runtimeAttempts[runtimeAttempts.length - 1]?.logPath,
+        sourceHash: runtimeAttempts[runtimeAttempts.length - 1]?.sourceHash,
+        tags: ['repair'],
+      }))
+    }
+  }
+
+  return events
 }
 
 function buildInfeasibleResult(
@@ -416,17 +519,19 @@ function buildInfeasibleResult(
       : null,
     checkerReport: null,
     deterministicReport: null,
-    attemptHistorySummary: runtimeAttempts.map((attempt) => buildAttemptSummary(
-      attempt.attempt,
-      'coder',
-      `Pi attempt ${attempt.attempt} kết thúc với trạng thái ${attempt.executionStatus}.`,
-      attempt.executionStatus === 'error' ? 'failed' : 'retry',
-      attempt.diagnostics,
-      attempt.artifactPath,
-      attempt.sourceHash,
-    )),
-    finalReason,
-    telemetry: buildTelemetry(startedAt, requestId, runtimeAttempts, 0),
+      attemptHistorySummary: runtimeAttempts.map((attempt) => buildAttemptSummary(
+        attempt.attempt,
+        'coder',
+        `Pi attempt ${attempt.attempt} kết thúc với trạng thái ${attempt.executionStatus}.`,
+        attempt.executionStatus === 'error' ? 'failed' : 'retry',
+        attempt.diagnostics,
+        attempt.artifactPath,
+        attempt.sourceHash,
+      )),
+      lifecycleEvents: buildLifecycleEvents(runtimeAttempts),
+      finalReason,
+      telemetry: buildTelemetry(startedAt, requestId, runtimeAttempts, 0),
+
   }
 }
 
@@ -458,29 +563,31 @@ function buildRetryResult(args: {
       args.runtimeAttempts[args.runtimeAttempts.length - 1],
       args.generatedArtifacts.get(args.runtimeAttempts[args.runtimeAttempts.length - 1].attempt) ?? null,
     ),
-    checkerReport: args.checkerReport,
-    deterministicReport: args.report,
-    attemptHistorySummary: [
-      ...args.runtimeAttempts.map((attempt) => buildAttemptSummary(
-        attempt.attempt,
-        'coder',
-        `Pi attempt ${attempt.attempt} đã chạy xong.`,
-        attempt.executionStatus === 'solved' ? 'success' : attempt.executionStatus === 'error' ? 'failed' : 'retry',
-        attempt.diagnostics,
-        attempt.artifactPath,
-        attempt.sourceHash,
-      )),
-      buildAttemptSummary(
-        args.runtimeAttempts.length,
-        'checker',
-        'Checker reject candidate vì base/hard constraints chưa đạt.',
-        'retry',
-        args.checkerFeedback,
-        args.runtimeAttempts[args.runtimeAttempts.length - 1]?.artifactPath,
-        args.runtimeAttempts[args.runtimeAttempts.length - 1]?.sourceHash,
-      ),
-    ],
-    finalReason: 'checker_requested_recode',
+      checkerReport: args.checkerReport,
+      deterministicReport: args.report,
+      attemptHistorySummary: [
+        ...args.runtimeAttempts.map((attempt) => buildAttemptSummary(
+          attempt.attempt,
+          'coder',
+          `Pi attempt ${attempt.attempt} đã chạy xong.`,
+          attempt.executionStatus === 'solved' ? 'success' : attempt.executionStatus === 'error' ? 'failed' : 'retry',
+          attempt.diagnostics,
+          attempt.artifactPath,
+          attempt.sourceHash,
+        )),
+        buildAttemptSummary(
+          args.runtimeAttempts.length,
+          'checker',
+          'Checker reject candidate vì base/hard constraints chưa đạt.',
+          'retry',
+          args.checkerFeedback,
+          args.runtimeAttempts[args.runtimeAttempts.length - 1]?.artifactPath,
+          args.runtimeAttempts[args.runtimeAttempts.length - 1]?.sourceHash,
+        ),
+      ],
+      lifecycleEvents: buildLifecycleEvents(args.runtimeAttempts, args.checkerReport),
+      finalReason: 'checker_requested_recode',
+
     telemetry: buildTelemetry(args.startedAt, args.requestId, args.runtimeAttempts, args.checkerFeedback.length),
   }
 }
@@ -515,29 +622,31 @@ function buildSuccessResult(args: {
     artifactSummary: latestAttempt
       ? toArtifactSummary(latestAttempt, args.generatedArtifacts.get(latestAttempt.attempt) ?? null)
       : null,
-    checkerReport: args.checkerReport,
-    deterministicReport: args.report,
-    attemptHistorySummary: [
-      ...args.runtimeAttempts.map((attempt) => buildAttemptSummary(
-        attempt.attempt,
-        'coder',
-        `Pi attempt ${attempt.attempt} đã chạy xong.`,
-        attempt.executionStatus === 'solved' ? 'success' : attempt.executionStatus === 'error' ? 'failed' : 'retry',
-        attempt.diagnostics,
-        attempt.artifactPath,
-        attempt.sourceHash,
-      )),
-      buildAttemptSummary(
-        latestAttempt?.attempt ?? 1,
-        'checker',
-        'Checker đã chốt kết quả cuối.',
-        'success',
-        [args.checkerReport.summary],
-        latestAttempt?.artifactPath,
-        latestAttempt?.sourceHash,
-      ),
-    ],
-    finalReason: args.checkerReport.userSoftWarnings.length === 0 ? 'all_constraints_satisfied' : 'soft_constraints_pending',
+      checkerReport: args.checkerReport,
+      deterministicReport: args.report,
+      attemptHistorySummary: [
+        ...args.runtimeAttempts.map((attempt) => buildAttemptSummary(
+          attempt.attempt,
+          'coder',
+          `Pi attempt ${attempt.attempt} đã chạy xong.`,
+          attempt.executionStatus === 'solved' ? 'success' : attempt.executionStatus === 'error' ? 'failed' : 'retry',
+          attempt.diagnostics,
+          attempt.artifactPath,
+          attempt.sourceHash,
+        )),
+        buildAttemptSummary(
+          latestAttempt?.attempt ?? 1,
+          'checker',
+          'Checker đã chốt kết quả cuối.',
+          'success',
+          [args.checkerReport.summary],
+          latestAttempt?.artifactPath,
+          latestAttempt?.sourceHash,
+        ),
+      ],
+      lifecycleEvents: buildLifecycleEvents(args.runtimeAttempts, args.checkerReport),
+      finalReason: args.checkerReport.userSoftWarnings.length === 0 ? 'all_constraints_satisfied' : 'soft_constraints_pending',
+
     telemetry: {
       ...buildTelemetry(args.startedAt, args.requestId, args.runtimeAttempts, 0),
       guardrailStopReason: null,
@@ -816,6 +925,33 @@ export async function runPiOrchestratedLoop(
       context: normalized,
     })
 
+    emit?.({
+      type: 'pi_coder_finished',
+      attempt,
+      message: `Pi.dev coder đã sinh artifact cho attempt ${attempt}.`,
+      artifactPath: execution.artifactPath,
+      sourceHash: execution.generatedArtifact?.sourceHash ?? execution.artifactPath,
+    })
+    emit?.({
+      type: 'sandbox_started',
+      attempt,
+      message: `Sandbox đang chạy artifact attempt ${attempt}.`,
+      artifactPath: execution.artifactPath,
+    })
+    emit?.({
+      type: 'sandbox_finished',
+      attempt,
+      message: execution.status === 'solved'
+        ? `Sandbox đã chạy xong attempt ${attempt} và trả candidate timetable.`
+        : execution.status === 'infeasible'
+          ? `Sandbox đã chạy xong attempt ${attempt} nhưng không tạo được candidate hợp lệ.`
+          : `Sandbox attempt ${attempt} gặp lỗi runtime/load.`,
+      artifactPath: execution.artifactPath,
+      logPath: getSandboxLogPath(execution.artifactPath) ?? undefined,
+      sourceHash: execution.generatedArtifact?.sourceHash ?? execution.artifactPath,
+      status: execution.status,
+    })
+
     finalExecution = execution
     if (execution.generatedArtifact) {
       generatedArtifacts.set(attempt, execution.generatedArtifact)
@@ -830,6 +966,7 @@ export async function runPiOrchestratedLoop(
       diagnostics: execution.diagnostics,
       artifactPath: execution.artifactPath,
       sourceHash: execution.generatedArtifact?.sourceHash ?? execution.artifactPath,
+      logPath: getSandboxLogPath(execution.artifactPath) ?? undefined,
     })
 
       if (execution.status !== 'solved' || execution.cells.length === 0) {

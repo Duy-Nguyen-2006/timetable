@@ -44,6 +44,23 @@ export type PiRuntimeAttemptRecord = {
   diagnostics: string[]
   artifactPath?: string
   sourceHash?: string
+  logPath?: string
+}
+
+export type AgentLifecyclePhase = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing'
+
+export type AgentLifecycleEvent = {
+  id: string
+  phase: AgentLifecyclePhase
+  title: string
+  detail: string
+  status: 'pending' | 'active' | 'completed' | 'failed'
+  attempt?: number
+  timestamp: string
+  artifactPath?: string
+  logPath?: string
+  sourceHash?: string
+  tags?: string[]
 }
 
 export type SolverStats = {
@@ -220,10 +237,12 @@ export type TimetableSolveResult = {
     assumptions: string[]
     sourceHash?: string
     attempt?: number
+    logPath?: string
   } | null
   checkerReport?: CheckerReport | null
   deterministicReport?: DeterministicValidationReport | null
   attemptHistorySummary?: AttemptSummary[]
+  lifecycleEvents?: AgentLifecycleEvent[]
   finalReason?: string | null
   telemetry?: SolveTelemetry
 }
@@ -232,6 +251,9 @@ export type AgentEvent =
   | { type: 'status'; message: string; iteration: number; maxIterations: number }
   | { type: 'phase'; phase: string; message: string; iteration: number; maxIterations: number }
   | { type: 'pi_coder_started'; attempt: number; message: string }
+  | { type: 'pi_coder_finished'; attempt: number; message: string; artifactPath?: string; sourceHash?: string }
+  | { type: 'sandbox_started'; attempt: number; message: string; artifactPath?: string }
+  | { type: 'sandbox_finished'; attempt: number; message: string; artifactPath?: string; logPath?: string; sourceHash?: string; status: SolverExecutionOutput['status'] }
   | { type: 'pi_runtime_missing'; message: string }
   | { type: 'checker_started'; attempt: number; message: string }
   | { type: 'checker_retry_requested'; attempt: number; message: string; retryInstructions: string[] }

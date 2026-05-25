@@ -30,6 +30,8 @@ import { generateTimetableWithAI } from './ai/client'
 import { useApiKeyStore } from './ai/api-key-store'
 import type {
   AgentEvent,
+  AgentLifecycleEvent,
+  AgentLifecyclePhase,
   CheckerReport,
   ConstraintCheckItem,
   DeterministicValidationReport,
@@ -65,6 +67,13 @@ const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
 
 const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
+const STEP_LABELS: Record<AgentLifecyclePhase, string> = {
+  thinking: 'Suy nghi',
+  coding: 'Viet code',
+  running: 'Chay thu',
+  checking: 'Kiem tra',
+  fixing: 'Sua loi',
+}
 
 function formatDuration(ms: number) {
   if (ms < 1000) return `${ms}ms`
@@ -178,6 +187,36 @@ function MetricCard({ label, value }: { label: string; value: ReactNode }) {
       <div className="mt-1 text-sm text-white/70">{value}</div>
     </div>
   )
+}
+
+function getLifecycleStatusClass(status: AgentLifecycleEvent['status']) {
+  switch (status) {
+    case 'completed':
+      return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300'
+    case 'active':
+      return 'border-sky-400/25 bg-sky-400/10 text-sky-300'
+    case 'failed':
+      return 'border-red-400/25 bg-red-400/10 text-red-300'
+    default:
+      return 'border-white/15 bg-white/[0.04] text-white/70'
+  }
+}
+
+function getLifecyclePhaseClass(phase: AgentLifecyclePhase) {
+  switch (phase) {
+    case 'thinking':
+      return 'border-white/15 bg-white/[0.04] text-white/70'
+    case 'coding':
+      return 'border-blue-400/25 bg-blue-400/10 text-blue-300'
+    case 'running':
+      return 'border-cyan-400/25 bg-cyan-400/10 text-cyan-300'
+    case 'checking':
+      return 'border-violet-400/25 bg-violet-400/10 text-violet-300'
+    case 'fixing':
+      return 'border-amber-400/25 bg-amber-400/10 text-amber-300'
+    default:
+      return 'border-white/15 bg-white/[0.04] text-white/70'
+  }
 }
 
 function loadStoredLowprizoApiKey() {
@@ -454,6 +493,7 @@ export default function App({ onBackToLanding }) {
   const [agentIteration, setAgentIteration] = useState(0)
   const [agentMaxIterations, setAgentMaxIterations] = useState(5)
   const [agentElapsed, setAgentElapsed] = useState(0)
+  const [agentTimeline, setAgentTimeline] = useState<AgentLifecycleEvent[]>([])
   const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
   const [lowprizoApiKey, setLowprizoApiKey] = useState('')
@@ -829,6 +869,10 @@ export default function App({ onBackToLanding }) {
     setConstraintList((current) => current.filter((constraint) => constraint.id !== id))
   }
 
+  const pushTimelineEvent = useCallback((event: AgentLifecycleEvent) => {
+    setAgentTimeline((current) => [...current, event])
+  }, [])
+
   const handleGenerate = async (disableLlm = false) => {
     const apiKey = lowprizoApiKey.trim()
     if (!apiKey) {
@@ -883,11 +927,23 @@ export default function App({ onBackToLanding }) {
     setShowTechnicalErrors(false)
     setAgentStatus('Đang khởi tạo...')
     setAgentStep('thinking')
-    setAgentIteration(0)
-    setAgentMaxIterations(6)
-    setAgentElapsed(0)
+      setAgentIteration(0)
+      setAgentMaxIterations(6)
+      setAgentElapsed(0)
+      setAgentTimeline([
+        {
+          id: crypto.randomUUID(),
+          phase: 'thinking',
+          title: 'Request queued',
+          detail: 'Da nhan input va bat dau chuan bi pipeline agent.',
+          status: 'active',
+          timestamp: new Date().toISOString(),
+          tags: ['request'],
+        },
+      ])
 
-    if (agentTimerRef.current) clearInterval(agentTimerRef.current)
+      if (agentTimerRef.current) clearInterval(agentTimerRef.current)
+
     agentTimerRef.current = setInterval(() => {
       setAgentElapsed((prev) => prev + 1)
     }, 1000)
@@ -907,89 +963,229 @@ export default function App({ onBackToLanding }) {
           },
           apiKey ?? undefined,
 
-        (event: AgentEvent) => {
-            switch (event.type) {
-              case 'status':
-              case 'phase': {
-                setAgentStatus(event.message)
-                setAgentIteration(event.iteration)
-                setAgentMaxIterations(event.maxIterations)
-                const phase = event.type === 'phase' ? event.phase : null
-                if (phase === 'deterministic_validation') {
-                  setAgentStep('checking')
-                } else if (phase === 'normalize_input') {
-                  setAgentStep('thinking')
-                } else if (event.message.includes('kiểm tra')) {
-                  setAgentStep('checking')
-                } else if (event.message.includes('sửa')) {
-                  setAgentStep('fixing')
-                } else {
+            (event: AgentEvent) => {
+              switch (event.type) {
+                case 'status':
+                case 'phase': {
+                  setAgentStatus(event.message)
+                  setAgentIteration(event.iteration)
+                  setAgentMaxIterations(event.maxIterations)
+                  const phase = event.type === 'phase' ? event.phase : null
+                  const lifecyclePhase: AgentLifecyclePhase = phase === 'deterministic_validation'
+                    ? 'checking'
+                    : phase === 'normalize_input'
+                      ? 'thinking'
+                      : event.message.includes('kiểm tra')
+                        ? 'checking'
+                        : event.message.includes('sửa')
+                          ? 'fixing'
+                          : 'coding'
+                  setAgentStep(lifecyclePhase)
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: lifecyclePhase,
+                    title: event.type === 'status' ? 'Status update' : 'Phase update',
+                    detail: event.message,
+                    status: 'active',
+                    attempt: event.iteration,
+                    timestamp: new Date().toISOString(),
+                    tags: [event.type],
+                  })
+                  break
+                }
+
+                case 'pi_coder_started':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
                   setAgentStep('coding')
-                }
-                break
-              }
-
-              case 'pi_coder_started':
-                setAgentIteration(event.attempt)
-                setAgentStatus(event.message)
-                setAgentStep('coding')
-                break
-              case 'pi_runtime_missing':
-                setAgentStatus(event.message)
-                setAgentStep('fixing')
-                break
-
-            case 'checker_started':
-              setAgentIteration(event.attempt)
-              setAgentStatus(event.message)
-              setAgentStep('checking')
-              break
-            case 'checker_retry_requested':
-              setAgentIteration(event.attempt)
-              setAgentStatus(event.message)
-              setAgentStep('fixing')
-              break
-            case 'checker_accepted':
-              setAgentIteration(event.attempt)
-              setAgentStatus(event.message)
-              setAgentStep('checking')
-              break
-            case 'checker_infeasible':
-              setAgentIteration(event.attempt)
-              setAgentStatus(event.message)
-              setAgentStep('checking')
-              break
-            case 'verified':
-              if (event.allSatisfied) {
-                setAgentStep('checking')
-                setAgentStatus('Tất cả ràng buộc thỏa mãn!')
-              } else {
-                const hardCount = event.violations.filter((v: { violated: boolean }) => v.violated).length
-                if (hardCount > 0) {
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'coding',
+                    title: `Coder started attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: 'active',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['coder'],
+                  })
+                  break
+                case 'pi_coder_finished':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep('coding')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'coding',
+                    title: `Coder finished attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: 'completed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    artifactPath: event.artifactPath,
+                    sourceHash: event.sourceHash,
+                    tags: ['coder', 'artifact'],
+                  })
+                  break
+                case 'sandbox_started':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep('running')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'running',
+                    title: `Sandbox started attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: 'active',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    artifactPath: event.artifactPath,
+                    tags: ['sandbox'],
+                  })
+                  break
+                case 'sandbox_finished':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep(event.status === 'solved' ? 'running' : 'fixing')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'running',
+                    title: `Sandbox finished attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: event.status === 'solved' ? 'completed' : 'failed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    artifactPath: event.artifactPath,
+                    logPath: event.logPath,
+                    sourceHash: event.sourceHash,
+                    tags: ['sandbox', event.status],
+                  })
+                  break
+                case 'pi_runtime_missing':
+                  setAgentStatus(event.message)
                   setAgentStep('fixing')
-                  setAgentStatus(`Phát hiện ${hardCount} vi phạm cứng, đang sửa...`)
-                } else {
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'fixing',
+                    title: 'Runtime missing',
+                    detail: event.message,
+                    status: 'failed',
+                    timestamp: new Date().toISOString(),
+                    tags: ['runtime'],
+                  })
+                  break
+                case 'checker_started':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
                   setAgentStep('checking')
-                  setAgentStatus(`Có ${event.violations.length} ràng buộc mềm chưa tối ưu, hoàn thành...`)
-                }
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'checking',
+                    title: `Checker started attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: 'active',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['checker'],
+                  })
+                  break
+                case 'checker_retry_requested':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep('fixing')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'fixing',
+                    title: `Checker requested retry on attempt ${event.attempt}`,
+                    detail: `${event.message} ${event.retryInstructions.join(' | ')}`.trim(),
+                    status: 'failed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['checker', 'repair'],
+                  })
+                  break
+                case 'checker_accepted':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep('checking')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'checking',
+                    title: `Checker accepted attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: 'completed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['checker'],
+                  })
+                  break
+                case 'checker_infeasible':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep('checking')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'checking',
+                    title: `Checker marked attempt ${event.attempt} infeasible`,
+                    detail: event.message,
+                    status: 'failed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['checker', 'infeasible'],
+                  })
+                  break
+                case 'verified':
+                  if (event.allSatisfied) {
+                    setAgentStep('checking')
+                    setAgentStatus('Tất cả ràng buộc thỏa mãn!')
+                  } else {
+                    const hardCount = event.violations.filter((v: { violated: boolean }) => v.violated).length
+                    if (hardCount > 0) {
+                      setAgentStep('fixing')
+                      setAgentStatus(`Phát hiện ${hardCount} vi phạm cứng, đang sửa...`)
+                    } else {
+                      setAgentStep('checking')
+                      setAgentStatus(`Có ${event.violations.length} ràng buộc mềm chưa tối ưu, hoàn thành...`)
+                    }
+                  }
+                  break
+                case 'debug':
+                  setAgentStatus(event.message)
+                  break
+                case 'result':
+                  setAgentStatus(event.data.message)
+                  setAgentStep(event.data.status === 'solved' ? 'checking' : 'idle')
+                  setAgentTimeline((current) => {
+                    const merged = [...current]
+                    const extra = event.data.lifecycleEvents ?? []
+                    const existingIds = new Set(merged.map((item) => item.id))
+                    extra.forEach((item) => {
+                      if (!existingIds.has(item.id)) {
+                        merged.push(item)
+                      }
+                    })
+                    return merged
+                  })
+                  break
+                case 'error':
+                  setAgentStatus(event.message)
+                  setAgentStep('fixing')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'fixing',
+                    title: 'Agent error',
+                    detail: event.message,
+                    status: 'failed',
+                    timestamp: new Date().toISOString(),
+                    tags: ['error'],
+                  })
+                  break
               }
-              break
-            case 'debug':
-              setAgentStatus(event.message)
-              break
-            case 'result':
-              setAgentStatus(event.data.message)
-              setAgentStep(event.data.status === 'solved' ? 'checking' : 'idle')
-              break
-            case 'error':
-              setAgentStatus(event.message)
-              setAgentStep('fixing')
-              break
-          }
-        },
+            },
+
         { disableLlm },
       )
       setAiResult(result)
+      setAgentTimeline(result.lifecycleEvents ?? [])
       setAgentIteration(result.telemetry?.totalAttempts ?? agentIteration)
       setAgentMaxIterations(result.telemetry?.totalAttempts ?? agentMaxIterations)
       setAgentStatus(result.message)
@@ -2476,20 +2672,20 @@ export default function App({ onBackToLanding }) {
                             </span>
                           </div>
 
-                          {/* Step indicators */}
-                          <div className="mb-3 flex items-center gap-1">
-                            {(['thinking', 'coding', 'running', 'checking', 'fixing'] as const).map((step) => {
-                              const labels: Record<string, string> = { thinking: 'Suy nghĩ', coding: 'Viết code', running: 'Chạy thử', checking: 'Kiểm tra', fixing: 'Sửa lỗi' }
-                              const isActive = agentStep === step
-                              const isPast = ['thinking', 'coding', 'running', 'checking', 'fixing'].indexOf(agentStep) > ['thinking', 'coding', 'running', 'checking', 'fixing'].indexOf(step)
-                              return (
-                                <div key={step} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all ${isActive ? 'bg-blue-500/20 text-blue-400' : isPast ? 'bg-white/[0.04] text-white/30' : 'bg-white/[0.02] text-white/15'}`}>
-                                  {isPast ? <Check size={9} strokeWidth={2.5} /> : isActive ? <Circle size={7} className="animate-pulse fill-current" /> : <Circle size={7} />}
-                                  <span>{labels[step]}</span>
-                                </div>
-                              )
-                            })}
-                          </div>
+                            {/* Step indicators */}
+                            <div className="mb-3 flex items-center gap-1">
+                              {STEP_ORDER.map((step) => {
+                                const isActive = agentStep === step
+                                const isPast = STEP_ORDER.indexOf(agentStep) > STEP_ORDER.indexOf(step)
+                                return (
+                                  <div key={step} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all ${isActive ? 'bg-blue-500/20 text-blue-400' : isPast ? 'bg-white/[0.04] text-white/30' : 'bg-white/[0.02] text-white/15'}`}>
+                                    {isPast ? <Check size={9} strokeWidth={2.5} /> : isActive ? <Circle size={7} className="animate-pulse fill-current" /> : <Circle size={7} />}
+                                    <span>{STEP_LABELS[step]}</span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+
 
                           {/* Progress bar */}
                           <div className="mb-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
@@ -2688,38 +2884,70 @@ export default function App({ onBackToLanding }) {
                             </section>
                           )}
 
-                          {(aiResult.attemptHistorySummary?.length ?? 0) > 0 && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <ClipboardList size={16} strokeWidth={1.5} className="text-violet-300" />
-                                </span>
-                                <div>
-                                  <h3 className="text-sm font-semibold text-white">Attempt history</h3>
-                                  <p className="text-xs text-white/40">Dấu vết coder/checker/validation cho từng vòng lặp.</p>
+                            {((aiResult.lifecycleEvents?.length ?? agentTimeline.length) > 0 || (aiResult.attemptHistorySummary?.length ?? 0) > 0) && (
+                              <section className={`${panelClass} p-4`}>
+                                <div className="mb-4 flex items-center gap-2.5">
+                                  <span className={iconShellClass}>
+                                    <ClipboardList size={16} strokeWidth={1.5} className="text-violet-300" />
+                                  </span>
+                                  <div>
+                                    <h3 className="text-sm font-semibold text-white">Agent execution timeline</h3>
+                                    <p className="text-xs text-white/40">Generate -&gt; sandbox run -&gt; checker -&gt; retry, hien thi theo thu tu thoi gian.</p>
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="space-y-2">
-                                {aiResult.attemptHistorySummary?.map((attempt, index) => (
-                                  <div key={`${attempt.phase}-${attempt.attempt}-${index}`} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
-                                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/70">Attempt {attempt.attempt}</span>
-                                      <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">{attempt.phase}</span>
-                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${attempt.status === 'success' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : attempt.status === 'retry' ? 'border-amber-400/25 bg-amber-400/10 text-amber-300' : attempt.status === 'failed' ? 'border-red-400/25 bg-red-400/10 text-red-300' : 'border-white/15 bg-white/[0.04] text-white/70'}`}>{attempt.status}</span>
+                                <div className="space-y-3">
+                                  {(aiResult.lifecycleEvents ?? agentTimeline).map((event) => (
+                                    <div key={event.id} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
+                                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getLifecyclePhaseClass(event.phase)}`}>{STEP_LABELS[event.phase]}</span>
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getLifecycleStatusClass(event.status)}`}>{event.status}</span>
+                                        {event.attempt ? <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/70">Attempt {event.attempt}</span> : null}
+                                        <span className="text-[10px] text-white/25">{new Date(event.timestamp).toLocaleTimeString('vi-VN')}</span>
+                                      </div>
+                                      <p className="text-sm font-medium text-white/80">{event.title}</p>
+                                      <p className="mt-1 text-xs text-white/45">{event.detail}</p>
+                                      <div className="mt-3 grid gap-2 text-xs text-white/35 sm:grid-cols-2 xl:grid-cols-4">
+                                        <p>Artifact: {event.artifactPath ?? '—'}</p>
+                                        <p>Sandbox log: {event.logPath ?? '—'}</p>
+                                        <p>Source hash: {event.sourceHash ?? '—'}</p>
+                                        <p>Tags: {event.tags?.join(', ') ?? '—'}</p>
+                                      </div>
                                     </div>
-                                    <p className="text-sm text-white/75">{attempt.summary}</p>
-                                    {attempt.details?.length ? <div className="mt-2">{renderList(attempt.details)}</div> : null}
-                                    <div className="mt-2 grid gap-1 text-xs text-white/35 sm:grid-cols-2">
-                                      <p>Artifact: {attempt.artifactPath ?? '—'}</p>
-                                      <p>Source hash: {attempt.sourceHash ?? '—'}</p>
-                                      <p>Started: {attempt.startedAt ?? '—'}</p>
-                                      <p>Finished: {attempt.finishedAt ?? '—'}</p>
+                                  ))}
+                                </div>
+
+                                {(aiResult.attemptHistorySummary?.length ?? 0) > 0 ? (
+                                  <div className="mt-5 border-t border-white/[0.06] pt-4">
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                      <div>
+                                        <h4 className="text-sm font-semibold text-white">Attempt history</h4>
+                                        <p className="text-xs text-white/40">Tóm tắt coder/checker/validation cho từng vòng lặp.</p>
+                                      </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                      {aiResult.attemptHistorySummary?.map((attempt, index) => (
+                                        <div key={`${attempt.phase}-${attempt.attempt}-${index}`} className="rounded-md border border-white/[0.06] bg-[#101010] p-3">
+                                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/70">Attempt {attempt.attempt}</span>
+                                            <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">{attempt.phase}</span>
+                                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${attempt.status === 'success' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : attempt.status === 'retry' ? 'border-amber-400/25 bg-amber-400/10 text-amber-300' : attempt.status === 'failed' ? 'border-red-400/25 bg-red-400/10 text-red-300' : 'border-white/15 bg-white/[0.04] text-white/70'}`}>{attempt.status}</span>
+                                          </div>
+                                          <p className="text-sm text-white/75">{attempt.summary}</p>
+                                          {attempt.details?.length ? <div className="mt-2">{renderList(attempt.details)}</div> : null}
+                                          <div className="mt-2 grid gap-1 text-xs text-white/35 sm:grid-cols-2">
+                                            <p>Artifact: {attempt.artifactPath ?? '—'}</p>
+                                            <p>Source hash: {attempt.sourceHash ?? '—'}</p>
+                                            <p>Started: {attempt.startedAt ?? '—'}</p>
+                                            <p>Finished: {attempt.finishedAt ?? '—'}</p>
+                                          </div>
+                                        </div>
+                                      ))}
                                     </div>
                                   </div>
-                                ))}
-                              </div>
-                            </section>
-                          )}
+                                ) : null}
+                              </section>
+                            )}
+
                         </div>
                       )}
 
