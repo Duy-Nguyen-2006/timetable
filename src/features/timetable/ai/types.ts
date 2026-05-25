@@ -35,6 +35,17 @@ export type GeneratedSolverArtifact = {
   sourceHash?: string
 }
 
+export type PiRuntimeAttemptRecord = {
+  attempt: number
+  prompt: string
+  checkerFeedback: string[]
+  artifactSummary: string
+  executionStatus: SolverExecutionOutput['status']
+  diagnostics: string[]
+  artifactPath?: string
+  sourceHash?: string
+}
+
 export type SolverStats = {
   wallTimeSeconds: number
   objectiveValue: number | null
@@ -185,6 +196,7 @@ export type SolveTelemetry = {
   totalAttempts?: number
   noProgressCount?: number
   guardrailStopReason?: string | null
+  checkerFeedbackCount?: number
 }
 
 export type TimetableSolveResult = {
@@ -207,6 +219,7 @@ export type TimetableSolveResult = {
     summary: string
     assumptions: string[]
     sourceHash?: string
+    attempt?: number
   } | null
   checkerReport?: CheckerReport | null
   deterministicReport?: DeterministicValidationReport | null

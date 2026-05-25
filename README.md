@@ -26,8 +26,14 @@ This repository currently contains **two UI app variants**:
 
 ## Current architecture status
 - Legacy in-repo agent loop has been removed.
-- The backend is now scaffolded for a **`pi.dev + checker`** architecture.
-- Until a real pi.dev runtime adapter is integrated, the API returns a deterministic scaffold response explaining that pi.dev is not configured yet.
+- The backend now runs a **`pi.dev + checker` orchestration** backed by a real server-side HTTP adapter.
+- Current runtime behavior: call the configured pi.dev code-generation endpoint, persist the returned Python solver artifact locally for traceability, then let the deterministic checker either accept it, report soft warnings, or request a recode loop up to 3 attempts.
+
+## Runtime configuration
+- `LOWPRIZO_API_BASE_URL` or `PI_DEV_BASE_URL`: base URL for the pi.dev-compatible backend.
+- `PI_DEV_GENERATE_PATH`: path for the code-generation endpoint. Default: `/v1/code/generate`.
+- Client requests must still send the user's API key via `x-lowprizo-api-key` or `apiKey` in the request body.
+- If the runtime endpoint or API key is missing/invalid, `/api/generate-timetable` now returns a clear runtime/configuration error instead of silently falling back to the local solver.
 
 ## Final decision rules for the new pipeline
 1. If Pi does **not** produce a timetable candidate, return: **`Không tạo được thời khóa biểu.`**

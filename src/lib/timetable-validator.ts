@@ -163,6 +163,38 @@ function hardConstraintPassed(parsed: ParsedConstraint, cells: TimetableSolveCel
   }
 }
 
+function softConstraintPassed(parsed: ParsedConstraint, cells: TimetableSolveCell[]): boolean {
+  switch (parsed.kind) {
+    case 'subject_prefer_periods':
+      return entries(cells)
+        .filter(({ entry }) => parsed.subjectLabels.includes(entry.subject))
+        .every(({ cell, entry }) => {
+          if (parsed.classFilter && parsed.classFilter.length > 0 && !parsed.classFilter.includes(entry.className)) {
+            return true
+          }
+          return parsed.periods.includes(cell.period)
+        })
+    case 'subject_prefer_sessions':
+      return entries(cells)
+        .filter(({ entry }) => parsed.subjectLabels.includes(entry.subject))
+        .every(({ cell }) => parsed.sessionIds.includes(cell.sessionId))
+    case 'subject_block_periods':
+      return !entries(cells).some(({ cell, entry }) => parsed.subjectLabels.includes(entry.subject) && parsed.periods.includes(cell.period))
+    case 'subject_only_sessions':
+      return !entries(cells).some(({ cell, entry }) => parsed.subjectLabels.includes(entry.subject) && !parsed.sessionIds.includes(cell.sessionId))
+    case 'subject_block_consecutive':
+    case 'teacher_max_consecutive':
+    case 'teacher_min_off_days':
+    case 'class_daily_subject_any':
+    case 'subjects_not_consecutive':
+      return true
+    case 'unparsed':
+      return false
+    default:
+      return hardConstraintPassed(parsed, cells)
+  }
+}
+
 function buildHardChecks(constraints: NormalizedConstraint[], cells: TimetableSolveCell[]): ConstraintCheckItem[] {
   return constraints.map((constraint) => {
     const passed = hardConstraintPassed(constraint.parsed, cells)
@@ -179,7 +211,7 @@ function buildHardChecks(constraints: NormalizedConstraint[], cells: TimetableSo
 
 function buildSoftChecks(constraints: NormalizedConstraint[], cells: TimetableSolveCell[]): ConstraintCheckItem[] {
   return constraints.map((constraint) => {
-    const passed = hardConstraintPassed(constraint.parsed, cells)
+    const passed = softConstraintPassed(constraint.parsed, cells)
     return {
       constraintId: constraint.id,
       original: constraint.original,

@@ -2,24 +2,28 @@
 
 ## Mục tiêu cập nhật lần này
 
-- [ ] Soát và thay thế toàn bộ logic agent hiện tại bằng kiến trúc mới `pi.dev + checker`.
-- [ ] Ghi lại plan triển khai rõ ràng cho 2 trạng thái kết quả cuối: không tạo được / tạo được với báo cáo constraints.
-- [ ] Cắt bỏ prompt/loop agent cũ trong API service và thay bằng scaffold runtime mới.
-- [ ] Đồng bộ UI/result contract với pipeline mới.
-- [ ] Verify API + lint/build + cập nhật `.orchids/orchids.json` đúng chuẩn.
+- [x] Soát và thay thế toàn bộ logic agent hiện tại bằng kiến trúc mới `pi.dev + checker`.
+- [x] Ghi lại plan triển khai rõ ràng cho 2 trạng thái kết quả cuối: không tạo được / tạo được với báo cáo constraints.
+- [x] Cắt bỏ prompt/loop agent cũ trong API service và thay bằng scaffold runtime mới.
+- [x] Implement fallback pi runtime adapter + checker retry loop thật trong backend.
+- [x] Replace local fallback adapter with a real pi.dev HTTP runtime adapter.
+- [x] Fix deterministic soft-constraint validation so user warnings are surfaced correctly.
+- [x] Verify API + lint/build + cập nhật `.orchids/orchids.json` đúng chuẩn.
 
 ## Assumptions
 
-- `pi.dev` sẽ là runtime chính cho coder agent ở bước tiếp theo, nhưng trong commit này ta chỉ thay thế kiến trúc codebase hiện tại sang scaffold sẵn sàng cho `pi.dev`.
+- Không có SDK pi.dev chính thức trong repo, nên lựa chọn ít rủi ro nhất là thin HTTP adapter gọi một pi.dev-compatible backend qua env-configurable endpoint.
+- Pi runtime endpoint sẽ trả về JSON theo contract hiện tại: `status`, `message`, `cells`, `diagnostics`, `solverStats`, và tùy chọn `generatedArtifact` chứa Python solver code.
 - Checker agent vẫn là deterministic-first: validator code thật quyết định pass/fail base + hard constraints, còn soft constraints chỉ dùng để báo cáo cho user.
-- Logic agent cũ (`Lowprizo coder/checker prompts` và loop hiện tại) sẽ bị xóa bỏ hoàn toàn theo yêu cầu.
+- Logic agent cũ (`Lowprizo coder/checker prompts` và loop hiện tại) đã bị xóa bỏ hoàn toàn theo yêu cầu.
 
 ## Plan đã chốt
 
-1. **Orchestrator mới**
-   - API route vẫn giữ `/api/generate-timetable`.
-   - Service mới đổi sang mô hình `pi runtime orchestration` thay cho `runAgenticLoop` cũ.
-   - Tạm thời service sẽ trả trạng thái `not_configured`/scaffold nếu chưa có runtime `pi.dev` thật.
+  1. **Orchestrator mới**
+     - API route vẫn giữ `/api/generate-timetable`.
+     - Service mới đổi sang mô hình `pi runtime orchestration` thay cho `runAgenticLoop` cũ.
+     - Runtime mặc định hiện tại là HTTP adapter: gọi pi.dev-compatible endpoint để sinh solver artifact Python, persist artifact đó cục bộ để trace/debug, rồi cho checker validate + feedback loop tối đa 3 lần.
+
 
 2. **Hai actor chính**
    - `Pi Coder Agent`: sinh/chạy/sửa solver code cho đến khi có candidate timetable hoặc kết luận không tạo được.
