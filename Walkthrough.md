@@ -105,3 +105,13 @@
 - Mục tiêu backend sau cleanup vẫn là: **nhận payload -> build system/user prompt -> model sinh solver artifact -> backend chạy artifact -> deterministic checker chốt accept/retry/infeasible -> trả kết quả + diagnostics**.
 - Integration provider hiện tại là **OpenAI-compatible client** trỏ tới `PI_DEV_BASE_URL`; không có SDK native riêng của LowPrizo trong repo này.
 - Lượt này chỉ bổ sung UI cho landing page và verify build, không mở rộng refactor ngoài scope.
+
+## Cleanup audit
+
+- [x] `examples/websocket/frontend.tsx`, `examples/websocket/server.ts` là demo độc lập, không thấy app chính import; nhiều khả năng thừa nếu không còn nhu cầu giữ ví dụ websocket.
+- [x] `__pycache__/`, `.pytest_cache/`, `tsconfig.tsbuildinfo`, `debug.log`, `dev.log`, `build/`, `release/` là cache/artifact output; có thể xóa an toàn khỏi working tree.
+- [x] `electron/main.mjs` và `python-dist/` **không** phải file thừa vì còn nằm trong flow package Electron.
+- [x] `scripts_test_generate_timetable.sh`, `test_datasets.py`, `datasets.txt`, `benchmark_latest*.json` **không nên xóa vội** vì vẫn phục vụ benchmark/test tooling.
+- [x] `mini-services/.gitkeep` gần như placeholder trống; xóa được nhưng giá trị cleanup thấp.
+- [x] Đã xóa `examples/websocket/*`, `__pycache__/`, `.pytest_cache/`, `build/`, `release/`, `tsconfig.tsbuildinfo`, `debug.log`, `dev.log`, `mini-services/.gitkeep`.
+- [x] Verify sau cleanup: `npx tsc --noEmit` pass, `npm run lint` pass với 1 warning cũ ở `scripts/benchmark-datasets.mjs`.
