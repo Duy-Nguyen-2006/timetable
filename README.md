@@ -27,11 +27,11 @@ This repository currently contains **two UI app variants**:
 ## Current architecture status
 - Legacy in-repo agent loop has been removed.
 - The backend now runs a **`pi.dev + checker` orchestration** backed by a real server-side HTTP adapter.
-- Current runtime behavior: call the configured pi.dev code-generation endpoint, persist the returned Python solver artifact locally for traceability, then let the deterministic checker either accept it, report soft warnings, or request a recode loop up to 3 attempts.
+- Current runtime behavior: call the configured LowPrizo/OpenAI-compatible chat completion endpoint, ask it to return a strict JSON solver result, persist the returned Python solver artifact locally for traceability, then let the deterministic checker either accept it, report soft warnings, or request a recode loop up to 3 attempts.
+- `LOWPRIZO_API_BASE_URL` or `PI_DEV_BASE_URL`: base URL for the pi.dev-compatible backend. For LowPrizo, use `https://api.lowprizo.com/v1`.
+- `PI_DEV_GENERATE_PATH`: path for the generation endpoint. For LowPrizo, use `/chat/completions`.
+- `PI_DEV_MODEL`: model name for runtime generation. Default: `devstral-latest`.
 
-## Runtime configuration
-- `LOWPRIZO_API_BASE_URL` or `PI_DEV_BASE_URL`: base URL for the pi.dev-compatible backend.
-- `PI_DEV_GENERATE_PATH`: path for the code-generation endpoint. Default: `/v1/code/generate`.
 - Client requests must still send the user's API key via `x-lowprizo-api-key` or `apiKey` in the request body.
 - If the runtime endpoint or API key is missing/invalid, `/api/generate-timetable` now returns a clear runtime/configuration error instead of silently falling back to the local solver.
 

@@ -45,3 +45,16 @@
    - `npm run lint`
    - `npm run build`
    - cập nhật `.orchids/orchids.json` về đúng `projectId`, `createdAt`, `startupCommands`, `templateId`
+
+## Mục tiêu cập nhật lần này (agent sandbox runtime)
+
+- [ ] Soát blast radius của luồng `runPiOrchestratedLoop` và `handleGenerate` trước khi đổi từ text-only LLM sang runtime có sandbox thực thi.
+- [ ] Thay runtime pi.dev hiện tại bằng contract agent sandbox: model phải trả `generatedArtifact.solverCode`, backend persist artifact vào sandbox workspace, chạy thử bằng Python runner thật, rồi mới checker.
+- [ ] Bổ sung telemetry/report để UI hiển thị rõ agent đã code, đã chạy thử, đã checker hay fail ở bước nào.
+- [ ] Verify API route bằng request thật, chạy lint/build, và sửa `.orchids/orchids.json` đúng chuẩn Orchids.
+
+## Assumptions (agent sandbox runtime)
+
+- Chưa có sandbox container độc lập cấp hạ tầng trong repo, nên lựa chọn ít rủi ro nhất là **workspace sandbox cục bộ theo request** trong thư mục tạm, tách biệt repo chính và không sửa source project.
+- Pi.dev/LowPrizo hiện chỉ được dùng làm model backend ; phần “agent” sẽ do backend orchestration tự thực hiện: nhận code artifact, persist vào workspace riêng, chạy thử bằng Python runner thật, rồi checker deterministic.
+- MVP an toàn trước mắt: agent chỉ được sinh Python solver artifact cho bài toán timetable và chỉ được thực thi qua runner contract đã giới hạn ; chưa mở shell/file tools tùy ý.

@@ -15,7 +15,8 @@ import type {
 } from '@/features/timetable/ai/types'
 import { buildPiCheckerPrompt, buildPiCheckerSystemPrompt } from '@/lib/agent-prompts/checker'
 import { buildPiCoderPrompt, buildPiCoderSystemPrompt } from '@/lib/agent-prompts/coder'
-import { persistGeneratedSolverArtifact } from '@/lib/generated-solver-artifacts'
+import { getGeneratedSolverWorkspace, persistGeneratedSolverArtifact } from '@/lib/generated-solver-artifacts'
+import { runSolverDirect } from '@/lib/sandbox'
 import { buildSolverProblemContext } from '@/lib/timetable-problem'
 import type { SolverProblemContext } from '@/lib/timetable-problem'
 import { validateTimetableResult } from '@/lib/timetable-validator'
@@ -23,7 +24,28 @@ import { validateTimetableResult } from '@/lib/timetable-validator'
 const PI_MAX_ATTEMPTS = 3
 const DEFAULT_PI_MODEL = 'devstral-latest'
 const DEFAULT_PI_DEV_BASE_URL = 'https://api.pi.dev'
-const DEFAULT_PI_DEV_GENERATE_PATH = '/v1/code/generate'
+const DEFAULT_PI_DEV_GENERATE_PATH = '/chat/completions'
+const LOWPRIZO_RESPONSE_FORMAT_INSTRUCTION = [
+  'Return exactly one JSON object and no markdown fences.',
+  'The JSON must match this schema:',
+  '{',
+  '  "status": "solved" | "infeasible" | "error",',
+  '  "message": string,',
+  '  "diagnostics": string[],',
+  '  "cells": Array<{ day: string, period: number, classId: string, subjectId: string, teacherId: string, assignmentId?: string | null, sessionId?: string | null }>,',
+  '  "iisConstraintIds": string[],',
+  '  "executionErrors": string[],',
+  '  "validationErrors": string[],',
+  '  "violations": any[],',
+  '  "solverStats": object | null,',
+  '  "generatedArtifact": {',
+  '    "solverCode": string,',
+  '    "entrypoint": string,',
+  '    "summary": string,',
+  '    "assumptions": string[]',
+  '  } | null',
+  '}',
+].join('\n')
 
 type ProgressEmitter = (event: AgentEvent) => void
 
@@ -170,14 +192,31 @@ function buildPiDevRequestBody(args: {
   attempt: number
   context: SolverProblemContext
 }) {
+  const runtimeProblem = buildRuntimeProblem(args.context)
   return {
-    requestId: args.requestId,
     model: args.model || DEFAULT_PI_MODEL,
-    attempt: args.attempt,
-    coderPrompt: args.coderPrompt,
-    checkerFeedback: args.checkerFeedback,
-    problem: buildRuntimeProblem(args.context),
-    payload: args.payload,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: [
+          buildPiCoderSystemPrompt(),
+          LOWPRIZO_RESPONSE_FORMAT_INSTRUCTION,
+        ].join('\n\n'),
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          requestId: args.requestId,
+          attempt: args.attempt,
+          coderPrompt: args.coderPrompt,
+          checkerFeedback: args.checkerFeedback,
+          problem: runtimeProblem,
+          payload: args.payload,
+        }),
+      },
+    ],
+    temperature: 0.2,
   }
 }
 
@@ -197,6 +236,113 @@ function normalizeGeneratedArtifact(
     summary: artifact.summary?.trim() || fallbackSummary,
     assumptions: Array.isArray(artifact.assumptions) ? artifact.assumptions : checkerFeedback,
   }, requestId)
+}
+
+function extractChatCompletionText(body: unknown) {
+  if (!body || typeof body !== 'object') {
+    return null
+  }
+
+  const choices = 'choices' in body ? body.choices : undefined
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return null
+  }
+
+  const firstChoice = choices[0]
+  if (!firstChoice || typeof firstChoice !== 'object' || !('message' in firstChoice)) {
+    return null
+  }
+
+  const message = firstChoice.message
+  if (!message || typeof message !== 'object' || !('content' in message)) {
+    return null
+  }
+
+  return typeof message.content === 'string' ? message.content : null
+}
+
+function parsePiRuntimeJson(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    throw new Error('LowPrizo returned an empty completion.')
+  }
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  const jsonText = fencedMatch?.[1]?.trim() || trimmed
+  return JSON.parse(jsonText) as Partial<SolverExecutionOutput> & {
+    generatedArtifact?: Partial<GeneratedSolverArtifact> | null
+    diagnostics?: string[]
+  }
+}
+
+function normalizeRuntimeCells(rawCells: unknown, context: SolverProblemContext) {
+  if (!Array.isArray(rawCells)) {
+    return []
+  }
+
+  return rawCells.flatMap((cell) => {
+    if (!cell || typeof cell !== 'object') {
+      return []
+    }
+
+    const slotId = typeof cell.slotId === 'string' && cell.slotId.trim().length > 0
+      ? cell.slotId
+      : [cell.dayId ?? cell.day, cell.sessionId ?? cell.session, cell.period]
+        .filter((part) => part !== undefined && part !== null && String(part).trim().length > 0)
+        .join('-')
+
+    const slot = context.meta.slotMap[slotId]
+    if (!slot) {
+      return []
+    }
+
+    const rawEntries = Array.isArray(cell.entries)
+      ? cell.entries
+      : [cell]
+
+    const entries = rawEntries.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return []
+      }
+
+      const assignmentKey = typeof entry.assignmentKey === 'string' && entry.assignmentKey.trim().length > 0
+        ? entry.assignmentKey
+        : typeof entry.assignmentId === 'string' && entry.assignmentId.trim().length > 0
+          ? entry.assignmentId
+          : null
+
+      const assignment = assignmentKey ? context.meta.assignmentMap[assignmentKey] : null
+
+      const teacher = typeof entry.teacher === 'string' && entry.teacher.trim().length > 0
+        ? entry.teacher
+        : assignment?.teacherLabel ?? ''
+      const subject = typeof entry.subject === 'string' && entry.subject.trim().length > 0
+        ? entry.subject
+        : assignment?.subjectLabel ?? ''
+      const className = typeof entry.className === 'string' && entry.className.trim().length > 0
+        ? entry.className
+        : assignment?.classLabel ?? ''
+
+      if (!teacher || !subject || !className) {
+        return []
+      }
+
+      return [{
+        assignmentKey: assignment?.id ?? assignmentKey ?? `${teacher}__${subject}__${className}`,
+        teacher,
+        subject,
+        className,
+      }]
+    })
+
+    return [{
+      slotId: slot.id,
+      dayId: slot.dayId,
+      sessionId: slot.sessionId,
+      period: slot.period,
+      entries,
+    }]
+  })
 }
 
 function buildCheckerFeedback(report: DeterministicValidationReport) {
@@ -461,9 +607,83 @@ async function executePiRuntimeAttempt(args: {
   }
 
   const contentType = response.headers.get('content-type') || ''
-  const body = contentType.includes('application/json')
-    ? await response.json() as Partial<SolverExecutionOutput> & { generatedArtifact?: Partial<GeneratedSolverArtifact> | null; diagnostics?: string[] }
-    : { message: await response.text() }
+  const rawBody = contentType.includes('application/json') ? await response.json() : await response.text()
+
+  if (!response.ok) {
+    const bodyText = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody)
+    const errorMessage = typeof rawBody === 'object' && rawBody && 'error' in rawBody
+      ? JSON.stringify(rawBody.error)
+      : `pi.dev runtime returned HTTP ${response.status}`
+
+    return {
+      status: 'error',
+      message: errorMessage,
+      diagnostics: [
+        `Pi coder prompt length: ${args.coderPrompt.length}`,
+        `Pi checker feedback count: ${args.checkerFeedback.length}`,
+        `pi.dev url: ${url}`,
+        `upstream body: ${bodyText.slice(0, 2000)}`,
+      ],
+      cells: [],
+      iisConstraintIds: [],
+      executionErrors: [],
+      validationErrors: [],
+      violations: [],
+      solverStats: null,
+      loadError: errorMessage,
+      runtimeError: errorMessage,
+      generatedArtifact: null,
+    }
+  }
+
+  const completionText = extractChatCompletionText(rawBody)
+  if (!completionText) {
+    return {
+      status: 'error',
+      message: 'LowPrizo did not return assistant content.',
+      diagnostics: [
+        `Pi coder prompt length: ${args.coderPrompt.length}`,
+        `Pi checker feedback count: ${args.checkerFeedback.length}`,
+        `pi.dev url: ${url}`,
+        `upstream body: ${JSON.stringify(rawBody).slice(0, 2000)}`,
+      ],
+      cells: [],
+      iisConstraintIds: [],
+      executionErrors: [],
+      validationErrors: [],
+      violations: [],
+      solverStats: null,
+      loadError: 'missing_completion_content',
+      runtimeError: 'missing_completion_content',
+      generatedArtifact: null,
+    }
+  }
+
+  let body: Partial<SolverExecutionOutput> & { generatedArtifact?: Partial<GeneratedSolverArtifact> | null; diagnostics?: string[] }
+  try {
+    body = parsePiRuntimeJson(completionText)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid LowPrizo JSON response.'
+    return {
+      status: 'error',
+      message,
+      diagnostics: [
+        `Pi coder prompt length: ${args.coderPrompt.length}`,
+        `Pi checker feedback count: ${args.checkerFeedback.length}`,
+        `pi.dev url: ${url}`,
+        `completion text: ${completionText.slice(0, 2000)}`,
+      ],
+      cells: [],
+      iisConstraintIds: [],
+      executionErrors: [],
+      validationErrors: [],
+      violations: [],
+      solverStats: null,
+      loadError: message,
+      runtimeError: message,
+      generatedArtifact: null,
+    }
+  }
 
   const generatedArtifact = normalizeGeneratedArtifact(
     body.generatedArtifact,
@@ -472,50 +692,78 @@ async function executePiRuntimeAttempt(args: {
     args.checkerFeedback,
   )
 
-  const mergedDiagnostics = [
-    `Pi coder prompt length: ${args.coderPrompt.length}`,
-    `Pi checker feedback count: ${args.checkerFeedback.length}`,
-    `pi.dev url: ${url}`,
-    ...(Array.isArray(body.diagnostics) ? body.diagnostics : []),
-  ]
-
-  if (!response.ok) {
-    const errorMessage = typeof body.message === 'string' && body.message.trim().length > 0
-      ? body.message
-      : `pi.dev runtime returned HTTP ${response.status}`
-
+  if (!generatedArtifact) {
     return {
       status: 'error',
-      message: errorMessage,
-      diagnostics: mergedDiagnostics,
+      message: 'Pi.dev không trả về solver artifact để chạy trong sandbox.',
+      diagnostics: [
+        `Pi coder prompt length: ${args.coderPrompt.length}`,
+        `Pi checker feedback count: ${args.checkerFeedback.length}`,
+        `pi.dev url: ${url}`,
+        `completion text: ${completionText.slice(0, 2000)}`,
+      ],
       cells: [],
       iisConstraintIds: [],
       executionErrors: [],
       validationErrors: [],
       violations: [],
       solverStats: null,
-      artifactPath: generatedArtifact?.path,
-      loadError: errorMessage,
-      runtimeError: errorMessage,
+      loadError: 'missing_generated_artifact',
+      runtimeError: 'missing_generated_artifact',
+      generatedArtifact: null,
+    }
+  }
+
+  const sandboxExecution = await runSolverDirect({
+    problem: args.context.problem,
+    solverArtifactPath: generatedArtifact.path,
+    entrypoint: generatedArtifact.entrypoint,
+  })
+
+  const workspace = getGeneratedSolverWorkspace(args.requestId)
+  const mergedDiagnostics = [
+    `Pi coder prompt length: ${args.coderPrompt.length}`,
+    `Pi checker feedback count: ${args.checkerFeedback.length}`,
+    `pi.dev url: ${url}`,
+    `sandbox artifact path: ${generatedArtifact.path}`,
+    `sandbox log path: ${workspace.logPath}`,
+    ...(Array.isArray(body.diagnostics) ? body.diagnostics : []),
+  ]
+
+  if (!sandboxExecution.success) {
+    return {
+      status: 'error',
+      message: 'Sandbox không chạy được solver artifact mà Pi.dev vừa sinh.',
+      diagnostics: [...mergedDiagnostics, sandboxExecution.error],
+      cells: [],
+      iisConstraintIds: [],
+      executionErrors: [],
+      validationErrors: [],
+      violations: [],
+      solverStats: null,
+      artifactPath: generatedArtifact.path,
+      loadError: 'sandbox_execution_failed',
+      runtimeError: sandboxExecution.error,
       generatedArtifact,
     }
   }
 
+  const sandboxResult = sandboxExecution.data
   return {
-    status: body.status === 'solved' || body.status === 'infeasible' ? body.status : 'error',
-    message: typeof body.message === 'string' && body.message.trim().length > 0
-      ? body.message
-      : 'Pi.dev runtime đã trả kết quả.',
-    diagnostics: mergedDiagnostics,
-    cells: Array.isArray(body.cells) ? body.cells : [],
-    iisConstraintIds: Array.isArray(body.iisConstraintIds) ? body.iisConstraintIds : [],
-    executionErrors: Array.isArray(body.executionErrors) ? body.executionErrors : [],
-    validationErrors: Array.isArray(body.validationErrors) ? body.validationErrors : [],
-    violations: Array.isArray(body.violations) ? body.violations : [],
-    solverStats: body.solverStats ?? null,
-    artifactPath: body.artifactPath ?? generatedArtifact?.path,
-    loadError: body.loadError ?? null,
-    runtimeError: body.runtimeError ?? null,
+    status: sandboxResult.status === 'solved' || sandboxResult.status === 'infeasible' ? sandboxResult.status : 'error',
+    message: typeof sandboxResult.message === 'string' && sandboxResult.message.trim().length > 0
+      ? sandboxResult.message
+      : 'Sandbox đã chạy solver artifact của Pi.dev.',
+    diagnostics: [...mergedDiagnostics, ...sandboxResult.diagnostics],
+    cells: normalizeRuntimeCells(sandboxResult.cells, args.context),
+    iisConstraintIds: Array.isArray(sandboxResult.iisConstraintIds) ? sandboxResult.iisConstraintIds : [],
+    executionErrors: Array.isArray(sandboxResult.executionErrors) ? sandboxResult.executionErrors : [],
+    validationErrors: Array.isArray(sandboxResult.validationErrors) ? sandboxResult.validationErrors : [],
+    violations: Array.isArray(sandboxResult.violations) ? sandboxResult.violations : [],
+    solverStats: sandboxResult.solverStats ?? null,
+    artifactPath: sandboxResult.artifactPath ?? generatedArtifact.path,
+    loadError: sandboxResult.loadError ?? null,
+    runtimeError: sandboxResult.runtimeError ?? null,
     generatedArtifact,
   }
 }

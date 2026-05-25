@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+
+import { getGeneratedSolverWorkspace } from '@/lib/generated-solver-artifacts'
 
 const SANDBOX_TIMEOUT_MS = 120_000
 
@@ -74,6 +77,11 @@ export type SolverExecutionRequest = {
 }
 
 export type SolverDirectOutput = import('@/features/timetable/ai/types').SolverExecutionOutput
+
+function writeSandboxLog(request: SolverExecutionRequest, content: string) {
+  const workspace = getGeneratedSolverWorkspace(request.solverArtifactPath ? path.basename(path.dirname(request.solverArtifactPath)) : undefined)
+  writeFileSync(workspace.logPath, content, 'utf8')
+}
 
 export function runSolverDirect(request: SolverProblem | SolverExecutionRequest): Promise<SolverDirectResult> {
   return new Promise((resolve) => {

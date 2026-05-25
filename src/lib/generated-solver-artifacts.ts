@@ -5,6 +5,12 @@ import path from 'node:path'
 
 import type { GeneratedSolverArtifact } from '@/features/timetable/ai/types'
 
+export type GeneratedSolverWorkspace = {
+  rootDir: string
+  artifactPath: string
+  logPath: string
+}
+
 function getPackagedPythonSourceDir() {
   const runnerDir = process.env.TIMETABLE_PYTHON_RUNNER_DIR
   if (!runnerDir) return null
@@ -34,9 +40,17 @@ export function readBaseSolverTemplate() {
   return readFileSync(BASE_TEMPLATE_PATH, 'utf8')
 }
 
+export function getGeneratedSolverWorkspace(requestId?: string): GeneratedSolverWorkspace {
+  const rootDir = ensureGeneratedSolverDir(requestId)
+  return {
+    rootDir,
+    artifactPath: path.join(rootDir, 'generated_solver.py'),
+    logPath: path.join(rootDir, 'sandbox-run.log'),
+  }
+}
+
 export function getGeneratedSolverArtifactPath(requestId?: string) {
-  const dir = ensureGeneratedSolverDir(requestId)
-  return path.join(dir, 'generated_solver.py')
+  return getGeneratedSolverWorkspace(requestId).artifactPath
 }
 
 export function persistGeneratedSolverArtifact(
@@ -48,11 +62,12 @@ export function persistGeneratedSolverArtifact(
   },
   requestId?: string,
 ): GeneratedSolverArtifact {
-  const artifactPath = getGeneratedSolverArtifactPath(requestId)
-  writeFileSync(artifactPath, input.solverCode, 'utf8')
+  const workspace = getGeneratedSolverWorkspace(requestId)
+  writeFileSync(workspace.artifactPath, input.solverCode, 'utf8')
+  writeFileSync(workspace.logPath, '', 'utf8')
 
   return {
-    path: artifactPath,
+    path: workspace.artifactPath,
     solverCode: input.solverCode,
     entrypoint: input.entrypoint,
     summary: input.summary,
