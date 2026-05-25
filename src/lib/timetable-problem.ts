@@ -60,6 +60,9 @@ export type ProblemMeta = {
   teacherToAssignmentIds: Record<string, string[]>
   classToAssignmentIds: Record<string, string[]>
   subjectToAssignmentIds: Record<string, string[]>
+}
+
+export type InternalProblemMeta = ProblemMeta & {
   assignmentMap: Record<string, SolverPayload['assignments'][number]>
   slotMap: Record<string, SolverPayload['slots'][number]>
   slotsByDayId: Record<string, string[]>
@@ -76,7 +79,7 @@ export type SolverProblemContext = {
   payload: SolverPayload
   parsedHard: NormalizedConstraint[]
   parsedSoft: NormalizedConstraint[]
-  meta: ProblemMeta
+  meta: InternalProblemMeta
   problem: {
     days: SolverRequestPayload['days']
     sessions: SolverRequestPayload['sessions']
@@ -105,6 +108,14 @@ export type SolverProblemContext = {
     softConstraints: SolverSoftConstraint[]
     solverConfig: ReturnType<typeof estimateSolverConfig>
     meta: ProblemMeta
+  }
+}
+
+function toAgentProblemMeta(meta: InternalProblemMeta): ProblemMeta {
+  return {
+    teacherToAssignmentIds: meta.teacherToAssignmentIds,
+    classToAssignmentIds: meta.classToAssignmentIds,
+    subjectToAssignmentIds: meta.subjectToAssignmentIds,
   }
 }
 
@@ -169,12 +180,12 @@ function pushIndex(map: Record<string, string[]>, key: string, value: string) {
   map[key].push(value)
 }
 
-function summarizePayload(payload: SolverPayload): ProblemMeta {
+function summarizePayload(payload: SolverPayload): InternalProblemMeta {
   const teacherToAssignmentIds: Record<string, string[]> = {}
   const classToAssignmentIds: Record<string, string[]> = {}
   const subjectToAssignmentIds: Record<string, string[]> = {}
-  const assignmentMap: ProblemMeta['assignmentMap'] = {}
-  const slotMap: ProblemMeta['slotMap'] = {}
+  const assignmentMap: InternalProblemMeta['assignmentMap'] = {}
+  const slotMap: InternalProblemMeta['slotMap'] = {}
   const slotsByDayId: Record<string, string[]> = {}
   const slotsBySessionId: Record<string, string[]> = {}
   const slotsByPeriod: Record<string, string[]> = {}
@@ -267,6 +278,7 @@ export function buildSolverProblemContext(
   const meta = summarizePayload(payload)
   const parsedHard = buildNormalizedConstraints(hardConstraints, request.constraintConfirmations, request)
   const parsedSoft = buildNormalizedConstraints(softConstraints, request.constraintConfirmations, request)
+  const agentProblemMeta = toAgentProblemMeta(meta)
 
   return {
     requestId,
@@ -302,7 +314,7 @@ export function buildSolverProblemContext(
       hardConstraints,
       softConstraints,
       solverConfig,
-      meta,
+      meta: agentProblemMeta,
     },
   }
 }
