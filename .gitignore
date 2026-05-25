@@ -17,6 +17,6 @@ __pycache__/
 .claude/
 db/*.db
 prisma/*.db
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 node_modules
 .venv
