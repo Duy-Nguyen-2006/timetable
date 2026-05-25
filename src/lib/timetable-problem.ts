@@ -195,9 +195,9 @@ function summarizePayload(payload: SolverPayload): InternalProblemMeta {
 
   for (const assignment of payload.assignments) {
     assignmentMap[assignment.id] = assignment
-    pushIndex(teacherToAssignmentIds, assignment.teacherId, assignment.id)
-    pushIndex(classToAssignmentIds, assignment.classId, assignment.id)
-    pushIndex(subjectToAssignmentIds, assignment.subjectId, assignment.id)
+    pushIndex(teacherToAssignmentIds, assignment.teacherLabel, assignment.id)
+    pushIndex(classToAssignmentIds, assignment.classLabel, assignment.id)
+    pushIndex(subjectToAssignmentIds, assignment.subjectLabel, assignment.id)
   }
 
   for (const slot of payload.slots) {
