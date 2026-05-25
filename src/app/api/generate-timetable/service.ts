@@ -699,23 +699,92 @@ async function executePiRuntimeAttempt(args: {
   context: SolverProblemContext
   emit?: ProgressEmitter
 }): Promise<SolverExecutionOutput & { generatedArtifact?: GeneratedSolverArtifact | null }> {
+  //
+  // STEP 1: Try template_solver directly (no LLM needed, 100% reliable)
+  //
+  args.emit?.({ type: 'status', message: 'Đang chạy template solver trực tiếp...', iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
+
+  const runtimeProblem = buildRuntimeProblem(args.context)
+
+  const directResult = await runSolverDirect({
+    problem: runtimeProblem,
+    // No solverArtifactPath → runner.py falls back to template_solver.solve_timetable
+  })
+
+  if (directResult.success) {
+    const data = directResult.data
+    if (data.status === 'solved' && (data.cells || []).length > 0) {
+      args.emit?.({
+        type: 'sandbox_finished', attempt: args.attempt,
+        message: `Template solver thành công! ${(data.cells || []).filter((c: { entries?: unknown[] }) => (c.entries || []).length > 0).length} ô tiết.`,
+        status: 'solved',
+      })
+      return {
+        status: 'solved',
+        message: data.message || 'Template solver đã tạo thời khóa biểu.',
+        diagnostics: [...(data.diagnostics || []), 'Solved via template_solver (no LLM needed)'],
+        cells: normalizeRuntimeCells(data.cells || [], args.context),
+        iisConstraintIds: data.iisConstraintIds || [],
+        executionErrors: data.executionErrors || [],
+        validationErrors: data.validationErrors || [],
+        violations: data.violations || [],
+        solverStats: data.solverStats || null,
+        artifactPath: data.artifactPath,
+        loadError: null,
+        runtimeError: null,
+        generatedArtifact: null,
+      }
+    }
+
+    if (data.status === 'infeasible') {
+      args.emit?.({
+        type: 'sandbox_finished', attempt: args.attempt,
+        message: 'Template solver: bài toán infeasible.',
+        status: 'infeasible',
+      })
+      return {
+        status: 'infeasible',
+        message: data.message || 'Không thể xếp thời khóa biểu hợp lệ.',
+        diagnostics: [...(data.diagnostics || []), 'Infeasible via template_solver'],
+        cells: [],
+        iisConstraintIds: data.iisConstraintIds || [],
+        executionErrors: data.executionErrors || [],
+        validationErrors: data.validationErrors || [],
+        violations: data.violations || [],
+        solverStats: data.solverStats || null,
+        loadError: null,
+        runtimeError: null,
+        generatedArtifact: null,
+      }
+    }
+  }
+
+  //
+  // STEP 2: Template solver failed/errored → engage LLM coding agent
+  //
   if (!args.apiKey.trim()) {
     return {
       status: 'error',
-      message: 'Thiếu API key để gọi LowPrizo runtime.',
-      diagnostics: ['Missing API key.'],
+      message: 'Template solver gặp lỗi và thiếu API key để dùng LLM.',
+      diagnostics: [directResult.success ? '' : (directResult as { error: string }).error, 'Missing API key.'].filter(Boolean),
       cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
       violations: [], solverStats: null, loadError: 'missing_api_key',
       runtimeError: 'missing_api_key', generatedArtifact: null,
     }
   }
 
+  args.emit?.({ type: 'status', message: 'Template solver gặp lỗi. LLM agent đang code solver mới...', iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
+
   const client = createPiSdkClient(args.apiKey)
-  const runtimeProblem = buildRuntimeProblem(args.context)
   const systemPrompt = buildPiCoderSystemPrompt()
 
+  const templateError = directResult.success
+    ? `Template solver returned status=${(directResult.data as { status: string }).status}`
+    : (directResult as { error: string }).error
+
   const userContent = JSON.stringify({
-    task: 'Write OR-Tools solver code. Submit via submit_solver_code tool. The template_solver.py in the system prompt handles all constraint types. Adapt it for this problem.',
+    task: 'The default template_solver failed. Write custom solver code. Submit via submit_solver_code tool.',
+    templateError,
     problem: runtimeProblem,
     checkerFeedback: args.checkerFeedback.length > 0 ? args.checkerFeedback : undefined,
   })
@@ -728,8 +797,6 @@ async function executePiRuntimeAttempt(args: {
   let lastArtifact: GeneratedSolverArtifact | null = null
   let lastResult: SolverExecutionOutput | null = null
   let totalToolCalls = 0
-
-  args.emit?.({ type: 'status', message: 'Coding agent bắt đầu sinh solver code...', iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
 
   for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
     let completion: OpenAI.Chat.Completions.ChatCompletion
@@ -745,9 +812,8 @@ async function executePiRuntimeAttempt(args: {
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming)
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error'
-      if (lastResult) break
       return {
-        status: 'error', message: 'Không thể kết nối tới LowPrizo.',
+        status: 'error', message: 'Không thể kết nối LLM.',
         diagnostics: [`SDK error turn ${turn}: ${msg}`],
         cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
         violations: [], solverStats: null, loadError: msg, runtimeError: msg,
@@ -758,13 +824,12 @@ async function executePiRuntimeAttempt(args: {
     const choice = completion.choices[0]
     if (!choice) break
     messages.push(choice.message as OpenAI.Chat.Completions.ChatCompletionMessageParam)
-
     if (!choice.message.tool_calls || choice.message.tool_calls.length === 0) break
 
     for (const toolCall of choice.message.tool_calls) {
       totalToolCalls++
       if (toolCall.function.name !== 'submit_solver_code') {
-        messages.push({ role: 'tool' as const, tool_call_id: toolCall.id, content: 'Unknown tool. Use submit_solver_code.' })
+        messages.push({ role: 'tool' as const, tool_call_id: toolCall.id, content: 'Use submit_solver_code.' })
         continue
       }
 
@@ -775,23 +840,20 @@ async function executePiRuntimeAttempt(args: {
         continue
       }
 
-      args.emit?.({ type: 'status', message: `Agent submit code (turn ${turn + 1}, ${code.length} chars)...`, iteration: args.attempt, maxIterations: PI_MAX_ATTEMPTS })
-
       const artifact = normalizeGeneratedArtifact(
-        { solverCode: code, entrypoint: 'solve_timetable', summary: `Turn ${turn + 1}`, assumptions: args.checkerFeedback },
-        args.requestId, `Agent turn ${turn + 1}`, args.checkerFeedback,
+        { solverCode: code, entrypoint: 'solve_timetable', summary: `LLM turn ${turn + 1}`, assumptions: args.checkerFeedback },
+        args.requestId, `LLM turn ${turn + 1}`, args.checkerFeedback,
       )
-
       if (!artifact) {
-        messages.push({ role: 'tool' as const, tool_call_id: toolCall.id, content: JSON.stringify({ error: 'Failed to save code.' }) })
+        messages.push({ role: 'tool' as const, tool_call_id: toolCall.id, content: JSON.stringify({ error: 'Save failed.' }) })
         continue
       }
       lastArtifact = artifact
 
-      args.emit?.({ type: 'sandbox_started', attempt: args.attempt, message: `Sandbox chạy code (turn ${turn + 1})...`, artifactPath: artifact.path })
+      args.emit?.({ type: 'sandbox_started', attempt: args.attempt, message: `Sandbox chạy LLM code (turn ${turn + 1})...`, artifactPath: artifact.path })
 
       const sandboxResult = await runSolverDirect({
-        problem: args.context.problem,
+        problem: runtimeProblem,
         solverArtifactPath: artifact.path,
         entrypoint: artifact.entrypoint,
       })
@@ -799,39 +861,25 @@ async function executePiRuntimeAttempt(args: {
       if (sandboxResult.success) {
         const data = sandboxResult.data
         lastResult = data as SolverExecutionOutput
-
-        args.emit?.({
-          type: 'sandbox_finished', attempt: args.attempt,
-          message: data.status === 'solved' ? `Solved! ${(data.cells || []).filter((c: { entries?: unknown[] }) => (c.entries || []).length > 0).length} cells.` : `Status: ${data.status}`,
-          artifactPath: artifact.path, status: data.status as SolverExecutionOutput['status'],
-        })
-
         messages.push({ role: 'tool' as const, tool_call_id: toolCall.id, content: JSON.stringify({
-          status: 'success', solver_status: data.status, message: data.message,
+          status: 'success', solver_status: data.status,
           filled_cells: (data.cells || []).filter((c: { entries?: unknown[] }) => (c.entries || []).length > 0).length,
-          diagnostics: (data.diagnostics || []).slice(0, 3),
-          iis: data.iisConstraintIds || [],
         }) })
-
         if (data.status === 'solved' || data.status === 'infeasible') break
       } else {
-        args.emit?.({ type: 'sandbox_finished', attempt: args.attempt, message: `Error: ${(sandboxResult.error || '').slice(0, 100)}`, artifactPath: artifact.path, status: 'error' })
         messages.push({ role: 'tool' as const, tool_call_id: toolCall.id, content: JSON.stringify({
           status: 'error', error: (sandboxResult.error || '').slice(0, 3000),
-          hint: 'Fix the code. Make sure to import from timetable_solver.base_solver_template and define solve_timetable(problem).',
         }) })
       }
     }
-
     if (lastResult && (lastResult.status === 'solved' || lastResult.status === 'infeasible')) break
   }
 
   if (lastResult) {
-    const workspace = getGeneratedSolverWorkspace(args.requestId)
     return {
       status: lastResult.status === 'solved' || lastResult.status === 'infeasible' ? lastResult.status : 'error',
-      message: lastResult.message || 'Agent xong.',
-      diagnostics: [...(lastResult.diagnostics || []), `Agent: ${totalToolCalls} tool calls`],
+      message: lastResult.message || 'LLM agent xong.',
+      diagnostics: [...(lastResult.diagnostics || []), `LLM agent: ${totalToolCalls} tool calls`],
       cells: normalizeRuntimeCells(lastResult.cells || [], args.context),
       iisConstraintIds: lastResult.iisConstraintIds || [],
       executionErrors: lastResult.executionErrors || [],
@@ -839,16 +887,15 @@ async function executePiRuntimeAttempt(args: {
       violations: lastResult.violations || [],
       solverStats: lastResult.solverStats || null,
       artifactPath: lastResult.artifactPath || lastArtifact?.path,
-      loadError: lastResult.loadError || null,
-      runtimeError: lastResult.runtimeError || null,
+      loadError: null, runtimeError: null,
       generatedArtifact: lastArtifact,
     }
   }
 
   return {
     status: 'error',
-    message: `Coding agent không tạo được kết quả sau ${totalToolCalls} tool calls.`,
-    diagnostics: [`Total turns used. Tool calls: ${totalToolCalls}`],
+    message: `Cả template solver và LLM agent đều không tạo được kết quả.`,
+    diagnostics: [`Template error: ${templateError}`, `LLM tool calls: ${totalToolCalls}`],
     cells: [], iisConstraintIds: [], executionErrors: [], validationErrors: [],
     violations: [], solverStats: null, loadError: 'no_result', runtimeError: 'no_result',
     generatedArtifact: lastArtifact,
