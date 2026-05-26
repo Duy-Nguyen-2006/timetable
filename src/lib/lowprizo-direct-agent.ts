@@ -1,12 +1,8 @@
 /**
- * Lowprizo Direct Tool Agent
+ * Lowprizo Direct Tool Agent (devstral-latest)
  *
- * Replaces the old Pi SDK integration.
- * Uses native OpenAI tool calling (with header sanitization to avoid WAF blocks).
- *
- * Supports configurable baseURL + model (you can point it at OpenRouter + Claude if needed).
- *
- * Strict sandbox: all operations limited to /tmp/tack-agent-<uuid>
+ * Uses native OpenAI tool calling with header sanitization to avoid WAF blocks.
+ * Strict sandbox: /tmp/tack-agent-<uuid>
  */
 
 import { randomUUID } from 'node:crypto'
@@ -61,11 +57,10 @@ function createSandbox(): Sandbox {
     fs.copyFileSync(baseSrc, path.join(dir, 'base_solver_template.py'))
   }
 
-  // Best performing bootstrap so far for hard datasets: "Produce cells no matter what" first.
+  // Simple guaranteed-cells bootstrap. The agent will improve it.
   const skeleton = `"""
-BEST BOOTSTRAP FOR HARD DATASETS (proven to work on DS2)
-Priority: Get cells on the board as fast as possible.
-Only refine after you have output.
+Simple bootstrap that guarantees some cells exist.
+The agent is expected to refine this into a proper constraint-respecting solver.
 """
 from base_solver_template import build_empty_result
 
@@ -674,7 +669,7 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
     },
   ]
 
-  const strategy: AgentStrategy = options.strategy ?? 'structured-json'
+  const strategy: AgentStrategy = options.strategy ?? 'native-tools'
   const maxTurns = options.maxTurns ?? 18
 
   let finalResult: TimetableSolveResult | null = null
@@ -750,7 +745,7 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
         }
 
-        // Aggressive steering for devstral-latest (model needs constant pressure)
+        // Hard safety nets + discipline guidance for devstral-latest
         const runCount = messages.filter(m => 
           m.role === 'tool' && m.content?.includes('"run_python"')
         ).length
@@ -758,7 +753,7 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
         if (runCount >= 3) {
           messages.push({
             role: 'user',
-            content: `CRITICAL: You have already run the solver ${runCount} times. STOP editing. Call submit_solution RIGHT NOW with whatever cells you have. This is not optional.`
+            content: `CRITICAL: You have already run the solver ${runCount} times. STOP editing. Call submit_solution RIGHT NOW with whatever cells you have.`
           })
         }
 
@@ -766,8 +761,7 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
           break
         }
 
-        // === State machine guidance for MANDATORY LOOP (strong but not blocking) ===
-        // After run_python, strongly encourage declare_fix_target for better focus + history
+        // Encourage use of declare_fix_target after run_python for better focus
         const recent = attemptHistory.slice(-3)
         const lastRunIdx = recent.map((a, i) => a.action === 'run_python' ? i : -1).reduce((a, b) => Math.max(a, b), -1)
         const hasDeclareAfterLastRun = recent.some((a, i) => a.action === 'declare_fix_target' && i > lastRunIdx)
@@ -775,7 +769,7 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
         if (lastRunIdx >= 0 && !hasDeclareAfterLastRun) {
           messages.push({
             role: 'user',
-            content: 'IMPORTANT: You just ran the solver. To stay disciplined and help the system track progress, call declare_fix_target with the constraint_number from HARD_CONSTRAINTS.txt now (before your next edit). This makes the MANDATORY LOOP much more effective. Declare the one you will fix, then ONE small edit.'
+            content: 'IMPORTANT: After running the solver, call declare_fix_target (with constraint_number from HARD_CONSTRAINTS.txt) before your next edit. This helps track progress on one hard constraint at a time.'
           })
         }
       }
@@ -800,69 +794,6 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
 
         finalResult = forcedResult
         emit({ type: 'result', data: forcedResult } as any)
-      }
-    } else {
-      // === Variant 2 & 3: Structured / ReAct (no tools param → bypass 403) ===
-      // Force model to output one clean ACTION JSON at the end of every response.
-      const actionInstruction = `
-You must respond with reasoning + exactly ONE JSON action at the very end.
-Format:
-{
-  "action": "read_file" | "write_file" | "edit_file" | "delete_file" | "run_python" | "submit_solution",
-  "args": { ... }
-}
-Only output valid JSON for the action. No markdown fences around the JSON.`
-
-      for (let turn = 1; turn <= maxTurns; turn++) {
-        const completion = await openai.chat.completions.create({
-          model,
-          messages,
-          // No "tools" array on purpose — this often triggers 403 on Lowprizo
-          response_format: { type: 'json_object' },
-          temperature: 0.3,
-          max_tokens: 4000,
-        })
-
-        let content = completion.choices[0].message.content || ''
-        messages.push({ role: 'assistant', content })
-
-        emit({ type: 'pi_coder_debug', attempt: turn, message: `Raw: ${content.slice(0, 350)}` } as any)
-
-        // Extract the last JSON object from the response
-        let action: any = null
-        try {
-          // Try to find a JSON object in the response
-          const jsonMatch = content.match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            action = JSON.parse(jsonMatch[0])
-          }
-        } catch {}
-
-        if (!action || !action.action) {
-          messages.push({
-            role: 'user',
-            content: 'You must output exactly one JSON action object at the end. ' + actionInstruction,
-          })
-          continue
-        }
-
-        const name = action.action
-        const args = action.args || {}
-
-        emit({ type: 'pi_coder_debug', attempt: turn, message: `Parsed Action: ${name}` } as any)
-
-        const result = await executeTool(name, args, sandbox, emit)
-
-        if (name === 'submit_solution' && result.submitted) {
-          finalResult = result.result
-          emit({ type: 'result', data: finalResult } as any)
-          return finalResult
-        }
-
-        messages.push({
-          role: 'user',
-          content: `Tool result for ${name}:\n${JSON.stringify(result)}`,
-        })
       }
     }
 

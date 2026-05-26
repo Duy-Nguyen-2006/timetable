@@ -25,7 +25,7 @@
 
 ## Important files
 - Agent rules file: [`AGENTS.md`](AGENTS.md)
-- Product/docs: [`README.md`](README.md), [`PLAN.md`](PLAN.md), [`worklog.md`](worklog.md)
+- Product/docs: [`README.md`](README.md), [`PLAN.md`](PLAN.md) (worklog.md removed as historical)
 - Next.js app shell: [`src/app/layout.tsx`](src/app/layout.tsx), [`src/app/page.tsx`](src/app/page.tsx), [`src/app/globals.css`](src/app/globals.css)
 - API routes: [`src/app/api/`](src/app/api/)
 - Timetable feature UI: [`src/features/timetable/`](src/features/timetable/)

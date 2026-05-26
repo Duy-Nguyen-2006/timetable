@@ -86,7 +86,7 @@
 - [ ] Chạy `scripts/test-hard-datasets.ts` (DS2 + DS5) ngay sau edit.
 - [ ] Kiểm tra: cells > 0, hard violations giảm mạnh so với baseline, có dùng `get_hard_constraint_progress`, recommended_next_step được follow.
 - [ ] Nếu cần: chạy full 6 datasets.
-- [ ] Ghi nhận % success + failure mode cụ thể vào worklog / phản hồi.
+- [ ] Ghi nhận % success + failure mode cụ thể (worklog.md đã xóa, dùng Walkthrough/Problem.md hoặc commit message).
 
 ## Mục tiêu cập nhật lần này (Electron Linux log fix)
 
