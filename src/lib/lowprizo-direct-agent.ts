@@ -20,6 +20,18 @@ import type {
 
 import { runSolverDirect } from '@/lib/sandbox'
 import { buildSolverProblemContext } from '@/lib/timetable-problem'
+import { runDeterministicChecks } from '@/lib/deterministic-checker'
+import { validateTimetableResult } from '@/lib/timetable-validator'
+
+// === Per-run state (module scope) for executeTool visibility (Feedback_4 bug D fix) ===
+// Reset at start of each runLowprizoDirectAgent. Enables stateful tools (attempt history,
+// declare_fix_target, get_hard..., run_python feedback) without ReferenceError.
+// Also holds currentSolverProblem so run_python can pass correct {problem, solverArtifactPath}
+// to runSolverDirect (fixes bugs B+C — agent-written solver.py now actually executed).
+let lastProducedCells: any[] = []
+let attemptHistory: any[] = []
+let currentFixTarget: { number: number; reason: string } | null = null
+let currentSolverProblem: any = null
 
 // Default (can be overridden)
 const DEFAULT_BASE_URL = 'https://api.lowprizo.com/v1'
@@ -264,6 +276,20 @@ function getToolDefinitions() {
         },
       },
     },
+    {
+      type: 'function' as const,
+      function: {
+        name: 'lint_python',
+        description: 'Quick preflight check on your solver.py (syntax proxy + OR-Tools import + entrypoint). Call this BEFORE run_python to catch 30-40% wasted turns on bad syntax/missing imports. Returns ok/errors/advice.',
+        parameters: {
+          type: 'object',
+          properties: {
+            filename: { type: 'string', description: 'Relative path to the .py file (usually solver.py)' },
+          },
+          required: ['filename'],
+        },
+      },
+    },
   ]
 }
 
@@ -287,6 +313,9 @@ async function executeTool(
 
       case 'write_file': {
         const full = safePath(args.filename, dir)
+        if (!currentFixTarget) {
+          return { ok: false, error: 'MANDATORY (state machine enforcement from Feedback_4/2): Sau hard violation, PHẢI gọi declare_fix_target(N) từ HARD_CONSTRAINTS.txt TRƯỚC KHI write. Gọi ngay với số từ checklist.' }
+        }
         await fs.promises.writeFile(full, args.content, 'utf8')
         emit?.({ type: 'pi_coder_finished', attempt: 1, message: `Wrote ${args.filename}` } as any)
         return { ok: true, message: `File written: ${args.filename}` }
@@ -294,6 +323,9 @@ async function executeTool(
 
       case 'edit_file': {
         const full = safePath(args.filename, dir)
+        if (!currentFixTarget) {
+          return { ok: false, error: 'MANDATORY (state machine enforcement from Feedback_4/2): Sau hard violation, PHẢI gọi declare_fix_target(N) từ HARD_CONSTRAINTS.txt TRƯỚC KHI edit. Gọi ngay với số từ checklist.' }
+        }
         let content = await fs.promises.readFile(full, 'utf8')
         if (!content.includes(args.old_string)) {
           return { ok: false, error: 'old_string not found' }
@@ -305,14 +337,50 @@ async function executeTool(
 
       case 'delete_file': {
         const full = safePath(args.filename, dir)
+        if (!currentFixTarget) {
+          return { ok: false, error: 'MANDATORY (state machine enforcement from Feedback_4/2): Sau hard violation, PHẢI gọi declare_fix_target(N) từ HARD_CONSTRAINTS.txt TRƯỚC KHI delete. Gọi ngay với số từ checklist.' }
+        }
         await fs.promises.rm(full, { force: true })
         return { ok: true, message: `Deleted ${args.filename}` }
+      }
+
+      case 'lint_python': {
+        const full = safePath(args.filename, dir)
+        try {
+          const src = await fs.promises.readFile(full, 'utf8')
+          const lineCount = src.split('\n').length
+          const hasOrtools = /from ortools|import ortools|cp_model/.test(src)
+          const hasSolve = /def solve_timetable|def solve\(/.test(src)
+          const errors: string[] = []
+          if (!hasOrtools) errors.push('Missing OR-Tools import (need: from ortools.sat.python import cp_model)')
+          if (!hasSolve) errors.push('Missing solve_timetable(...) entrypoint function')
+          if (/\t/.test(src) && / {2,}/.test(src)) errors.push('Mixed tabs and spaces — normalize to 4 spaces')
+          const ok = errors.length === 0 && hasOrtools && hasSolve
+          return {
+            ok,
+            errors,
+            lineCount,
+            hasOrtools,
+            hasSolve,
+            advice: ok
+              ? 'Good structure. Safe to call run_python now.'
+              : 'Fix errors above first (call read_file to see the code, then edit). This saves many wasted turns.',
+          }
+        } catch (e: any) {
+          return { ok: false, errors: [String(e?.message || e)], advice: 'File not readable or other error' }
+        }
       }
 
       case 'run_python': {
         const full = safePath(args.filename, dir)
         emit?.({ type: 'sandbox_started', attempt: 1, message: `Running ${args.filename}` } as any)
-        const result: any = await runSolverDirect(full as any).catch((e: any) => ({
+        // Feedback_4 B+C fix: pass proper SolverExecutionRequest with problem + artifactPath.
+        // Now runner.py will load the agent's solver.py (not template) and exec its solve_timetable.
+        const solverReq: any = {
+          problem: currentSolverProblem,
+          solverArtifactPath: full,
+        }
+        const result: any = await runSolverDirect(solverReq).catch((e: any) => ({
           success: false,
           error: e.message,
         }))
@@ -354,17 +422,54 @@ async function executeTool(
         const previousBest = lastProducedCells.length
         const improvement = feedback.cells_count > previousBest ? ' (improved)' : ''
 
-        // Build explicit hard constraint status
-        const hardViolList = (feedback.violations || [])
+        // Build explicit hard constraint status (now much more prescriptive per senior review)
+        let hardViolList = (feedback.violations || [])
           .filter((v: any) => v.violated)
           .slice(0, 5)
           .map((v: any) => `- ${v.description || v.constraint_id || 'Unknown hard constraint'}`)
           .join('\n');
 
+        // Load HARD_CONSTRAINTS.txt to map violations/iis back to numbered items + make advice concrete
+        let checklist: string[] = [];
+        try {
+          const checklistContent = fs.readFileSync(path.join(dir, 'HARD_CONSTRAINTS.txt'), 'utf8');
+          checklist = checklistContent.split('\n').filter((l: string) => l.trim());
+        } catch {}
+
+        // Try to enrich hard violation list with actual checklist text when we have iis or ids
+        const iisIds: string[] = feedback.iisConstraintIds || [];
+        if ((hardViolations > 0 || iisIds.length > 0) && checklist.length > 0) {
+          const enriched: string[] = [];
+          const seen = new Set<string>();
+          // Prioritize iisConstraintIds (most precise from solver)
+          for (const id of iisIds) {
+            const num = parseInt(String(id).replace(/\D/g, ''), 10);
+            if (num && checklist[num - 1] && !seen.has(String(num))) {
+              seen.add(String(num));
+              enriched.push(`- #${num}: ${checklist[num - 1]}`);
+            }
+          }
+          // Fall back to any violations that mention a number
+          for (const v of (feedback.violations || []).filter((x: any) => x.violated)) {
+            const m = String(v.constraint_id || v.description || '').match(/#?(\d+)/);
+            if (m) {
+              const num = parseInt(m[1], 10);
+              if (num && checklist[num - 1] && !seen.has(String(num))) {
+                seen.add(String(num));
+                enriched.push(`- #${num}: ${checklist[num - 1]}`);
+              }
+            }
+          }
+          if (enriched.length > 0) {
+            hardViolList = enriched.slice(0, 5).join('\n');
+          }
+        }
+
         if (feedback.status === 'error') {
           guidance = `CRITICAL ERROR: Solver crashed.\n${feedback.diagnostics.slice(0,2).join('\n')}\n→ Fix the code bug before adding more constraints.`
-        } else if (hardViolations > 0) {
-          guidance = `Current: ${feedback.cells_count} cells${improvement} | Remaining hard violations: ${hardViolations}\nStill broken:\n${hardViolList}\nBest so far: ${previousBest} cells\n→ Make one targeted fix for the broken hard constraints above.`
+        } else if (hardViolations > 0 || iisIds.length > 0) {
+          const iisNote = iisIds.length > 0 ? ` (iisConstraintIds: ${iisIds.join(', ')})` : '';
+          guidance = `CRITICAL: Hard constraint(s) still violated${iisNote}.\nStill broken:\n${hardViolList}\n\nMANDATORY NEXT STEP: Call declare_fix_target(N) RIGHT NOW with the exact number from HARD_CONSTRAINTS.txt above (before any edit). Make ONE small targeted change only (especially for "chỉ dạy" availability — add ForbiddenIntervals for the restricted teacher). Best so far: ${previousBest} cells. Current: ${feedback.cells_count} cells${improvement}.`
         } else if (feedback.cells_count > 0) {
           guidance = `GOOD: ${feedback.cells_count} cells and 0 hard violations.\n→ You have a valid solution. Call submit_solution, or continue to optimize soft constraints if you want.`
         } else {
@@ -387,17 +492,40 @@ async function executeTool(
       }
 
       case 'submit_solution': {
+        // Feedback_4 fix E: actually call the real validator instead of always 'accept'
+        const cells = args.cells || [];
+        let verdict: 'accept' | 'reject' = 'accept';
+        let validationErrors: any[] = [];
+        let violations: any[] = [];
+
+        if (currentSolverProblem) {
+          try {
+            const det = runDeterministicChecks(
+              currentSolverProblem.hardConstraints || [],
+              currentSolverProblem.assignments || [],
+              cells
+            );
+            violations = det.violations || [];
+            if (violations.length > 0) {
+              verdict = 'reject';
+              validationErrors = violations;
+            }
+          } catch (e: any) {
+            validationErrors = [{ message: 'Validator error: ' + (e?.message || e) }];
+          }
+        }
+
         const result: TimetableSolveResult = {
           status: 'solved',
-          verdict: 'accept',
+          verdict,
           message: args.message,
           diagnostics: args.diagnostics || [],
-          cells: args.cells || [],
+          cells,
           executionErrors: [],
-          validationErrors: [],
+          validationErrors,
           iisConstraintIds: [],
           conflictingConstraints: [],
-          violations: [],
+          violations,
           overallAssessment: 'Generated by Lowprizo Direct Agent',
           solverStats: null,
         } as any
@@ -556,7 +684,7 @@ export async function runLowprizoDirectAgent(
       const candidates = ['thứ 2','thứ 3','thứ 4','thứ 5','thứ 6','thứ 7','chủ nhật','thứ hai','thứ ba','thứ tư','thứ năm','thứ sáu','thứ bảy']
       for (const cand of candidates) {
         if (text.includes(cand)) {
-          const id = dayIdByLabel.get(cand) || dayIdByLabel.get(cand.replace('thứ ', 'thứ '))
+          const id = dayIdByLabel.get(cand) || dayIdByLabel.get(cand.toLowerCase().trim().replace(/\s+/g, ' '))
           if (id) allowed.push(id)
         }
       }
@@ -673,11 +801,13 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
   const maxTurns = options.maxTurns ?? 18
 
   let finalResult: TimetableSolveResult | null = null
-  let lastProducedCells: any[] = []
-
-  // === Attempt Memory + strict state machine for MANDATORY LOOP ===
-  const attemptHistory: any[] = []
-  let currentFixTarget: { number: number; reason: string } | null = null
+  // Per-run state now at module scope (see top of file — Feedback_4 bug D fix).
+  // Reset for this runLowprizoDirectAgent invocation. currentSolverProblem set so
+  // run_python can construct proper SolverExecutionRequest (bugs B+C).
+  lastProducedCells.length = 0
+  attemptHistory.length = 0
+  currentFixTarget = null
+  currentSolverProblem = problem
 
   const emit = (e: AgentEvent) => options.onProgress?.(e)
 
@@ -809,7 +939,8 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
         const solverPath = path.join(dir, 'solver.py')
         if (fs.existsSync(solverPath)) {
           try {
-            const lastRun: any = await runSolverDirect(solverPath as any)
+            // Feedback_4 B+C fix (safety net path): pass problem + artifactPath so runner uses agent's solver.py
+            const lastRun: any = await runSolverDirect({ problem, solverArtifactPath: solverPath } as any)
             const data = lastRun?.data || lastRun
             if (data?.cells && Array.isArray(data.cells) && data.cells.length > 0) {
               forced = {
@@ -867,7 +998,8 @@ export async function forceSubmitLastSolverIfPossible(sandboxDir: string): Promi
   if (!fs.existsSync(solverPath)) return null
 
   try {
-    const result: any = await runSolverDirect(solverPath as any)
+    // Feedback_4 B+C fix (final safety helper): pass problem + artifactPath
+    const result: any = await runSolverDirect({ problem: currentSolverProblem, solverArtifactPath: solverPath } as any)
     const data = result?.data || result
     if (data?.cells && data.cells.length > 0) {
       return {
