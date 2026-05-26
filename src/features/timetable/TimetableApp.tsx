@@ -455,7 +455,6 @@ function InfoField({ icon: Icon, label, placeholder, value, onChange }) {
 }
 
 export default function App({ onBackToLanding }) {
-  const { apiKey } = useApiKeyStore()
   const [page, setPage] = useState('select')
   const [selectedDays, setSelectedDays] = useState(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
   const [selectedSessions, setSelectedSessions] = useState(['morning'])
