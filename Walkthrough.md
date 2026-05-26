@@ -44,6 +44,39 @@
 
 Đây là snapshot code + harness hiện tại. Tôi đã thử tất cả các hướng nghĩ ra (tool nhỏ, bootstrap, state machine nhẹ, rich feedback, safety net). Kết quả tốt nhất đạt được là 4/6 ổn định.
 
+### Cleanup: Xóa hoàn toàn kiến trúc cũ (coder + checker orchestrated) — 2026-05-26
+
+**Lý do (theo yêu cầu user):** Codebase đưa nguyên cho chuyên gia review → phải dọn sạch để không bị nhầm "kiến trúc cũ vẫn còn".
+
+**Phạm vi xóa (đúng scope, low risk):**
+- `src/app/api/generate-timetable/service.ts`: gút từ ~1102 lines → ~55 lines (chỉ còn thin wrapper luôn gọi `runLowprizoDirectAgent`).
+- Xóa toàn bộ `src/lib/agent-prompts/` (coder.ts 198 dòng + checker.ts 25 dòng — 100% code của old Pi coder/checker).
+- Xóa dep `"@earendil-works/pi-coding-agent": "^0.74.2"` trong package.json.
+- Cập nhật comment `engine` trong types.ts cho rõ ràng.
+
+**Kết quả diff:**
+```
+5 files changed, 33 insertions(+), 1315 deletions(-)
+```
+(service.ts giảm ~1050 dòng, 2 prompt files biến mất hoàn toàn, dir `agent-prompts/` gone).
+
+**GitNexus (bắt buộc theo AGENTS.md):**
+- Upstream impact của `runPiOrchestratedLoop` (trước khi xóa): **LOW** (chỉ có route POST gọi).
+- Impact của `runLowprizoDirectAgent`: **LOW** (chỉ test scripts gọi trực tiếp).
+- Sau edit: `gitnexus__detect_changes` (unstaged) → medium risk (do xóa nhiều symbol chết trong graph), nhưng **không ảnh hưởng flow production ngoài wrapper name giữ nguyên** cho backward compat. Các process bị ảnh hưởng chỉ là internal steps bên trong direct agent.
+
+**Verify ngay (sau edit):**
+- `git status --short` + `ls src/lib/agent-prompts` → dir gone ✓
+- `grep pi-coding-agent package.json` → không còn ✓
+- `npm run lint` → 0 lỗi mới từ cleanup (2 vấn đề pre-existing ở test scripts).
+- GitNexus detect done.
+- Route + API contract không đổi (client vẫn gọi `runPiOrchestratedLoop` như cũ).
+
+**Hậu quả tích cực cho expert:**
+- Giờ nhìn vào source chỉ thấy **1 implementation duy nhất** cho AI agent: `src/lib/lowprizo-direct-agent.ts` (native tool calling, 8 tools, MANDATORY LOOP, declare_fix_target, availability bootstrap, devstral-latest only...).
+- Không còn coder/checker split, không còn Pi SDK, không còn 2 prompt files riêng, không còn 1000 dòng legacy loop.
+- Tên function export cũ giữ lại chỉ để route không phải sửa.
+
 ### Chi tiết thay đổi then chốt (low-risk)
 - Vị trí: ngay sau khi viết `HARD_CONSTRAINTS.txt` trong `runLowprizoDirectAgent` (lowprizo-direct-agent.ts).
 - Hành vi mới: quét hard constraints tìm pattern "chỉ dạy" + teacher → build allowed day list → generate initial cells ưu tiên ngày hợp lệ → ghi đè `solver.py`.

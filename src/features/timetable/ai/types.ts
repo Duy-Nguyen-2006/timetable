@@ -133,10 +133,10 @@ export type SolverRequestPayload = {
   trace?: boolean
   userNotes?: string
   /**
-   * Engine selection.
-   * - 'legacy': Default orchestrated flow.
-   * - 'pi-agent': Legacy name kept for backward compatibility.
-   *   Routes to the current direct Lowprizo + devstral implementation.
+   * Engine selection (for backward compat on the wire only).
+   * All values (including absent / 'legacy' / 'pi-agent') now route to the single
+   * modern direct agent implementation (native tool calling on Lowprizo devstral-latest).
+   * The old orchestrated Pi coder + checker architecture has been removed.
    */
   engine?: 'legacy' | 'pi-agent'
 
