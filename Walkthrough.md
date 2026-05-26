@@ -7,12 +7,13 @@
 - Sau edit: test ngay trên hard datasets, đo improvement trên DS2/DS5.
 
 - [x] GitNexus impact (LOW risk) cho bước tiếp theo.
-- [x] Thêm tool `declare_fix_target` + enforcement state machine trong loop:
-  - Model bắt buộc declare constraint_number sau run_python trước khi edit.
-  - History + currentFixTarget tracking.
-  - Steering message chặn edit nếu skip declare.
-  - Cập nhật toàn bộ prompt (system + user) để dạy quy tắc STRICT MANDATORY LOOP.
-- Mục tiêu: Tăng độ kỷ luật "one constraint at a time" → ổn định 100% hơn nữa trên mọi dataset.
+- [x] Thêm tool `declare_fix_target` + enforcement state machine trong loop.
+- [x] **Prompt compression + external instructions** (thử nghiệm):
+  - Tạo file `AGENT_INSTRUCTIONS.txt` + nén mạnh system prompt.
+  - **Kết quả**: Regress rõ rệt trên hard datasets (0/2 success).
+  - Đã revert (lựa chọn A của user), quay về prompt explicit hơn.
+  - Sau revert: Hard datasets (DS2 + DS5) phục hồi tốt → 2/2 success (32 cells và 12 cells, hard true).
+- Mục tiêu: Tìm cân bằng giữa độ dài prompt và khả năng model tuân thủ loop. (Kết luận tạm: devstral cần prompt explicit rõ ràng hơn là file ngoài).
 
 ### Current Status (as of this push - 2026-05-26)
 **Kết quả test toàn bộ 6 datasets (devstral-latest, first-run, tất cả cải tiến hiện tại):**

@@ -622,7 +622,7 @@ def solve_timetable(problem):
     fs.writeFileSync(path.join(dir, 'solver.py'), smartSkeleton)
   }
 
-  const systemPrompt = `You are a disciplined OR-Tools (cp_model) developer. Your ONLY mission is to produce cells and call submit_solution within a small number of attempts. You are inside sandbox: ${dir}
+  const systemPrompt = `You are a disciplined OR-Tools (cp_model) developer. Your ONLY mission is to produce valid cells and call submit_solution within a small number of attempts. You are inside sandbox: ${dir}
 
 CRITICAL RULES FOR DEVSTRAL (follow exactly):
 1. You MUST use the skeleton in solver.py as starting point. Do NOT delete it and rewrite from scratch.
@@ -640,17 +640,17 @@ MANDATORY BEHAVIOR:
 - Produce cells as early as possible (even a partial timetable is better than nothing).
 - If after 5 runs you still have 0 cells → submit anyway with whatever you have.
 
-TOOLS: read_file, write_file, edit_file, run_python, submit_solution, read_attempt_history, get_hard_constraint_progress
+TOOLS: read_file, write_file, edit_file, run_python, submit_solution, read_attempt_history, get_hard_constraint_progress, declare_fix_target
 
-MANDATORY LOOP (STRICT — you must follow this exactly):
+MANDATORY LOOP (you must follow this exactly):
 After every run_python:
-1. Call get_hard_constraint_progress.
-2. Read the "recommended_next_step" and broken list.
+1. Immediately call get_hard_constraint_progress.
+2. Read the "recommended_next_step" and the list of broken hard constraints.
 3. Call declare_fix_target with the exact constraint_number you will fix next (from HARD_CONSTRAINTS.txt).
-4. Make ONE small targeted edit for that declared constraint.
+4. Make ONE small, targeted edit following the recommendation (especially for availability/"chỉ dạy" issues — use ForbiddenIntervals or equivalent).
 5. Run again and repeat.
 
-The system will block you from editing if you skip declare_fix_target after a run. Fix one constraint at a time using the tool advice (especially ForbiddenIntervals for availability).
+Do not ignore the tool's advice. Do not rewrite large parts of the code. Fix one broken constraint at a time.
 
 You will be judged on whether you successfully submit cells that satisfy hard constraints, not on beauty of code.
 
@@ -660,15 +660,15 @@ Start now. Be extremely disciplined.`
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Here is the timetable problem (JSON):\n${JSON.stringify(problem, null, 2)}\n\nHARD CONSTRAINT CHECKLIST (you must satisfy all of these):\n${hardList}\n\nYou must follow this exact STRICT loop:
+      content: `Here is the timetable problem (JSON):\n${JSON.stringify(problem, null, 2)}\n\nHARD CONSTRAINT CHECKLIST (you must satisfy all of these):\n${hardList}\n\nYou must follow this exact loop:
 After every run:
 - Call get_hard_constraint_progress
-- Read the recommended_next_step
+- Read the recommended_next_step carefully (especially for "chỉ dạy" / availability problems)
 - Call declare_fix_target (with the constraint_number from HARD_CONSTRAINTS.txt)
-- Make ONE small targeted edit for the declared constraint
+- Make ONE small targeted fix following the advice
 - Run again
 
-The system enforces declare_fix_target — you will be blocked from editing if you skip it after a run. Fix one at a time. After cells + 0 hard violations (or max ~7 runs), submit.
+Do not rewrite big parts of the code. Fix one broken hard constraint at a time using the tool's guidance. After you have cells + 0 hard violations (or after max ~7 runs), submit.
 
 Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
     },
