@@ -132,7 +132,12 @@ export type SolverRequestPayload = {
   debug?: boolean
   trace?: boolean
   userNotes?: string
-  /** Use the new Pi Coding Agent engine (headless, sandboxed) */
+  /**
+   * Engine selection.
+   * - 'legacy': Default orchestrated flow.
+   * - 'pi-agent': Legacy name kept for backward compatibility.
+   *   Routes to the current direct Lowprizo + devstral implementation.
+   */
   engine?: 'legacy' | 'pi-agent'
 
   /** Optional: override model and baseURL for the direct agent (e.g. OpenRouter + Claude) */

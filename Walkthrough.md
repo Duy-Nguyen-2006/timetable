@@ -15,6 +15,12 @@
   - Sau revert: Hard datasets (DS2 + DS5) phục hồi tốt → 2/2 success (32 cells và 12 cells, hard true).
 - Mục tiêu: Tìm cân bằng giữa độ dài prompt và khả năng model tuân thủ loop. (Kết luận tạm: devstral cần prompt explicit rõ ràng hơn là file ngoài).
 
+- [x] Dọn "thừa Pi naming":
+  - Xóa alias `runTimetableWithPiAgent` và special-case routing.
+  - Giữ chuỗi 'pi-agent' trong type chỉ để backward compatibility (clients cũ vẫn gửi được).
+  - Làm sạch comment, không còn nhầm lẫn "Pi Coding Agent" với implementation hiện tại.
+  - Low risk theo GitNexus impact.
+
 ### Current Status (as of this push - 2026-05-26)
 **Kết quả test toàn bộ 6 datasets (devstral-latest, first-run, tất cả cải tiến hiện tại):**
 - **4/6 thành công** (cells + hard constraints satisfied)

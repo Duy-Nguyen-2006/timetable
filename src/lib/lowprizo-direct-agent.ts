@@ -960,5 +960,5 @@ export async function forceSubmitLastSolverIfPossible(sandboxDir: string): Promi
   return null
 }
 
-// Drop-in replacement export so existing code (service.ts) can keep using the same name
-export { runLowprizoDirectAgent as runTimetableWithPiAgent }
+// Note: The old alias `runTimetableWithPiAgent` was removed as part of cleaning up legacy Pi naming.
+// The current implementation is the direct Lowprizo agent. Clients using engine: 'pi-agent' are still supported for backward compatibility.
