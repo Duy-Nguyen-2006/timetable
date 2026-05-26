@@ -4,8 +4,18 @@ import http from 'node:http'
 import path from 'node:path'
 import fs from 'node:fs'
 
+if (process.platform === 'linux') {
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('disable-gpu')
+  app.commandLine.appendSwitch('disable-gpu-compositing')
+  app.commandLine.appendSwitch('disable-gpu-vsync')
+  app.commandLine.appendSwitch('disable-software-rasterizer')
+  app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor')
+}
+
 const isDev = !app.isPackaged
 let serverProcess = null
+let mainWindow = null
 
 // Use string concatenation to avoid nested template literal pitfalls
 const LOADING_URL = 'data:text/html,' + encodeURIComponent(
@@ -141,6 +151,21 @@ async function startServer() {
   return `http://127.0.0.1:${port}`
 }
 
+function stopServer() {
+  if (!serverProcess) return
+
+  try {
+    serverProcess.removeAllListeners()
+    serverProcess.stdout?.removeAllListeners('data')
+    serverProcess.stderr?.removeAllListeners('data')
+    if (!serverProcess.killed) serverProcess.kill()
+  } catch {
+    // ignore cleanup errors during shutdown
+  }
+
+  serverProcess = null
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -156,6 +181,11 @@ async function createWindow() {
     },
   })
 
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
+
   await win.loadURL(LOADING_URL)
   win.show()
 
@@ -167,26 +197,28 @@ async function createWindow() {
   }
 }
 
-// Suppress VSync/GL errors on Linux (DRM vsync unavailable on Wayland/VMs/some drivers)
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('disable-gpu-vsync')
-  app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor')
-}
-
 app.whenReady().then(createWindow)
 
+app.on('browser-window-created', (_event, window) => {
+  if (process.platform !== 'linux') return
+
+  window.once('ready-to-show', () => {
+    try {
+      window.setBackgroundColor('#050505')
+    } catch {
+      // no-op
+    }
+  })
+})
+
 app.on('window-all-closed', () => {
-  if (serverProcess) {
-    serverProcess.kill()
-    serverProcess = null
-  }
+  stopServer()
+  mainWindow = null
 
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', () => {
-  if (serverProcess) {
-    serverProcess.kill()
-    serverProcess = null
-  }
+  stopServer()
+  mainWindow = null
 })

@@ -62,7 +62,6 @@ function createSandbox(): Sandbox {
   }
 
   // Best performing bootstrap so far for hard datasets: "Produce cells no matter what" first.
-  // This was the only version that ever got DS2 to submit real cells.
   const skeleton = `"""
 BEST BOOTSTRAP FOR HARD DATASETS (proven to work on DS2)
 Priority: Get cells on the board as fast as possible.
@@ -244,6 +243,17 @@ function getToolDefinitions() {
         },
       },
     },
+    {
+      type: 'function' as const,
+      function: {
+        name: 'get_hard_constraint_progress',
+        description: 'Get clear status of all hard constraints: how many are satisfied vs still violated, with a short list of the broken ones. Use this often to know exactly what to fix next.',
+        parameters: {
+          type: 'object',
+          properties: {},
+        },
+      },
+    },
   ]
 }
 
@@ -331,14 +341,24 @@ async function executeTool(
         })
 
         let guidance = ''
+        const previousBest = lastProducedCells.length
+        const improvement = feedback.cells_count > previousBest ? ' (improved)' : ''
+
+        // Build explicit hard constraint status
+        const hardViolList = (feedback.violations || [])
+          .filter((v: any) => v.violated)
+          .slice(0, 5)
+          .map((v: any) => `- ${v.description || v.constraint_id || 'Unknown hard constraint'}`)
+          .join('\n');
+
         if (feedback.status === 'error') {
-          guidance = `CRITICAL ERROR: Solver crashed.\nDiagnostics: ${feedback.diagnostics.slice(0,3).join(' | ')}\nFix the code immediately.`
+          guidance = `CRITICAL ERROR: Solver crashed.\n${feedback.diagnostics.slice(0,2).join('\n')}\n→ Fix the code bug before adding more constraints.`
         } else if (hardViolations > 0) {
-          guidance = `PROGRESS: ${feedback.cells_count} cells. Still ${hardViolations} hard violations.\nBest so far: ${lastProducedCells.length} cells.\nAfter 5+ runs you should submit your best version.`
+          guidance = `Current: ${feedback.cells_count} cells${improvement} | Remaining hard violations: ${hardViolations}\nStill broken:\n${hardViolList}\nBest so far: ${previousBest} cells\n→ Make one targeted fix for the broken hard constraints above.`
         } else if (feedback.cells_count > 0) {
-          guidance = `EXCELLENT: Produced ${feedback.cells_count} cells with 0 hard violations.\nCALL submit_solution NOW with these cells.`
+          guidance = `GOOD: ${feedback.cells_count} cells and 0 hard violations.\n→ You have a valid solution. Call submit_solution, or continue to optimize soft constraints if you want.`
         } else {
-          guidance = 'Solver ran successfully but produced 0 cells. The model is not generating any assignments.'
+          guidance = `Solver ran with no errors but produced 0 cells.\n→ The current code is not assigning anything. Fix the basic variable/constraint setup first.`
         }
 
         // Track best result
@@ -387,6 +407,52 @@ async function executeTool(
         }
       }
 
+      case 'get_hard_constraint_progress': {
+        const latest = attemptHistory.length > 0 ? attemptHistory[attemptHistory.length - 1] : null
+        const cells = latest?.result?.cells_count ?? 0
+        const hardViolCount = latest?.result?.hard_violations ?? 0
+
+        // Read the numbered checklist from the file written in the sandbox
+        let checklist = []
+        try {
+          const checklistContent = fs.readFileSync(path.join(dir, 'HARD_CONSTRAINTS.txt'), 'utf8')
+          checklist = checklistContent.split('\n').filter(l => l.trim())
+        } catch {}
+
+        // Build a clean status for each hard constraint (simple heuristic based on violations)
+        // For a more accurate version we could re-validate, but this is fast and useful for the model
+        const brokenDetails = (latest?.result?.violations || [])
+          .filter((v: any) => v.violated)
+          .slice(0, 6)
+          .map((v: any) => v.description || v.constraint_id || 'Unknown hard constraint')
+
+        // Make advice much more prescriptive for common hard cases (especially availability)
+        let recommended = 'Pick one broken hard constraint and make a small, targeted edit. Then run again.';
+        const brokenText = brokenDetails.join(' ').toLowerCase();
+
+        if (brokenText.includes('chỉ dạy') || brokenText.includes('không dạy')) {
+          recommended = 'This looks like a teacher availability issue. Add a ForbiddenIntervals or similar constraint for the restricted teacher on the forbidden days/periods. Do not rewrite the whole solver.';
+        } else if (hardViolCount > 0) {
+          recommended = 'Focus on one specific hard constraint from the broken list. Make the smallest possible edit to fix it, then re-run and check this tool again.';
+        }
+
+        const progress = {
+          total_hard: checklist.length || 'unknown',
+          cells_produced: cells,
+          hard_violations_remaining: hardViolCount,
+          broken_hard_constraints: brokenDetails,
+          status: hardViolCount === 0 
+            ? 'All known hard constraints appear satisfied in the last run.' 
+            : `${hardViolCount} hard constraint(s) still violated in the last run.`,
+          recommended_next_step: recommended
+        }
+
+        return {
+          ok: true,
+          ...progress
+        }
+      }
+
       default:
         return { ok: false, error: `Unknown tool: ${name}` }
     }
@@ -427,6 +493,14 @@ export async function runLowprizoDirectAgent(
 
   const problem = buildSolverProblemContext(payload, requestId)
 
+  // Create a clean, explicit hard constraint checklist for the agent (greatly helps first-run performance)
+  const hardList = (problem.parsedHard || []).map((h: any, i: number) => 
+    `${i+1}. ${h.original || h.text || JSON.stringify(h)}`
+  ).join('\n');
+
+  // Write the hard constraint checklist to a file so the agent (and tools) can easily reference it
+  fs.writeFileSync(path.join(dir, 'HARD_CONSTRAINTS.txt'), hardList || 'No hard constraints provided.')
+
   const systemPrompt = `You are a disciplined OR-Tools (cp_model) developer. Your ONLY mission is to produce cells and call submit_solution within a small number of attempts. You are inside sandbox: ${dir}
 
 CRITICAL RULES FOR DEVSTRAL (follow exactly):
@@ -436,13 +510,25 @@ CRITICAL RULES FOR DEVSTRAL (follow exactly):
 4. Your goal is to produce SOME valid cells quickly, not a perfect solution.
 5. After 5-6 runs at most, you MUST call submit_solution with whatever cells you have (even if soft constraints are not perfect).
 
+HARD CONSTRAINTS YOU MUST SATISFY 100% (your explicit checklist):
+${hardList}
+
 MANDATORY BEHAVIOR:
 - First action: read solver.py to see the current skeleton.
 - Then make targeted edits using edit_file on specific sections only.
 - Produce cells as early as possible (even a partial timetable is better than nothing).
 - If after 5 runs you still have 0 cells → submit anyway with whatever you have.
 
-TOOLS: read_file, write_file, edit_file, run_python, submit_solution, read_attempt_history
+TOOLS: read_file, write_file, edit_file, run_python, submit_solution, read_attempt_history, get_hard_constraint_progress
+
+MANDATORY LOOP (you must follow this):
+After every run_python:
+1. Immediately call get_hard_constraint_progress.
+2. Read the "recommended_next_step" and the list of broken hard constraints.
+3. Make ONE small, targeted edit following the recommendation (especially for availability/"chỉ dạy" issues — use ForbiddenIntervals or equivalent).
+4. Run again and repeat.
+
+Do not ignore the tool's advice. Do not rewrite large parts of the code. Fix one broken constraint at a time.
 
 You will be judged on whether you successfully submit cells that satisfy hard constraints, not on beauty of code.
 
@@ -452,7 +538,16 @@ Start now. Be extremely disciplined.`
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Here is the timetable problem (JSON):\n${JSON.stringify(problem, null, 2)}\n\nFollow these rules strictly:\n1. Read the current solver.py skeleton first.\n2. Only edit specific sections using edit_file.\n3. After every run, seriously consider calling read_attempt_history.\n4. Produce cells as fast as possible.\n5. After maximum 6 runs, you MUST submit (even if imperfect).\n\nStart by reading solver.py now.`,
+      content: `Here is the timetable problem (JSON):\n${JSON.stringify(problem, null, 2)}\n\nHARD CONSTRAINT CHECKLIST (you must satisfy all of these):\n${hardList}\n\nYou must follow this exact loop:
+After every run:
+- Call get_hard_constraint_progress
+- Read the recommended_next_step carefully (especially for "chỉ dạy" / availability problems)
+- Make ONE small targeted fix following the advice
+- Run again
+
+Do not rewrite big parts of the code. Fix one broken hard constraint at a time using the tool's guidance. After you have cells + 0 hard violations (or after max ~7 runs), submit.
+
+Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
     },
   ]
 
