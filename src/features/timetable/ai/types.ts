@@ -132,6 +132,12 @@ export type SolverRequestPayload = {
   debug?: boolean
   trace?: boolean
   userNotes?: string
+  /** Use the new Pi Coding Agent engine (headless, sandboxed) */
+  engine?: 'legacy' | 'pi-agent'
+
+  /** Optional: override model and baseURL for the direct agent (e.g. OpenRouter + Claude) */
+  baseURL?: string
+  model?: string
 }
 
 export type SolverExecutionOutput = {

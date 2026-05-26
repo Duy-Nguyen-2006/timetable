@@ -64,7 +64,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **1c26bd75-473f-4ad2-876f-a3f8557e3f6b** (1573 symbols, 2812 relationships, 65 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **timetable** (1660 symbols, 2981 relationships, 78 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -87,10 +87,10 @@ This project is indexed by GitNexus as **1c26bd75-473f-4ad2-876f-a3f8557e3f6b** 
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/1c26bd75-473f-4ad2-876f-a3f8557e3f6b/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/1c26bd75-473f-4ad2-876f-a3f8557e3f6b/clusters` | All functional areas |
-| `gitnexus://repo/1c26bd75-473f-4ad2-876f-a3f8557e3f6b/processes` | All execution flows |
-| `gitnexus://repo/1c26bd75-473f-4ad2-876f-a3f8557e3f6b/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/timetable/clusters` | All functional areas |
+| `gitnexus://repo/timetable/processes` | All execution flows |
+| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

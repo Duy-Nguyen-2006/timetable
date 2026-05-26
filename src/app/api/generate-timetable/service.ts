@@ -23,6 +23,7 @@ import { getSandboxLogPath, runSolverDirect } from '@/lib/sandbox'
 import { buildSolverProblemContext } from '@/lib/timetable-problem'
 import type { SolverProblemContext } from '@/lib/timetable-problem'
 import { validateTimetableResult } from '@/lib/timetable-validator'
+import { runTimetableWithPiAgent } from '@/lib/lowprizo-direct-agent'
 
 const PI_MAX_ATTEMPTS = 3
 const DEFAULT_PI_MODEL = 'devstral-latest'
@@ -910,6 +911,24 @@ export async function runPiOrchestratedLoop(
   requestId = randomUUID(),
   deps: PiRuntimeDependencies = {},
 ): Promise<TimetableSolveResult> {
+  // === NEW: Pi Coding Agent engine (headless, sandboxed, autonomous) ===
+  // When user explicitly requests engine: 'pi-agent' (or we decide to flip default later)
+  if (input.engine === 'pi-agent') {
+    emit?.({ type: 'status', message: 'Khởi chạy Pi Coding Agent (sandboxed)...', iteration: 1, maxIterations: 1 })
+    try {
+      return await runTimetableWithPiAgent(input, {
+        apiKey,
+        baseURL: input.baseURL,
+        model: input.model,
+        onProgress: emit ? (e) => emit(e as any) : undefined,
+        debug: !!input.debug,
+      })
+    } catch (err: any) {
+      emit?.({ type: 'error', message: `Pi Agent thất bại: ${err?.message || err}` })
+      // Fall through to legacy as graceful degradation (optional)
+    }
+  }
+
   const startedAt = Date.now()
   const normalized = buildSolverProblemContext(input, requestId)
   const runtimeAttempts: PiRuntimeAttemptRecord[] = []
