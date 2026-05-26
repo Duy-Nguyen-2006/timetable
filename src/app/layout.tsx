@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Timetable - Thời khóa biểu điện tử",
-  description: "Thiết lập giảng dạy điện tử - Xếp thời khóa biểu tự động bằng AI",
+  description: "Thiết lập giảng dạy điện tử - Nhập dữ liệu và xem màn hình xếp lịch",
 };
 
 export default function RootLayout({

@@ -26,18 +26,10 @@ import {
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
-import { generateTimetableWithAI } from './ai/client'
-import { useApiKeyStore } from './ai/api-key-store'
-import type {
-  AgentEvent,
-  AgentLifecycleEvent,
-  AgentLifecyclePhase,
-  CheckerReport,
-  ConstraintCheckItem,
-  DeterministicValidationReport,
-  SolverRequestPayload,
-  TimetableSolveResult,
-} from './ai/types'
+// AI generation imports removed — only data entry + payload export kept
+// import { generateTimetableWithAI } from './ai/client'
+// import { useApiKeyStore } from './ai/api-key-store'
+// import type { ... } from './ai/types'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -60,7 +52,7 @@ import {
   teacherColors,
 } from './constants'
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
-import { normalizeAssignments } from '@/lib/timetable-prompt'
+import { normalizeAssignments } from './utils'
 
 const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
