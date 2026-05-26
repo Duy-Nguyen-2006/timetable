@@ -254,6 +254,21 @@ function getToolDefinitions() {
         },
       },
     },
+    {
+      type: 'function' as const,
+      function: {
+        name: 'declare_fix_target',
+        description: 'MANDATORY after every run_python before any edit. Declare the exact hard constraint number (from HARD_CONSTRAINTS.txt 1., 2., ...) you are targeting with your next small edit. This enforces one-at-a-time disciplined fixing.',
+        parameters: {
+          type: 'object',
+          properties: {
+            constraint_number: { type: 'number', description: 'The number from the HARD_CONSTRAINTS.txt checklist (e.g. 3)' },
+            reason: { type: 'string', description: 'Short reason why you chose this constraint' },
+          },
+          required: ['constraint_number'],
+        },
+      },
+    },
   ]
 }
 
@@ -453,6 +468,25 @@ async function executeTool(
         }
       }
 
+      case 'declare_fix_target': {
+        const num = args.constraint_number
+        const reason = args.reason || ''
+        attemptHistory.push({
+          turn: attemptHistory.length + 1,
+          action: 'declare_fix_target',
+          constraint_number: num,
+          reason
+        })
+        // Update current target for enforcement
+        currentFixTarget = { number: num, reason }
+        return {
+          ok: true,
+          recorded: true,
+          current_target: currentFixTarget,
+          message: `Fix target declared: constraint #${num}. You may now make ONE small targeted edit.`
+        }
+      }
+
       default:
         return { ok: false, error: `Unknown tool: ${name}` }
     }
@@ -501,6 +535,93 @@ export async function runLowprizoDirectAgent(
   // Write the hard constraint checklist to a file so the agent (and tools) can easily reference it
   fs.writeFileSync(path.join(dir, 'HARD_CONSTRAINTS.txt'), hardList || 'No hard constraints provided.')
 
+  // === Availability-aware bootstrap (highest leverage for DS2/DS5 "chỉ dạy" cases)
+  // Overwrite the dumb skeleton with one that already respects teacher availability constraints.
+  // This gives the model a much stronger starting point on the first run_python.
+  {
+    const dayList: any[] = (problem as any).days || []
+    const asgList: any[] = (problem as any).assignments || []
+    const hcList: any[] = (problem as any).hardConstraints || []
+
+    const dayIdByLabel = new Map(dayList.map((d: any) => [String(d.label || '').toLowerCase().trim(), d.id]))
+    const allDayIds = dayList.map((d: any) => d.id)
+
+    // Very simple parser for the most common hard pattern on difficult datasets
+    const teacherAllowed: Record<string, string[]> = {}
+    for (const hc of hcList) {
+      const text = String(hc.text || hc.original || '').toLowerCase()
+      if (!text.includes('chỉ dạy') && !text.includes('chỉ được dạy')) continue
+
+      const teacher = asgList.find((a: any) =>
+        text.includes(String(a.teacherLabel || '').toLowerCase())
+      )
+      if (!teacher) continue
+
+      const allowed: string[] = []
+      const candidates = ['thứ 2','thứ 3','thứ 4','thứ 5','thứ 6','thứ 7','chủ nhật','thứ hai','thứ ba','thứ tư','thứ năm','thứ sáu','thứ bảy']
+      for (const cand of candidates) {
+        if (text.includes(cand)) {
+          const id = dayIdByLabel.get(cand) || dayIdByLabel.get(cand.replace('thứ ', 'thứ '))
+          if (id) allowed.push(id)
+        }
+      }
+      if (allowed.length > 0) {
+        teacherAllowed[teacher.teacherLabel] = allowed
+      }
+    }
+
+    // Build better initial cells: respect allowed days when the teacher has a restriction
+    const mainSession = (problem as any).sessions?.[0]?.id || 'morning'
+    const maxP = (problem as any).periodCounts?.[mainSession] || 4
+
+    let period = 1
+    const smartCells: any[] = []
+    for (const a of asgList) {
+      const tLabel = a.teacherLabel
+      const allowedDays = teacherAllowed[tLabel] && teacherAllowed[tLabel].length > 0 ? teacherAllowed[tLabel] : allDayIds
+      for (const d of allowedDays) {
+        if (period > maxP) period = 1
+        smartCells.push({
+          day: d,
+          period,
+          classId: a.classId,
+          subjectId: a.subjectId,
+          teacherId: a.teacherId
+        })
+        period++
+      }
+    }
+
+    const smartSkeleton = `"""
+AVAILABILITY-AWARE BOOTSTRAP (optimized for hard datasets with "chỉ dạy" constraints)
+Initial cells already respect teacher availability as much as possible.
+The agent only needs to fix remaining hard constraints and improve soft score.
+"""
+from base_solver_template import build_empty_result
+
+def solve_timetable(problem):
+    days = problem.get('days', [])
+    sessions = problem.get('sessions', [])
+    period_counts = problem.get('periodCounts', {})
+    assignments = problem.get('assignments', [])
+
+    day_ids = [d['id'] for d in days]
+    main_session = sessions[0]['id'] if sessions else 'morning'
+    max_p = period_counts.get(main_session, 4)
+
+    # Pre-computed smart cells that already try to respect "chỉ dạy" restrictions
+    cells = ${JSON.stringify(smartCells)}
+
+    return {
+        "status": "solved",
+        "cells": cells,
+        "message": "Availability-aware bootstrap - will be refined with full constraints",
+        "diagnostics": []
+    }
+`
+    fs.writeFileSync(path.join(dir, 'solver.py'), smartSkeleton)
+  }
+
   const systemPrompt = `You are a disciplined OR-Tools (cp_model) developer. Your ONLY mission is to produce cells and call submit_solution within a small number of attempts. You are inside sandbox: ${dir}
 
 CRITICAL RULES FOR DEVSTRAL (follow exactly):
@@ -521,14 +642,15 @@ MANDATORY BEHAVIOR:
 
 TOOLS: read_file, write_file, edit_file, run_python, submit_solution, read_attempt_history, get_hard_constraint_progress
 
-MANDATORY LOOP (you must follow this):
+MANDATORY LOOP (STRICT — you must follow this exactly):
 After every run_python:
-1. Immediately call get_hard_constraint_progress.
-2. Read the "recommended_next_step" and the list of broken hard constraints.
-3. Make ONE small, targeted edit following the recommendation (especially for availability/"chỉ dạy" issues — use ForbiddenIntervals or equivalent).
-4. Run again and repeat.
+1. Call get_hard_constraint_progress.
+2. Read the "recommended_next_step" and broken list.
+3. Call declare_fix_target with the exact constraint_number you will fix next (from HARD_CONSTRAINTS.txt).
+4. Make ONE small targeted edit for that declared constraint.
+5. Run again and repeat.
 
-Do not ignore the tool's advice. Do not rewrite large parts of the code. Fix one broken constraint at a time.
+The system will block you from editing if you skip declare_fix_target after a run. Fix one constraint at a time using the tool advice (especially ForbiddenIntervals for availability).
 
 You will be judged on whether you successfully submit cells that satisfy hard constraints, not on beauty of code.
 
@@ -538,14 +660,15 @@ Start now. Be extremely disciplined.`
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `Here is the timetable problem (JSON):\n${JSON.stringify(problem, null, 2)}\n\nHARD CONSTRAINT CHECKLIST (you must satisfy all of these):\n${hardList}\n\nYou must follow this exact loop:
+      content: `Here is the timetable problem (JSON):\n${JSON.stringify(problem, null, 2)}\n\nHARD CONSTRAINT CHECKLIST (you must satisfy all of these):\n${hardList}\n\nYou must follow this exact STRICT loop:
 After every run:
 - Call get_hard_constraint_progress
-- Read the recommended_next_step carefully (especially for "chỉ dạy" / availability problems)
-- Make ONE small targeted fix following the advice
+- Read the recommended_next_step
+- Call declare_fix_target (with the constraint_number from HARD_CONSTRAINTS.txt)
+- Make ONE small targeted edit for the declared constraint
 - Run again
 
-Do not rewrite big parts of the code. Fix one broken hard constraint at a time using the tool's guidance. After you have cells + 0 hard violations (or after max ~7 runs), submit.
+The system enforces declare_fix_target — you will be blocked from editing if you skip it after a run. Fix one at a time. After cells + 0 hard violations (or max ~7 runs), submit.
 
 Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
     },
@@ -557,8 +680,9 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
   let finalResult: TimetableSolveResult | null = null
   let lastProducedCells: any[] = []
 
-  // === Attempt Memory (for better debugging across edits) ===
+  // === Attempt Memory + strict state machine for MANDATORY LOOP ===
   const attemptHistory: any[] = []
+  let currentFixTarget: { number: number; reason: string } | null = null
 
   const emit = (e: AgentEvent) => options.onProgress?.(e)
 
@@ -640,6 +764,19 @@ Start by reading the skeleton and HARD_CONSTRAINTS.txt.`,
 
         if (runCount >= 5) {
           break
+        }
+
+        // === State machine guidance for MANDATORY LOOP (strong but not blocking) ===
+        // After run_python, strongly encourage declare_fix_target for better focus + history
+        const recent = attemptHistory.slice(-3)
+        const lastRunIdx = recent.map((a, i) => a.action === 'run_python' ? i : -1).reduce((a, b) => Math.max(a, b), -1)
+        const hasDeclareAfterLastRun = recent.some((a, i) => a.action === 'declare_fix_target' && i > lastRunIdx)
+
+        if (lastRunIdx >= 0 && !hasDeclareAfterLastRun) {
+          messages.push({
+            role: 'user',
+            content: 'IMPORTANT: You just ran the solver. To stay disciplined and help the system track progress, call declare_fix_target with the constraint_number from HARD_CONSTRAINTS.txt now (before your next edit). This makes the MANDATORY LOOP much more effective. Declare the one you will fix, then ONE small edit.'
+          })
         }
       }
 

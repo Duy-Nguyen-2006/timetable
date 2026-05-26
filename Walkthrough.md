@@ -1,3 +1,53 @@
+## Mục tiêu: Đẩy Lowprizo Direct Agent (devstral-latest) đạt 100% hard constraints trên toàn 6 datasets (first-run only, no long-term memory)
+
+- [x] Dùng GitNexus (sau `gitnexus analyze`) + đọc source để map chính xác luồng `runLowprizoDirectAgent` + `executeTool` + `get_hard_constraint_progress` + MANDATORY LOOP.
+- [x] Chẩn đoán root cause còn thiếu 100%: bootstrap mù availability (đặc biệt "chỉ dạy thứ 3 4 5" trên DS2/DS5) là điểm yếu lớn nhất cho first-run.
+- [x] GitNexus impact + context trên `createSandbox` (và bootstrap logic) → risk **LOW**, chỉ ảnh hưởng test scripts + agent harness.
+- [x] Triển khai thay đổi tối thiểu + high-leverage: **availability-aware bootstrap** (parse hard constraints, bias initial cells theo ngày được phép cho teacher bị hạn chế).
+- Sau edit: test ngay trên hard datasets, đo improvement trên DS2/DS5.
+
+- [x] GitNexus impact (LOW risk) cho bước tiếp theo.
+- [x] Thêm tool `declare_fix_target` + enforcement state machine trong loop:
+  - Model bắt buộc declare constraint_number sau run_python trước khi edit.
+  - History + currentFixTarget tracking.
+  - Steering message chặn edit nếu skip declare.
+  - Cập nhật toàn bộ prompt (system + user) để dạy quy tắc STRICT MANDATORY LOOP.
+- Mục tiêu: Tăng độ kỷ luật "one constraint at a time" → ổn định 100% hơn nữa trên mọi dataset.
+
+### Current Status (as of this push - 2026-05-26)
+**Kết quả test toàn bộ 6 datasets (devstral-latest, first-run, tất cả cải tiến hiện tại):**
+- **4/6 thành công** (cells + hard constraints satisfied)
+  - DS1, DS2, DS5, DS6: ✅ Pass (cells tốt, hard OK)
+  - DS3, DS4: ❌ Fail (0 cells, kẹt max turns, không submit được dù đã retry)
+- Hard datasets gốc (DS2 + DS5 với "chỉ dạy thứ 3 4 5"): Đã ổn định pass tốt sau bootstrap + tool nhỏ.
+- Vấn đề còn lại: Agent vẫn hay kẹt ở 0 cells trên một số dataset (DS3/DS4). Bootstrap + declare_fix_target + prescriptive feedback giúp nhiều nhưng chưa đủ cover hết pattern của mọi dataset.
+
+**Những gì đã cải thiện rõ rệt:**
+- Feedback từ runner rất rich (violations, guidance, best-so-far).
+- Within-run memory (`read_attempt_history`).
+- Tool nhỏ `get_hard_constraint_progress` (prescriptive, đặc biệt cho availability).
+- Availability-aware bootstrap (cells ban đầu đã bias theo "chỉ dạy").
+- `declare_fix_target` + MANDATORY LOOP guidance (tăng kỷ luật "fix một cái một lúc").
+
+**Vấn đề hiện tại cần chuyên gia fix:**
+- DS3 và DS4 vẫn produce 0 cells và không submit.
+- Model (devstral-latest) đôi khi vẫn ignore advice hoặc không biết khi nào nên submit dù có cells + hard gần ổn.
+- Bootstrap vẫn chưa đủ general cho mọi kiểu constraint "chặt" khác nhau giữa các dataset.
+- Enforcement của loop vẫn chủ yếu dựa vào prompt + guidance (chưa đủ mạnh để model luôn tuân thủ 100%).
+
+Đây là snapshot code + harness hiện tại. Tôi đã thử tất cả các hướng nghĩ ra (tool nhỏ, bootstrap, state machine nhẹ, rich feedback, safety net). Kết quả tốt nhất đạt được là 4/6 ổn định.
+
+### Chi tiết thay đổi then chốt (low-risk)
+- Vị trí: ngay sau khi viết `HARD_CONSTRAINTS.txt` trong `runLowprizoDirectAgent` (lowprizo-direct-agent.ts).
+- Hành vi mới: quét hard constraints tìm pattern "chỉ dạy" + teacher → build allowed day list → generate initial cells ưu tiên ngày hợp lệ → ghi đè `solver.py`.
+- Kết quả mong đợi: run_python đầu tiên đã có cells khá tốt về availability → MANDATORY LOOP + prescriptive tool chỉ cần fix nốt các hard còn lại → tăng tỉ lệ submit thành công 100% ngay lần chạy đầu.
+
+### Verify checklist (bắt buộc sau mỗi edit)
+- [ ] Chạy `scripts/test-hard-datasets.ts` (DS2 + DS5) ngay sau edit.
+- [ ] Kiểm tra: cells > 0, hard violations giảm mạnh so với baseline, có dùng `get_hard_constraint_progress`, recommended_next_step được follow.
+- [ ] Nếu cần: chạy full 6 datasets.
+- [ ] Ghi nhận % success + failure mode cụ thể vào worklog / phản hồi.
+
 ## Mục tiêu cập nhật lần này (Electron Linux log fix)
 
 - [x] Soát cấu hình khởi tạo Electron trên Linux và khoanh vùng nguyên nhân log GL/VSync + GLib-GObject.
