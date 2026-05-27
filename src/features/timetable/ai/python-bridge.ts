@@ -30,6 +30,32 @@ export async function executeGeneratedCode(
     return (window as any).electron.python.executeCode(code, input, timeout);
   }
 
+  // Web fallback: call server-side executor route.
+  if (typeof window !== 'undefined') {
+    const response = await fetch('/api/ai/python-execute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code,
+        input,
+        timeoutMs: timeout,
+      }),
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok || !payload?.ok || !payload?.result) {
+      throw new Error(
+        payload?.error ||
+          `[python-bridge] Server executor failed with HTTP ${response.status}`
+      );
+    }
+
+    return payload.result as ExecutionResult;
+  }
+
   throw new Error(
     '[python-bridge] Python executor IPC is not available. Please run inside Electron app (with preload exposing window.electron.python.executeCode) or wire a server execution route.'
   );
