@@ -1,0 +1,37 @@
+## Error Type
+Build Error
+
+## Error Message
+Parsing ecmascript source code failed
+
+## Build Output
+./src/features/timetable/TimetableApp.tsx:2655:29
+Parsing ecmascript source code failed
+  2653 |                           )}
+  2654 |                         </div>
+> 2655 |                       </div>
+       |                             ^
+> 2656 |
+       | ^
+> 2657 |                       {aiLoading && (
+       | ^^^^^^^^^^^^^^^^^^^^^^^
+  2658 |                         <div className="mb-4 rounded-md border border-white/[0.08] bg-[#0a0a0a] p-4">
+  2659 |                           {/* Header with timer */}
+  2660 |                           <div className="mb-3 flex items-center justify-between">
+
+Expected '</', got 'jsx text (
+
+                      )'
+
+Import traces:
+  Client Component Browser:
+    ./src/features/timetable/TimetableApp.tsx [Client Component Browser]
+    ./src/app/page.tsx [Client Component Browser]
+    ./src/app/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./src/features/timetable/TimetableApp.tsx [Client Component SSR]
+    ./src/app/page.tsx [Client Component SSR]
+    ./src/app/page.tsx [Server Component]
+
+Next.js version: 16.1.3 (Turbopack)

@@ -1245,7 +1245,6 @@ const handleDownloadExcel = useCallback(() => {
     )
   
     return (
-    <>
     <main className="w-full overflow-x-hidden bg-[#0A0A0A] font-normal text-white">
       {page === 'select' ? (
         <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
@@ -3508,6 +3507,8 @@ const handleDownloadExcel = useCallback(() => {
         }}
         requireValid={isFirstRun}
       />
-    </>
+    </div>
   );
 }
+
+export default App;

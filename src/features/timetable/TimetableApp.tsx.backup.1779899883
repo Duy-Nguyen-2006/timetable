@@ -31,15 +31,6 @@ import { runLocalAgent } from './ai/local-agent'
 import { SettingsModal } from './SettingsModal'
 import type { AIProviderConfig } from './ai/types'
 import { Settings as SettingsIcon } from 'lucide-react'
-
-// Temporary shims for types that belonged to the removed remote AI layer (allows clean build)
-type AgentLifecyclePhase = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle';
-type AgentLifecycleEvent = any;
-type TimetableSolveResult = any;
-type ConstraintCheckItem = any;
-type DeterministicValidationReport = any;
-type CheckerReport = any;
-type SolverRequestPayload = any;
 import {
   classPresetGroups,
   constraintTypeList,
@@ -75,7 +66,6 @@ const STEP_LABELS: Record<AgentLifecyclePhase, string> = {
   running: 'Chay thu',
   checking: 'Kiem tra',
   fixing: 'Sua loi',
-  idle: 'Idle',
 }
 
 function formatDuration(ms: number) {
@@ -1088,7 +1078,7 @@ export default function App({ onBackToLanding }) {
               pushTimelineEvent({
                 id: crypto.randomUUID(),
                 phase: (event as any).phase || 'coding',
-                title: (event as any).message || event.type,
+                title: event.message || event.type,
                 detail: JSON.stringify(event).slice(0, 200),
                 status: 'active',
                 timestamp: new Date().toISOString(),
@@ -1099,26 +1089,100 @@ export default function App({ onBackToLanding }) {
 
 
 
+                    id: crypto.randomUUID(),
+                    phase: 'checking',
+                    title: `Checker accepted attempt ${event.attempt}`,
+                    detail: event.message,
+                    status: 'completed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['checker'],
+                  })
+                  break
+                case 'checker_infeasible':
+                  setAgentIteration(event.attempt)
+                  setAgentStatus(event.message)
+                  setAgentStep('checking')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'checking',
+                    title: `Checker marked attempt ${event.attempt} infeasible`,
+                    detail: event.message,
+                    status: 'failed',
+                    attempt: event.attempt,
+                    timestamp: new Date().toISOString(),
+                    tags: ['checker', 'infeasible'],
+                  })
+                  break
+                case 'verified':
+                  if (event.allSatisfied) {
+                    setAgentStep('checking')
+                    setAgentStatus('Tất cả ràng buộc thỏa mãn!')
+                  } else {
+                    const hardCount = event.violations.filter((v: { violated: boolean }) => v.violated).length
+                    if (hardCount > 0) {
+                      setAgentStep('fixing')
+                      setAgentStatus(`Phát hiện ${hardCount} vi phạm cứng, đang sửa...`)
+                    } else {
+                      setAgentStep('checking')
+                      setAgentStatus(`Có ${event.violations.length} ràng buộc mềm chưa tối ưu, hoàn thành...`)
+                    }
+                  }
+                  break
+                case 'debug':
+                  setAgentStatus(event.message)
+                  break
+                case 'result':
+                  setAgentStatus(event.data.message)
+                  setAgentStep(event.data.status === 'solved' ? 'checking' : 'idle')
+                  setAgentTimeline((current) => {
+                    const merged = [...current]
+                    const extra = event.data.lifecycleEvents ?? []
+                    const existingIds = new Set(merged.map((item) => item.id))
+                    extra.forEach((item) => {
+                      if (!existingIds.has(item.id)) {
+                        merged.push(item)
+                      }
+                    })
+                    return merged
+                  })
+                  break
+                case 'error':
+                  setAgentStatus(event.message)
+                  setAgentStep('fixing')
+                  pushTimelineEvent({
+                    id: crypto.randomUUID(),
+                    phase: 'fixing',
+                    title: 'Agent error',
+                    detail: event.message,
+                    status: 'failed',
+                    timestamp: new Date().toISOString(),
+                    tags: ['error'],
+                  })
+                  break
+              }
+              },
+        )
 
-        if (agentResult && agentResult.success && agentResult.finalResult) {
-          setAiResult(agentResult.finalResult);
-          setAgentStatus("Hoàn thành!");
-          setAgentStep("idle");
-        } else if (agentResult?.error) {
-          setAiError(agentResult.error);
+        if (agentResult.success && agentResult.finalResult) {
+          setAiResult(agentResult.finalResult as any)
+          setAgentStatus('Hoàn thành!')
+          setAgentStep('idle')
+        } else {
+          setAiError(agentResult.error || 'AI Agent không tạo được lời giải hợp lệ.')
         }
-      } catch (err) {
-        setAiError(err instanceof Error ? err.message : "Lỗi khi chạy AI Agent");
+      } catch (err: any) {
+        setAiError(err instanceof Error ? err.message : 'Lỗi khi chạy AI Agent')
       } finally {
-        setAiLoading(false);
+        setAiLoading(false)
         if (agentTimerRef.current) {
-          clearInterval(agentTimerRef.current);
-          agentTimerRef.current = null;
+          clearInterval(agentTimerRef.current)
+          agentTimerRef.current = null
         }
       }
   }
 
-const handleDownloadExcel = useCallback(() => {
+  const handleDownloadExcel = useCallback(() => {
     if (!aiResult || aiResult.status !== 'solved') return
 
     const headerRow: string[] = ['Thứ', 'Tiết']
@@ -1145,7 +1209,7 @@ const handleDownloadExcel = useCallback(() => {
 
           resultTableClassColumns.forEach((className) => {
             const entry = className
-              ? (solvedCellMap.get(cellKey) as any)?.entries?.find((item) => item.className === className)
+              ? solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className)
               : null
             dataRow.push(entry?.subject ?? '')
             dataRow.push(entry?.teacher ?? '')
@@ -1245,7 +1309,6 @@ const handleDownloadExcel = useCallback(() => {
     )
   
     return (
-    <>
     <main className="w-full overflow-x-hidden bg-[#0A0A0A] font-normal text-white">
       {page === 'select' ? (
         <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
@@ -1284,37 +1347,6 @@ const handleDownloadExcel = useCallback(() => {
                 </p>
               </div>
             </header>
-
-            {/* === AI Provider Configuration - Only on the first page (as requested) === */}
-            <div className="mb-6 rounded-lg border border-white/10 bg-[#111] p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-medium text-white/80">
-                    <SettingsIcon size={16} />
-                    Cấu hình AI Provider
-                  </div>
-                  <p className="mt-1 text-xs text-white/50">
-                    Cần thiết để sử dụng tính năng xếp lịch tự động bằng AI (LLM + OR-Tools)
-                  </p>
-                  {aiProvider ? (
-                    <div className="mt-2 text-xs text-emerald-400">
-                      Đã cấu hình: <span className="font-mono">{aiProvider.model}</span>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-xs text-amber-400">
-                      Chưa cấu hình — Bắt buộc phải thiết lập trước khi dùng AI
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => setShowSettingsModal(true)}
-                  className="mt-2 w-full rounded-md bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 active:bg-white/20 sm:mt-0 sm:w-auto"
-                >
-                  {aiProvider ? 'Thay đổi cấu hình' : 'Cấu hình ngay'}
-                </button>
-              </div>
-            </div>
 
             <div className="flex flex-col gap-3">
               <section className={`${panelClass} p-4`}>
@@ -3052,7 +3084,7 @@ const handleDownloadExcel = useCallback(() => {
                                               {row.period}
                                             </td>
                                             {resultTableClassColumns.map((className, classIndex) => {
-                                              const entry = className ? (solvedCellMap.get(cellKey) as any)?.entries?.find((item) => item.className === className) : null
+                                              const entry = className ? solvedCellMap.get(cellKey)?.entries.find((item) => item.className === className) : null
 
                                               return (
                                                 <Fragment key={`${cellKey}-${classIndex}-${className || 'blank'}`}>
@@ -3493,21 +3525,5 @@ const handleDownloadExcel = useCallback(() => {
           </main>
 
 
-      {/* AI Provider Settings Modal */}
-      <SettingsModal
-        open={showSettingsModal}
-        onOpenChange={(open) => {
-          setShowSettingsModal(open);
-          if (!open && isFirstRun && !aiProvider) setShowSettingsModal(true);
-        }}
-        initialConfig={aiProvider || undefined}
-        onSave={(config) => {
-          setAiProvider(config);
-          try { localStorage.setItem("tack_ai_provider_config", JSON.stringify(config)); } catch {}
-          setIsFirstRun(false);
-        }}
-        requireValid={isFirstRun}
-      />
-    </>
-  );
+  )
 }
