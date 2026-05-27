@@ -24,6 +24,8 @@ from openai import OpenAI
 load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise RuntimeError("API_KEY environment variable is required (set OpenRouter API key or compatible LLM provider key)")
 API_BASE = os.getenv("API_BASE", "https://openrouter.ai/api/v1")
 MODEL = os.getenv("MODEL", "deepseek/deepseek-v4-flash")
 
