@@ -8,3 +8,5 @@
 - [x] Locate assignment step validation flow
 - [x] Add assignment reference and period-total validation
 - [x] Verify validation changes
+- [x] Update assignment period mismatch warning copy
+- [x] Add popup notifications for delete/restore actions

@@ -653,8 +653,15 @@ export default function App({ onBackToLanding }) {
     setPeriods((current) => ({ ...current, [sessionId]: value }))
   }
 
-  const toggleDeletedPeriod = (dayId, sessionId, period) => {
+  const restoreDeletedPeriods = () => {
+    setDeletedPeriods({})
+  }
+
+  const toggleDeletedPeriod = (dayId: string, sessionId: string, period: number) => {
     const cellKey = getCellKey(dayId, sessionId, period)
+    const dayLabel = days.find((day) => day.id === dayId)?.label ?? dayId
+    const sessionLabel = sessions.find((session) => session.id === sessionId)?.label ?? sessionId
+    const willRestore = Boolean(deletedPeriods[cellKey])
     setDeletedPeriods((current) => {
       const next = { ...current }
       if (next[cellKey]) {
@@ -664,6 +671,11 @@ export default function App({ onBackToLanding }) {
       }
       return next
     })
+    window.alert(
+      willRestore
+        ? `Đã khôi phục tiết ${period} - ${sessionLabel} - ${dayLabel}.`
+        : `Đã xóa tiết ${period} - ${sessionLabel} - ${dayLabel} khỏi khung thời khóa biểu.`,
+    )
   }
 
   const parseLines = (input: string) =>
@@ -691,8 +703,9 @@ export default function App({ onBackToLanding }) {
     setTeacherInput('')
   }
 
-  const deleteTeacher = (name) => {
+  const deleteTeacher = (name: string) => {
     setTeacherList((current) => current.filter((teacher) => teacher !== name))
+    window.alert(`Đã xóa giáo viên ${name}.`)
   }
 
   const importSubject = (presetValue?: string) => {
@@ -712,8 +725,9 @@ export default function App({ onBackToLanding }) {
     setSubjectInput('')
   }
 
-  const deleteSubject = (name) => {
+  const deleteSubject = (name: string) => {
     setSubjectList((current) => current.filter((subject) => subject !== name))
+    window.alert(`Đã xóa môn ${name}.`)
   }
 
   const importClass = () => {
@@ -724,9 +738,15 @@ export default function App({ onBackToLanding }) {
     setClassInput('')
   }
 
-  const deleteClass = (name) => {
+  const deleteClass = (name: string) => {
+    const removedAssignmentCount = assignmentList.filter((assignment) => assignment.className === name).length
     setClassList((current) => current.filter((className) => className !== name))
     setAssignmentList((current) => current.filter((assignment) => assignment.className !== name))
+    window.alert(
+      removedAssignmentCount > 0
+        ? `Đã xóa lớp ${name} và ${removedAssignmentCount} phân công chuyên môn liên quan.`
+        : `Đã xóa lớp ${name}.`,
+    )
   }
 
   const addClass = (name) => {
@@ -866,8 +886,12 @@ export default function App({ onBackToLanding }) {
     setAssignmentDraft((current) => ({ ...current, weeklyPeriods: '' }))
   }
 
-    const deleteAssignment = (key) => {
+    const deleteAssignment = (key: string) => {
+      const deletedAssignment = assignmentList.find((assignment) => assignment.key === key)
       setAssignmentList((current) => current.filter((assignment) => assignment.key !== key))
+      if (deletedAssignment) {
+        window.alert(`Đã xóa phân công: ${deletedAssignment.teacher} - ${deletedAssignment.subject} - ${deletedAssignment.className} - ${deletedAssignment.weeklyPeriods} tiết.`)
+      }
     }
 
     const validateAssignmentsBeforeNext = () => {
@@ -888,7 +912,7 @@ export default function App({ onBackToLanding }) {
       }
 
       if (totalAssignedPeriods !== totalRequiredClassPeriods) {
-        setAssignmentValidationMessage(`Tổng số tiết cần xếp của tất cả các lớp (${totalRequiredClassPeriods}) phải bằng tổng số tiết được phân công chuyên môn (${totalAssignedPeriods}).`)
+        setAssignmentValidationMessage(`Tổng số tiết trong phân công chuyên môn là ${totalAssignedPeriods}, tổng số tiết cần xếp của tất cả các lớp là ${totalRequiredClassPeriods}.`)
         return false
       }
 
@@ -913,8 +937,12 @@ export default function App({ onBackToLanding }) {
     setConstraintDraft((current) => ({ ...current, text: '' }))
   }
 
-  const deleteConstraint = (id) => {
+  const deleteConstraint = (id: string) => {
+    const deletedConstraint = constraintList.find((constraint) => constraint.id === id)
     setConstraintList((current) => current.filter((constraint) => constraint.id !== id))
+    if (deletedConstraint) {
+      window.alert(`Đã xóa ràng buộc: ${deletedConstraint.text}`)
+    }
   }
 
   const pushTimelineEvent = useCallback((event: AgentLifecycleEvent) => {
@@ -1616,11 +1644,12 @@ export default function App({ onBackToLanding }) {
               <div className={`${panelClass} px-4 py-2.5 text-sm text-white/50`}>
                 <span className="font-medium text-white">Số tiết đang hoạt động:</span> {activePeriodCount}
               </div>
-              <button
-                type="button"
-                onClick={() => setDeletedPeriods({})}
-                className={ghostButtonClass}
-              >
+                <button
+                  type="button"
+                  onClick={restoreDeletedPeriods}
+                  className={ghostButtonClass}
+                >
+
                 <RotateCcw size={14} strokeWidth={1.5} />
                 Khôi phục tất cả
               </button>
