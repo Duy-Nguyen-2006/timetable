@@ -53,7 +53,22 @@ Hãy review và kết luận APPROVED hoặc đưa feedback chi tiết.
   }
 
   const content = payload.content || '';
-  const approved = content.toUpperCase().includes('APPROVED');
+  const normalized = content
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+  const hasExplicitReject =
+    /\bNOT\s+APPROVED\b/.test(normalized) ||
+    /\bKHONG\s+APPROVED\b/.test(normalized) ||
+    /\bREJECT\b/.test(normalized) ||
+    /\bTU\s*CHOI\b/.test(normalized)
+
+  const hasExplicitApprove =
+    /^\s*APPROVED\b/m.test(normalized) ||
+    /\bKET\s*LUAN\s*:\s*APPROVED\b/.test(normalized)
+
+  const approved = hasExplicitApprove && !hasExplicitReject
 
   return {
     approved,

@@ -1115,7 +1115,13 @@ export default function App({ onBackToLanding }) {
 
 
         if (agentResult && agentResult.success && agentResult.finalResult) {
-          setAiResult(agentResult.finalResult);
+          const normalizedResult = {
+            status: 'solved',
+            message: 'Đã tạo thời khóa biểu thành công.',
+            violations: [],
+            ...agentResult.finalResult,
+          }
+          setAiResult(normalizedResult);
           setAgentStatus("Hoàn thành!");
           setAgentStep("idle");
         } else if (agentResult?.error) {
