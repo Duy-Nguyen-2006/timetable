@@ -470,11 +470,12 @@ export default function App({ onBackToLanding }) {
   const [classInput, setClassInput] = useState('')
   const [classList, setClassList] = useState<string[]>([])
   const [assignmentDraft, setAssignmentDraft] = useState({ teacher: '', subject: '', className: '', weeklyPeriods: '' })
-  const [assignmentImportMode, setAssignmentImportMode] = useState('update')
-  const [bulkAssignmentText, setBulkAssignmentText] = useState('')
-  const [bulkAssignmentErrors, setBulkAssignmentErrors] = useState<BulkAssignmentError[]>([])
-  const [assignmentList, setAssignmentList] = useState<AssignmentItem[]>([])
-  const [constraintDraft, setConstraintDraft] = useState<{ type: keyof typeof constraintTypes; text: string; weight: number }>({ type: 'required', text: '', weight: 5 })
+    const [assignmentImportMode, setAssignmentImportMode] = useState('update')
+    const [bulkAssignmentText, setBulkAssignmentText] = useState('')
+    const [bulkAssignmentErrors, setBulkAssignmentErrors] = useState<BulkAssignmentError[]>([])
+    const [assignmentList, setAssignmentList] = useState<AssignmentItem[]>([])
+    const [assignmentValidationMessage, setAssignmentValidationMessage] = useState<string | null>(null)
+    const [constraintDraft, setConstraintDraft] = useState<{ type: keyof typeof constraintTypes; text: string; weight: number }>({ type: 'required', text: '', weight: 5 })
   const [constraintList, setConstraintList] = useState<ConstraintItem[]>([])
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
@@ -533,9 +534,9 @@ export default function App({ onBackToLanding }) {
     [selectedSessions],
   )
 
-  const selectedSessionNames = useMemo(() => selectedSessionData.map((session) => session.label), [selectedSessionData])
-
-  const selectedSpreadsheetDays = useMemo(
+    const selectedSessionNames = useMemo(() => selectedSessionData.map((session) => session.label), [selectedSessionData])
+  
+    const selectedSpreadsheetDays = useMemo(
     () => days.filter((day) => selectedDays.includes(day.id)),
     [selectedDays],
   )
@@ -762,37 +763,48 @@ export default function App({ onBackToLanding }) {
         return
       }
 
-      const [teacher, subject, className, weeklyPeriods] = parts
-      const checks = [
-        { value: teacher, valid: Boolean(teacher) },
-        { value: subject, valid: Boolean(subject) },
-        { value: className, valid: Boolean(className) },
-        { value: weeklyPeriods, valid: /^\d+$/.test(weeklyPeriods) && Number(weeklyPeriods) > 0 },
-      ]
-      const badIndex = checks.findIndex((check) => !check.valid)
-      if (badIndex !== -1) {
-        errors.push({ line: index + 1, rawLine, parts, segmentIndex: badIndex })
-        return
-      }
-
-      parsed.push({
-        key: makeAssignmentKey(teacher, subject, className, weeklyPeriods),
-        teacher,
-        subject,
-        className,
-        weeklyPeriods,
-      })
+        const [teacher, subject, className, weeklyPeriods] = parts
+        const normalizedClassName = className.toUpperCase()
+        const checks = [
+          { value: teacher, valid: Boolean(teacher) && teacherList.includes(teacher) },
+          { value: subject, valid: Boolean(subject) && subjectList.includes(subject) },
+          { value: className, valid: Boolean(className) && classList.includes(normalizedClassName) },
+          { value: weeklyPeriods, valid: /^\d+$/.test(weeklyPeriods) && Number(weeklyPeriods) > 0 },
+        ]
+        const badIndex = checks.findIndex((check) => !check.valid)
+        if (badIndex !== -1) {
+          errors.push({ line: index + 1, rawLine, parts, segmentIndex: badIndex })
+          return
+        }
+  
+        parsed.push({
+          key: makeAssignmentKey(teacher, subject, normalizedClassName, weeklyPeriods),
+          teacher,
+          subject,
+          className: normalizedClassName,
+          weeklyPeriods,
+        })
     })
 
     return { parsed, errors }
   }
 
-  const renderBulkAssignmentErrorLine = (error: BulkAssignmentError) => {
-    if (!error.parts || error.segmentIndex === -1) {
-      return <span className="text-red-300 underline decoration-red-400 decoration-2 underline-offset-2">{error.rawLine}</span>
+    const getBulkAssignmentErrorMessage = (error: BulkAssignmentError) => {
+      if (!error.parts || error.segmentIndex === -1) return 'Sai format. Đúng: Teacher-Subject-Class-Number.'
+
+      const value = error.parts[error.segmentIndex]?.trim() || 'trống'
+      if (error.segmentIndex === 0) return `Giáo viên ${value} không được nhập ở bước trước, vui lòng nhập lại.`
+      if (error.segmentIndex === 1) return `Môn ${value} không được nhập ở bước trước, vui lòng nhập lại.`
+      if (error.segmentIndex === 2) return `Lớp ${value} không được nhập ở bước trước, vui lòng nhập lại.`
+      return `Số tiết ${value} không hợp lệ, vui lòng nhập số nguyên lớn hơn 0.`
     }
 
-    return error.parts.map((part, index) => (
+    const renderBulkAssignmentErrorLine = (error: BulkAssignmentError) => {
+      if (!error.parts || error.segmentIndex === -1) {
+        return <span className="text-red-300 underline decoration-red-400 decoration-2 underline-offset-2">{error.rawLine}</span>
+      }
+  
+      return error.parts.map((part, index) => (
       <Fragment key={`${error.line}-${index}`}>
         {index > 0 ? <span className="text-white/30">-</span> : null}
         <span className={index === error.segmentIndex ? 'text-red-300 underline decoration-red-400 decoration-2 underline-offset-2' : 'text-white/60'}>
@@ -802,12 +814,13 @@ export default function App({ onBackToLanding }) {
     ))
   }
 
-  const importBulkAssignments = () => {
-    const { parsed, errors } = parseBulkAssignments(bulkAssignmentText)
-    setBulkAssignmentErrors(errors)
-    if (!parsed.length || errors.length) return
-
-    setAssignmentList((current) => {
+    const importBulkAssignments = () => {
+      const { parsed, errors } = parseBulkAssignments(bulkAssignmentText)
+      setBulkAssignmentErrors(errors)
+      setAssignmentValidationMessage(null)
+      if (!parsed.length || errors.length) return
+  
+      setAssignmentList((current) => {
       const next = [...current]
       parsed.forEach((assignment) => {
         if (!next.some((existing) => existing.key === assignment.key)) next.push(assignment)
@@ -817,18 +830,35 @@ export default function App({ onBackToLanding }) {
     setBulkAssignmentText('')
   }
 
-  const importAssignment = () => {
-    const { teacher, subject, className, weeklyPeriods } = assignmentDraft
-    const cleanPeriods = weeklyPeriods.trim()
-    if (!teacher || !subject || !className || !cleanPeriods) return
+    const importAssignment = () => {
+      const { teacher, subject, className, weeklyPeriods } = assignmentDraft
+      const cleanPeriods = weeklyPeriods.trim()
+      if (!teacher || !subject || !className || !cleanPeriods) return
 
-    const nextAssignment = {
-      key: makeAssignmentKey(teacher, subject, className, cleanPeriods),
-      teacher,
-      subject,
-      className,
-      weeklyPeriods: cleanPeriods,
-    }
+      if (!teacherList.includes(teacher)) {
+        setAssignmentValidationMessage(`Giáo viên ${teacher} không được nhập ở bước trước, vui lòng nhập lại.`)
+        return
+      }
+
+      if (!subjectList.includes(subject)) {
+        setAssignmentValidationMessage(`Môn ${subject} không được nhập ở bước trước, vui lòng nhập lại.`)
+        return
+      }
+
+      if (!classList.includes(className)) {
+        setAssignmentValidationMessage(`Lớp ${className} không được nhập ở bước trước, vui lòng nhập lại.`)
+        return
+      }
+
+      setAssignmentValidationMessage(null)
+  
+      const nextAssignment = {
+        key: makeAssignmentKey(teacher, subject, className, cleanPeriods),
+        teacher,
+        subject,
+        className,
+        weeklyPeriods: cleanPeriods,
+      }
 
     setAssignmentList((current) =>
       current.some((assignment) => assignment.key === nextAssignment.key) ? current : [...current, nextAssignment],
@@ -836,11 +866,38 @@ export default function App({ onBackToLanding }) {
     setAssignmentDraft((current) => ({ ...current, weeklyPeriods: '' }))
   }
 
-  const deleteAssignment = (key) => {
-    setAssignmentList((current) => current.filter((assignment) => assignment.key !== key))
-  }
+    const deleteAssignment = (key) => {
+      setAssignmentList((current) => current.filter((assignment) => assignment.key !== key))
+    }
 
-  const importConstraint = () => {
+    const validateAssignmentsBeforeNext = () => {
+      const invalidAssignment = assignmentList.find((assignment) => !teacherList.includes(assignment.teacher) || !subjectList.includes(assignment.subject) || !classList.includes(assignment.className))
+      if (invalidAssignment) {
+        const message = !teacherList.includes(invalidAssignment.teacher)
+          ? `Giáo viên ${invalidAssignment.teacher} không được nhập ở bước trước, vui lòng nhập lại.`
+          : !subjectList.includes(invalidAssignment.subject)
+            ? `Môn ${invalidAssignment.subject} không được nhập ở bước trước, vui lòng nhập lại.`
+            : `Lớp ${invalidAssignment.className} không được nhập ở bước trước, vui lòng nhập lại.`
+        setAssignmentValidationMessage(message)
+        return false
+      }
+
+      if (assignmentList.length === 0) {
+        setAssignmentValidationMessage('Vui lòng tạo ít nhất một phân công chuyên môn trước khi tiếp tục.')
+        return false
+      }
+
+      if (totalAssignedPeriods !== totalRequiredClassPeriods) {
+        setAssignmentValidationMessage(`Tổng số tiết cần xếp của tất cả các lớp (${totalRequiredClassPeriods}) phải bằng tổng số tiết được phân công chuyên môn (${totalAssignedPeriods}).`)
+        return false
+      }
+
+      setAssignmentValidationMessage(null)
+      setPage('constraints')
+      return true
+    }
+  
+    const importConstraint = () => {
     const lines = parseLines(constraintDraft.text)
     if (!lines.length) return
 
@@ -1311,16 +1368,21 @@ export default function App({ onBackToLanding }) {
   }, [aiResult, fixedResultTableSections, resultTableClassColumns, solvedCellMap])
 
     const activePeriodCount = useMemo(
-    () =>
-      selectedSpreadsheetDays.reduce(
-        (total, day) =>
-          total + timetableRows.filter((row) => !deletedPeriods[getCellKey(day.id, row.sessionId, row.period)]).length,
-        0,
-      ),
-    [deletedPeriods, selectedSpreadsheetDays, timetableRows],
-  )
-
-  return (
+      () =>
+        selectedSpreadsheetDays.reduce(
+          (total, day) =>
+            total + timetableRows.filter((row) => !deletedPeriods[getCellKey(day.id, row.sessionId, row.period)]).length,
+          0,
+        ),
+      [deletedPeriods, selectedSpreadsheetDays, timetableRows],
+    )
+    const totalRequiredClassPeriods = activePeriodCount * classList.length
+    const totalAssignedPeriods = useMemo(
+      () => assignmentList.reduce((total, assignment) => total + Number(assignment.weeklyPeriods || 0), 0),
+      [assignmentList],
+    )
+  
+    return (
     <main className="w-full overflow-x-hidden bg-[#0A0A0A] font-normal text-white">
       {page === 'select' ? (
         <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
@@ -2183,10 +2245,10 @@ export default function App({ onBackToLanding }) {
                       <ArrowLeft size={14} strokeWidth={1.5} />
                       Quay lại
                     </button>
-                        <button type="button" onClick={() => setPage('constraints')} className={navNextClass}>
-                          Tiếp tục
-                          <ChevronRight size={14} strokeWidth={1.5} />
-                        </button>
+                          <button type="button" onClick={validateAssignmentsBeforeNext} className={navNextClass}>
+                            Tiếp tục
+                            <ChevronRight size={14} strokeWidth={1.5} />
+                          </button>
                   </div>
                   <header className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                     <div>
@@ -2240,16 +2302,23 @@ export default function App({ onBackToLanding }) {
                           })}
                         </div>
 
-                        {assignmentImportMode === 'bulk' ? (
-                          <div>
-                            <label className="block">
-                              <span className="mb-2 block text-xs font-medium text-white/50">Teacher-Subject-Class-Number</span>
+                          {assignmentValidationMessage ? (
+                            <div className="mb-4 rounded border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">
+                              {assignmentValidationMessage}
+                            </div>
+                          ) : null}
+
+                          {assignmentImportMode === 'bulk' ? (
+                            <div>
+                              <label className="block">
+                                <span className="mb-2 block text-xs font-medium text-white/50">Teacher-Subject-Class-Number</span>
                               <textarea
                                 value={bulkAssignmentText}
-                                onChange={(event) => {
-                                  setBulkAssignmentText(event.target.value)
-                                  setBulkAssignmentErrors([])
-                                }}
+                                  onChange={(event) => {
+                                    setBulkAssignmentText(event.target.value)
+                                    setBulkAssignmentErrors([])
+                                    setAssignmentValidationMessage(null)
+                                  }}
                                 placeholder="Huy-Toán-8A-4"
                                 rows={7}
                                 className={`${inputClass} min-h-40 resize-y ${bulkAssignmentErrors.length ? 'border-red-400/60 decoration-red-400' : ''}`}
@@ -2259,11 +2328,12 @@ export default function App({ onBackToLanding }) {
                             {bulkAssignmentErrors.length ? (
                               <div className="mt-3 space-y-2 rounded border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">
                                 <p>Sai format. Đúng: Teacher-Subject-Class-Number.</p>
-                                {bulkAssignmentErrors.map((error) => (
-                                  <p key={error.line}>
-                                    Dòng {error.line}: {renderBulkAssignmentErrorLine(error)}
-                                  </p>
-                                ))}
+                                  {bulkAssignmentErrors.map((error) => (
+                                    <div key={error.line} className="space-y-1">
+                                      <p>Dòng {error.line}: {renderBulkAssignmentErrorLine(error)}</p>
+                                      <p>{getBulkAssignmentErrorMessage(error)}</p>
+                                    </div>
+                                  ))}
                               </div>
                             ) : null}
                           </div>
@@ -2275,7 +2345,10 @@ export default function App({ onBackToLanding }) {
                               placeholder="Chọn giáo viên đã nhập"
                               value={assignmentDraft.teacher}
                               options={sortedTeacherList}
-                              onChange={(value) => setAssignmentDraft((current) => ({ ...current, teacher: value }))}
+                                onChange={(value) => {
+                                  setAssignmentDraft((current) => ({ ...current, teacher: value }))
+                                  setAssignmentValidationMessage(null)
+                                }}
                             />
                             <SelectField
                               icon={BookOpen}
@@ -2283,7 +2356,10 @@ export default function App({ onBackToLanding }) {
                               placeholder="Chọn môn học đã nhập"
                               value={assignmentDraft.subject}
                               options={sortedSubjectList}
-                              onChange={(value) => setAssignmentDraft((current) => ({ ...current, subject: value }))}
+                                onChange={(value) => {
+                                  setAssignmentDraft((current) => ({ ...current, subject: value }))
+                                  setAssignmentValidationMessage(null)
+                                }}
                             />
                             <SelectField
                               icon={Hash}
@@ -2291,7 +2367,10 @@ export default function App({ onBackToLanding }) {
                               placeholder="Chọn lớp đã nhập"
                               value={assignmentDraft.className}
                               options={sortedClassList}
-                              onChange={(value) => setAssignmentDraft((current) => ({ ...current, className: value }))}
+                                onChange={(value) => {
+                                  setAssignmentDraft((current) => ({ ...current, className: value }))
+                                  setAssignmentValidationMessage(null)
+                                }}
                             />
                             <label className={`${panelClass} block p-4`}>
                               <div className="mb-3 flex items-center gap-2.5">
@@ -2305,7 +2384,10 @@ export default function App({ onBackToLanding }) {
                                 min="1"
                                 max="60"
                                 value={assignmentDraft.weeklyPeriods}
-                                onChange={(event) => setAssignmentDraft((current) => ({ ...current, weeklyPeriods: event.target.value }))}
+                                  onChange={(event) => {
+                                    setAssignmentDraft((current) => ({ ...current, weeklyPeriods: event.target.value }))
+                                    setAssignmentValidationMessage(null)
+                                  }}
                                 placeholder="Ví dụ: 6"
                                 className={inputClass}
                               />
@@ -2325,17 +2407,22 @@ export default function App({ onBackToLanding }) {
                     </section>
 
                     <aside className={`${panelClass} p-4`}>
-                      <div className="mb-4 flex items-center gap-2.5">
-                        <span className={iconShellClass}>
-                          <Check size={16} strokeWidth={1.5} />
-                        </span>
-                        <div>
-                          <h2 className="text-sm font-semibold text-white">Danh sách phân công</h2>
-                          <p className="text-xs text-white/40">Mỗi dòng là một giáo viên - môn - lớp</p>
+                          <div className="mb-4 flex items-center gap-2.5">
+                          <span className={iconShellClass}>
+                            <Check size={16} strokeWidth={1.5} />
+                          </span>
+                          <div>
+                            <h2 className="text-sm font-semibold text-white">Danh sách phân công</h2>
+                            <p className="text-xs text-white/40">Mỗi dòng là một giáo viên - môn - lớp</p>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="space-y-0">
+                        <div className={`${totalAssignedPeriods === totalRequiredClassPeriods ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200' : 'border-amber-400/20 bg-amber-500/10 text-amber-200'} mb-4 rounded border p-3 text-xs`}>
+                          <p>Tổng số tiết cần xếp của tất cả các lớp: {totalRequiredClassPeriods}</p>
+                          <p>Tổng số tiết được phân công chuyên môn: {totalAssignedPeriods}</p>
+                        </div>
+  
+                        <div className="space-y-0">
                           {assignmentList.length ? (
                             sortedAssignmentList.map((assignment, index) => {
                               const teacherColor = teacherColorMap[assignment.teacher] ?? teacherColors[0]
