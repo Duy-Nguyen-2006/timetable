@@ -64,7 +64,6 @@ import {
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
 import { normalizeAssignments } from './utils'
 
-const LOWPRIZO_API_KEY_STORAGE_KEY = 'lowprizo_api_key'
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
 
@@ -220,26 +219,6 @@ function getLifecyclePhaseClass(phase: AgentLifecyclePhase) {
     default:
       return 'border-white/15 bg-white/[0.04] text-white/70'
   }
-}
-
-function loadStoredLowprizoApiKey() {
-  if (typeof window === 'undefined') return ''
-
-  try {
-    return localStorage.getItem(LOWPRIZO_API_KEY_STORAGE_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function saveStoredLowprizoApiKey(apiKey: string) {
-  try {
-    if (apiKey) {
-      localStorage.setItem(LOWPRIZO_API_KEY_STORAGE_KEY, apiKey)
-    } else {
-      localStorage.removeItem(LOWPRIZO_API_KEY_STORAGE_KEY)
-    }
-  } catch {}
 }
 
 type AssignmentItem = {
@@ -499,7 +478,6 @@ export default function App({ onBackToLanding }) {
   const [agentTimeline, setAgentTimeline] = useState<AgentLifecycleEvent[]>([])
   const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
-  const [lowprizoApiKey, setLowprizoApiKey] = useState('')
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
@@ -509,8 +487,6 @@ export default function App({ onBackToLanding }) {
   const AI_PROVIDER_STORAGE_KEY = 'tack_ai_provider_config'
 
   useEffect(() => {
-    setLowprizoApiKey(loadStoredLowprizoApiKey())
-
     // Load local AI provider config
     try {
       const saved = localStorage.getItem(AI_PROVIDER_STORAGE_KEY)
@@ -521,10 +497,6 @@ export default function App({ onBackToLanding }) {
       }
     } catch {}
   }, [])
-
-  useEffect(() => {
-    saveStoredLowprizoApiKey(lowprizoApiKey.trim())
-  }, [lowprizoApiKey])
 
   const sortedTeacherList = useMemo(() => sortAlphabetically(teacherList), [teacherList])
   const sortedSubjectList = useMemo(() => sortAlphabetically(subjectList), [subjectList])
@@ -605,10 +577,59 @@ export default function App({ onBackToLanding }) {
     })
   }, [deletedPeriods, selectedSpreadsheetDays, timetableRows])
 
-  const solvedCellMap = useMemo(
-    () => new Map(aiResult?.cells.map((cell) => [cell.slotId, cell]) ?? []),
-    [aiResult],
-  )
+  const solvedCellMap = useMemo(() => {
+    const directCells = Array.isArray((aiResult as any)?.cells) ? (aiResult as any).cells : []
+    if (directCells.length > 0) {
+      return new Map(directCells.map((cell) => [cell.slotId, cell]))
+    }
+
+    const scheduleRows = Array.isArray((aiResult as any)?.schedule) ? (aiResult as any).schedule : []
+    if (scheduleRows.length === 0) {
+      return new Map()
+    }
+
+    const dayAliasToId = new Map<string, string>()
+    selectedSpreadsheetDays.forEach((day) => {
+      dayAliasToId.set(String(day.id).toLowerCase(), day.id)
+      dayAliasToId.set(String(day.label).toLowerCase(), day.id)
+      dayAliasToId.set(String(day.tableLabel).toLowerCase(), day.id)
+    })
+
+    const resolveSessionAndPeriod = (globalPeriod: number) => {
+      let cursor = 0
+      for (const session of selectedSessionData) {
+        const count = periods[session.id] ?? defaultPeriods[session.id]
+        if (globalPeriod <= cursor + count) {
+          return { sessionId: session.id, period: globalPeriod - cursor }
+        }
+        cursor += count
+      }
+      return null
+    }
+
+    const bySlot = new Map<string, { slotId: string; entries: Array<{ className: string; subject: string; teacher: string }> }>()
+
+    scheduleRows.forEach((row: any) => {
+      const dayRaw = String(row?.day ?? '').trim().toLowerCase()
+      const dayId = dayAliasToId.get(dayRaw)
+      const className = String(row?.class ?? row?.className ?? '').trim()
+      const subject = String(row?.subject ?? '').trim()
+      const teacher = String(row?.teacher ?? '').trim()
+      const periodRaw = Number(row?.period)
+
+      if (!dayId || !className || !Number.isFinite(periodRaw) || periodRaw <= 0) return
+
+      const slot = resolveSessionAndPeriod(periodRaw)
+      if (!slot) return
+
+      const slotId = getCellKey(dayId, slot.sessionId, slot.period)
+      const existing = bySlot.get(slotId) ?? { slotId, entries: [] }
+      existing.entries.push({ className, subject, teacher })
+      bySlot.set(slotId, existing)
+    })
+
+    return new Map(Array.from(bySlot.values()).map((cell) => [cell.slotId, cell]))
+  }, [aiResult, periods, selectedSessionData, selectedSpreadsheetDays])
 
   const resultClassColumns = useMemo(() => {
     const defaultClassOrder = ['6A', '6B', '7A', '7B', '8A', '8B', '9A', '9B']
@@ -978,13 +999,6 @@ export default function App({ onBackToLanding }) {
   }, [])
 
     const handleGenerate = async (_useTemplate = false) => {
-
-    const apiKey = lowprizoApiKey.trim()
-    if (!apiKey) {
-      setAiError('Vui lòng nhập Lowprizo API key trước khi xếp lịch.')
-      setAiResult(null)
-      return
-    }
 
     if (activePeriodCount <= 0) {
       setAiError(NO_ACTIVE_PERIOD_MESSAGE)

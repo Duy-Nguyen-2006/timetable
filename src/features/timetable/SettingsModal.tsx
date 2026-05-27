@@ -33,6 +33,11 @@ export function SettingsModal({
   const { toast } = useToast();
 
   const handleTest = async () => {
+    if (!baseURL.trim()) {
+      setTestResult('Vui lòng nhập Base URL trước khi test.');
+      return;
+    }
+
     if (!apiKey.trim()) {
       setTestResult('Vui lòng nhập API Key trước khi test.');
       return;
@@ -42,19 +47,28 @@ export function SettingsModal({
     setTestResult(null);
 
     try {
-      const res = await fetch(`${baseURL.replace(/\/$/, '')}/models`, {
+      const res = await fetch('/api/provider/test', {
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          baseURL: baseURL.trim(),
+          apiKey: apiKey.trim(),
+          model: model.trim(),
+        }),
       });
 
-      if (res.ok) {
-        setTestResult('✅ Kết nối thành công! Key và Base URL hợp lệ.');
+      const payload = await res.json().catch(() => null);
+      const message = payload?.message as string | undefined;
+      const details = payload?.details as string | undefined;
+
+      if (payload?.ok) {
+        setTestResult(message ?? '✅ Kết nối thành công!');
         toast({ title: 'Kết nối thành công', description: 'Bạn có thể lưu cấu hình.' });
-      } else if (res.status === 401) {
-        setTestResult('❌ API Key không hợp lệ hoặc hết hạn (401).');
       } else {
-        setTestResult(`❌ Lỗi kết nối: ${res.status} ${res.statusText}`);
+        const composed = [message ?? '❌ Test thất bại.', details].filter(Boolean).join('\n');
+        setTestResult(composed);
       }
     } catch (e: any) {
       setTestResult(`❌ Không kết nối được: ${e.message}`);
@@ -64,20 +78,34 @@ export function SettingsModal({
   };
 
   const handleSave = () => {
+    const trimmedBaseURL = baseURL.trim().replace(/\/$/, '');
     const trimmedKey = apiKey.trim();
+    const trimmedModel = model.trim();
+
+    if (!trimmedBaseURL) {
+      toast({ title: 'Lỗi', description: 'Base URL không được để trống', variant: 'destructive' });
+      return;
+    }
+
+    if (!/^https?:\/\//i.test(trimmedBaseURL)) {
+      toast({ title: 'Lỗi', description: 'Base URL phải bắt đầu bằng http:// hoặc https://', variant: 'destructive' });
+      return;
+    }
+
     if (!trimmedKey) {
       toast({ title: 'Lỗi', description: 'API Key không được để trống', variant: 'destructive' });
       return;
     }
-    if (!model.trim()) {
+
+    if (!trimmedModel) {
       toast({ title: 'Lỗi', description: 'Model không được để trống', variant: 'destructive' });
       return;
     }
 
     onSave({
-      baseURL: baseURL.trim() || DEFAULT_BASE_URL,
+      baseURL: trimmedBaseURL,
       apiKey: trimmedKey,
-      model: model.trim(),
+      model: trimmedModel,
     });
     onOpenChange(false);
   };
