@@ -1,51 +1,39 @@
 # Tack Timetable
 
-## Project variants
+AI-assisted timetable generator built with Next.js + React + TypeScript, with local Coder/Reviewer loop and Python execution bridge.
 
-This repository currently contains **two UI app variants**:
+## Active app
 
-1. **Primary app (active): Next.js App Router**
-   - Entry: [`src/app/page.tsx`](src/app/page.tsx)
-   - API routes: [`src/app/api/`](src/app/api/)
-   - Main timetable feature: [`src/features/timetable/`](src/features/timetable/)
+- App entry: [`src/app/page.tsx`](src/app/page.tsx)
+- Layout + global styles: [`src/app/layout.tsx`](src/app/layout.tsx), [`src/app/globals.css`](src/app/globals.css)
+- Main feature UI: [`src/features/timetable/TimetableApp.tsx`](src/features/timetable/TimetableApp.tsx)
 
-2. **Legacy playground (reference only): Vite app**
-   - Folder: [`timetable/`](timetable/)
-   - Entry: [`timetable/src/App.jsx`](timetable/src/App.jsx)
+## Current API routes
 
-### Which one should be used?
-- For all current feature development, API integration, and production flow, use the **Next.js app**.
-- Use the legacy Vite app only for historical reference or migration comparison.
+- Provider connectivity test: [`POST /api/provider/test`](src/app/api/provider/test/route.ts:9)
+- Server-side LLM chat proxy: [`POST /api/ai/chat`](src/app/api/ai/chat/route.ts:19)
 
-## Generate timetable flow (current)
-- Client call: [`generateTimetableWithAI()`](src/features/timetable/ai/client.ts:5)
-- Route handler: [`POST`](src/app/api/generate-timetable/route.ts:43)
-- Service orchestrator: [`runPiOrchestratedLoop()`](src/app/api/generate-timetable/service.ts:865)
-- Deterministic checker: [`validateTimetableResult()`](src/lib/timetable-validator.ts:194)
-- Python runner: [`main()`](python/timetable_solver/runner.py:33)
+## AI execution flow (current)
 
-## Current architecture status
-- Legacy in-repo agent loop has been removed.
-- The backend now runs a **coder + checker orchestration** backed by a server-side OpenAI-compatible adapter.
-- Current runtime behavior: call the configured LowPrizo chat completion endpoint, ask it to return a strict JSON solver result with a generated Python solver artifact, execute that artifact locally through the runner, then let the deterministic checker either accept it, report soft warnings, or request a recode loop up to 3 attempts.
-- `PI_DEV_BASE_URL` or `LOWPRIZO_API_BASE_URL`: base URL for the LowPrizo-compatible backend. Default: `https://api.lowprizo.com/v1`.
-- `PI_DEV_MODEL`: model name for runtime generation. Default: `devstral-latest`.
+1. User configures provider in UI ([`SettingsModal`](src/features/timetable/SettingsModal.tsx:21)).
+2. Orchestrator runs in browser ([`runLocalAgent`](src/features/timetable/ai/local-agent.ts:18)).
+3. Coder and Reviewer call LLM through server route ([`/api/ai/chat`](src/app/api/ai/chat/route.ts:19)).
+4. Generated Python is executed through bridge ([`executeGeneratedCode`](src/features/timetable/ai/python-bridge.ts:20)).
+5. Result is rendered as timetable table and exported to Excel in UI ([`handleDownloadExcel`](src/features/timetable/TimetableApp.tsx:1135)).
 
-- Client requests must still send the user's API key via `x-lowprizo-api-key` or `apiKey` in the request body.
-- If the runtime endpoint or API key is missing/invalid, `/api/generate-timetable` now returns a clear runtime/configuration error instead of silently falling back to the local solver.
+## Important behavior notes
 
-## Final decision rules for the new pipeline
-1. If the coder agent does **not** produce a timetable candidate, return: **`Không tạo được thời khóa biểu.`**
-2. If the coder agent produces a timetable and base + hard constraints pass:
-   - if all soft constraints pass, return: **`Tất cả ràng buộc đều thỏa mãn.`**
-   - if some soft constraints fail, still return a solved timetable and surface those soft warnings to the user.
-3. If base or hard constraints fail, the checker must ask the coder agent to generate another attempt.
+- Reviewer reject is enforced and retried with bounded rounds in [`runLocalAgent`](src/features/timetable/ai/local-agent.ts:18).
+- Browser-side fake execution stub has been removed; if IPC is missing, bridge throws explicit error in [`python-bridge.ts`](src/features/timetable/ai/python-bridge.ts:20).
 
-## Local verification notes
+## Run locally
+
+- Install: `npm install`
+- Dev: `npm run dev`
+- Build: `npm run build`
 - Lint: `npm run lint`
-- API smoke test: `curl -X POST http://127.0.0.1:3000/api/generate-timetable ...`
-- `npm run build` is blocked in this environment for Next.js projects, so build verification could not be executed here.
 
-## Security note
-- Do not commit real API keys/tokens.
-- Keep `.env*` out of commits and use placeholders in docs.
+## Security
+
+- Do not commit real secrets from `.env*`.
+- Keep provider/API keys out of source files and docs.

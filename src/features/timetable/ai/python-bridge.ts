@@ -30,25 +30,7 @@ export async function executeGeneratedCode(
     return (window as any).electron.python.executeCode(code, input, timeout);
   }
 
-  // DEV STUB - only for early development before IPC is wired
-  console.warn('[python-bridge] Using DEV STUB. Real IPC not wired yet.');
-  await new Promise((r) => setTimeout(r, 300));
-
-  // Return a fake successful result so the rest of the agent can be developed
-  return {
-    success: true,
-    has_solution: true,
-    stdout: 'SOLUTION FOUND\nFake schedule generated in dev stub',
-    stderr: '',
-    execution_time_ms: 1234,
-    error_type: null,
-    result: {
-      classes: ['6A', '6B'],
-      days: ['Thứ 2', 'Thứ 3'],
-      periods: [1, 2, 3],
-      schedule: [
-        { class: '6A', day: 'Thứ 2', period: 1, subject: 'Toán', teacher: 'Sơn' },
-      ],
-    },
-  };
+  throw new Error(
+    '[python-bridge] Python executor IPC is not available. Please run inside Electron app (with preload exposing window.electron.python.executeCode) or wire a server execution route.'
+  );
 }

@@ -53,3 +53,11 @@ coverage.xml
 .pytest_cache/
 *.egg-info/
 .eggs/
+
+# AI runtime artifacts
+runner.py
+runner_generated.py
+results.txt
+Result.csv
+input.json
+*.backup.*

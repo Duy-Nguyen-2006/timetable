@@ -16,7 +16,7 @@
 - Nếu có nhiều implementation options, chọn option ít rủi ro nhất trước.
 ## Workflow
 - Trước khi sửa code, đọc codebase hiện tại bằng công cụ phù hợp (ưu tiên search/read theo scope nhỏ).
-- Với task dài, tạo và cập nhật [`Walkthrough.md`](Walkthrough.md) theo checklist có bước verify rõ ràng; làm xong mục nào tick mục đó ngay.
+- Với task dài, tạo checklist tiến độ rõ ràng và verify ngay theo từng bước (không dồn verify về cuối).
 - Verify ngay sau từng đầu mục; không dồn verify về cuối.
 - Trước khi sửa function/class/method, chạy impact analysis (call sites, API contract, data flow).
 - Trước khi commit/push, chạy detect-changes và các lệnh verify liên quan.
@@ -25,26 +25,24 @@
 
 ## Important files
 - Agent rules file: [`AGENTS.md`](AGENTS.md)
-- Product/docs: [`README.md`](README.md), [`PLAN.md`](PLAN.md) (worklog.md removed as historical)
+- Product/docs: [`README.md`](README.md)
 - Next.js app shell: [`src/app/layout.tsx`](src/app/layout.tsx), [`src/app/page.tsx`](src/app/page.tsx), [`src/app/globals.css`](src/app/globals.css)
 - API routes: [`src/app/api/`](src/app/api/)
 - Timetable feature UI: [`src/features/timetable/`](src/features/timetable/)
 - Reusable components: [`src/components/ui/`](src/components/ui/)
 - Core libs: [`src/lib/`](src/lib/)
-- Python solver package: [`python/timetable_solver/`](python/timetable_solver/)
-- Python tests: [`python/tests/`](python/tests/)
-- Prisma schema: [`prisma/schema.prisma`](prisma/schema.prisma)
-- Legacy Vite playground (if needed): [`timetable/`](timetable/)
+- Python execution host: [`python/code_executor.py`](python/code_executor.py)
+- AI orchestrators/helpers: [`agent.py`](agent.py), [`reviewer_agent.py`](reviewer_agent.py), [`output_formatter.py`](output_formatter.py)
+- Sandbox executors: [`sandbox/executor.py`](sandbox/executor.py), [`sandbox/bubblewrap_executor.py`](sandbox/bubblewrap_executor.py)
 
 ## Environment & secrets
-- Env files: `.env`, `.env.local`, `timetable/.env.local`.
+- Env files: `.env`, `.env.local`.
 - Không commit API keys/tokens thật.
 - Nếu cần thêm biến môi trường, cập nhật docs kèm ví dụ placeholder.
 
 ## Verify checklist (minimum)
 - Frontend (Next.js): `npm run lint` (nếu có), `npm run build`.
-- Python solver: chạy tests trong [`python/tests/`](python/tests/).
-- API routes thay đổi: test route bằng request thật hoặc integration test.
+- API routes thay đổi: test route bằng request thật hoặc integration test ([`/api/ai/chat`](src/app/api/ai/chat/route.ts), [`/api/provider/test`](src/app/api/provider/test/route.ts)).
 - UI thay đổi: verify render + interaction chính + responsive cơ bản.
 
 ## Deploy notes

@@ -16,7 +16,6 @@ export default function RootLayout({
       <body
         suppressHydrationWarning
         className="antialiased dark"
-        style={{ margin: 0, background: '#0a0a0a', color: '#ffffff', fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif", fontWeight: 500 }}
       >
         {children}
       </body>
