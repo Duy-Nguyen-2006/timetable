@@ -20,3 +20,36 @@ prisma/*.db
 *.tsbuildinfo
 node_modules
 .venv
+
+# Secrets - NEVER commit
+.env
+.env.*
+!.env.example
+
+# Large generated analysis dumps (repomix, aider, etc.)
+repomix*.xml
+repomix*.txt
+repomix*.md
+*.repomix.*
+aider-*.log
+aider-*.md
+
+# Python / build artifacts
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+*.egg-info/
+.eggs/
