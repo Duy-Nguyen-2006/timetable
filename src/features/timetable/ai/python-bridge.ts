@@ -6,7 +6,7 @@
  * For now it contains the interface + a dev stub.
  */
 
-import type { AgentInputPayload, ExecutionResult } from './types';
+import type { ExecutionResult } from './types';
 
 export interface PythonBridgeOptions {
   timeoutMs?: number;
@@ -19,7 +19,7 @@ export interface PythonBridgeOptions {
  */
 export async function executeGeneratedCode(
   code: string,
-  input: AgentInputPayload,
+  input: unknown,
   options: PythonBridgeOptions = {}
 ): Promise<ExecutionResult> {
   const timeout = options.timeoutMs ?? 180_000;

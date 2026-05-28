@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -45,10 +46,10 @@ ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 180
   return new Promise((resolve) => {
     const binary = getPythonBinary('code_executor')
     const jobDir = path.join(app.getPath('temp'), `tack-job-${Date.now()}`)
-    require('fs').mkdirSync(jobDir, { recursive: true })
+    fs.mkdirSync(jobDir, { recursive: true })
 
     // Write input.json
-    require('fs').writeFileSync(
+    fs.writeFileSync(
       path.join(jobDir, 'input.json'),
       JSON.stringify(input, null, 2),
       'utf8'

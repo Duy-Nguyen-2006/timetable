@@ -69,12 +69,15 @@ result = run_in_sandbox(
     timeout=90,
     memory_limit="4g",
     cpu_limit=2,
+    strict=True,
     workspace_dir=".",           # chỉ thư mục này được mount vào container
 )
 
 print(result["stdout"])
 print(result["stderr"])
 ```
+
+`strict=True` là bắt buộc cho production path. Nếu Docker image unavailable, hàm sẽ raise thay vì fallback im lặng.
 
 ### 3. Tích hợp vào agent.py (đã hỗ trợ)
 

@@ -21,6 +21,23 @@ jobs:
       - run: ./.venv/bin/pip install -U pip pytest ortools
       - run: npm run lint
       - run: npm run build
+      - name: Provider smoke tests
+        env:
+          LOWPRIZO_API_KEY: ${{ secrets.LOWPRIZO_API_KEY }}
+          SKIP_PROVIDER_SMOKE: ${{ vars.SKIP_PROVIDER_SMOKE }}
+        run: |
+          if [ "$SKIP_PROVIDER_SMOKE" = "1" ] || [ -z "$LOWPRIZO_API_KEY" ]; then
+            SKIP_PROVIDER_SMOKE=1 npm run provider:smoke
+          else
+            npm run dev &
+            server_pid=$!
+            trap 'kill $server_pid' EXIT
+            for i in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:3000 >/dev/null; then break; fi
+              sleep 1
+            done
+            npm run provider:smoke
+          fi
       - run: ./.venv/bin/pytest python/tests
       - name: Dataset API tests
         env:

@@ -60,4 +60,6 @@ runner_generated.py
 results.txt
 Result.csv
 input.json
+.ai_results/
 *.backup.*
+public/templates/
