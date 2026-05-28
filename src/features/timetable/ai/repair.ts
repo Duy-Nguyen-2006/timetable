@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { Plan, Violation } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, RepairTurnResult } from './types';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
@@ -109,7 +110,7 @@ export async function runRepairTurn(
   };
 
   const response = await invokeChat(chatPayload);
-  const parsed = repairResponseSchema.parse(JSON.parse(response.content ?? '{}'));
+  const parsed = repairResponseSchema.parse(parseModelJson(response.content));
   return {
     ...parsed,
     rawResponse: response.content,

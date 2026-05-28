@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { ConstraintSpec, Plan } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, CoderTurnResult } from './types';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
@@ -135,7 +136,7 @@ export async function runCoderTurn(
   };
 
   const response = await invokeChat(chatPayload);
-  const parsed = coderResponseSchema.parse(JSON.parse(response.content ?? '{}'));
+  const parsed = coderResponseSchema.parse(parseModelJson(response.content));
   return reflectConstraintCode(
     ensureCoverage(
     {

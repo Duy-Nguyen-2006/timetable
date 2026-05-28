@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { parseConstraint } from '@/lib/constraint-parser';
 
 import type { ConstraintSpec } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
@@ -573,7 +574,7 @@ export async function runTranslatorTurn(
 
   try {
     const response = await invokeChat(payload);
-    const parsedJson = JSON.parse(response.content ?? '{}');
+    const parsedJson = parseModelJson(response.content);
     const validated = translatorResponseSchema.parse(parsedJson);
     const sanitized = sanitizeSpecs(input, validated.constraintSpecs);
     return {

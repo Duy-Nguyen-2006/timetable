@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { ConstraintSpec, Plan } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, PlannerTurnResult } from './types';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
@@ -142,7 +143,7 @@ export async function runPlannerTurn(
 
   try {
     const response = await invokeChat(payload);
-    const candidate = planSchema.parse(JSON.parse(response.content ?? '{}'));
+    const candidate = planSchema.parse(parseModelJson(response.content));
     return {
       plan: validatePlanCoverage(candidate, input.constraintSpecs),
       rawResponse: response.content,
