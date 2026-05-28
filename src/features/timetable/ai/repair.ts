@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 import type { Plan, Violation } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, RepairTurnResult } from './types';
+import { invokeChat } from './chat-client';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
 
@@ -12,24 +14,13 @@ const repairResponseSchema = z.object({
       oldStr: z.string(),
       newStr: z.string(),
       reason: z.string(),
+      replaceAll: z.boolean().optional(),
     })
   ),
   assumptions: z.array(z.string()),
 });
 
-function defaultInvokeChat(payload: Record<string, unknown>): Promise<{ content?: string; usage?: ChatUsage }> {
-  return fetch('/api/ai/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).then(async (response) => {
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.ok) {
-      throw new Error(body?.error || `Chat API failed with status ${response.status}`);
-    }
-    return { content: String(body.content ?? ''), usage: body.usage as ChatUsage | undefined };
-  });
-}
+const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
 
 function loadRepairSystemPrompt(): Promise<string> {
   return fetch('/prompts/repair.system.md')
@@ -63,6 +54,7 @@ export async function runRepairTurn(
         role: 'user',
         content: JSON.stringify({
           plan: payload.plan,
+          currentCode: payload.constraintCode,
           constraintCode: payload.constraintCode,
           violations: payload.violations.map((violation) => ({
             constraintId: violation.constraintId,
@@ -94,6 +86,7 @@ export async function runRepairTurn(
                   oldStr: { type: 'string' },
                   newStr: { type: 'string' },
                   reason: { type: 'string' },
+                  replaceAll: { type: 'boolean' },
                 },
                 required: ['oldStr', 'newStr', 'reason'],
                 additionalProperties: false,
@@ -109,7 +102,7 @@ export async function runRepairTurn(
   };
 
   const response = await invokeChat(chatPayload);
-  const parsed = repairResponseSchema.parse(JSON.parse(response.content ?? '{}'));
+  const parsed = repairResponseSchema.parse(parseModelJson(response.content));
   return {
     ...parsed,
     rawResponse: response.content,
@@ -117,15 +110,36 @@ export async function runRepairTurn(
   };
 }
 
-export function applyRepairPatches(source: string, patches: RepairTurnResult['patches']): string {
-  let updated = source;
+export function applyRepairPatches(
+  source: string,
+  patches: RepairTurnResult['patches']
+): string {
+  // 1) Validate TẤT CẢ patches trên source GỐC trước khi apply bất kỳ patch nào (atomic).
+  const plan: Array<{ index: number; patch: typeof patches[0] }> = [];
   for (const patch of patches) {
     if (!patch.oldStr) continue;
-    if (!updated.includes(patch.oldStr)) {
-      const preview = patch.oldStr.slice(0, 100);
-      throw new Error(`Repair patch failed to apply: oldStr not found.\n${preview}`);
+    const occurrences = source.split(patch.oldStr).length - 1;
+    if (occurrences === 0) {
+      throw new Error(
+        `Repair patch oldStr not found in source. Preview: ${patch.oldStr.slice(0, 120)}`
+      );
     }
-    updated = updated.replace(patch.oldStr, patch.newStr);
+    if (occurrences > 1 && !patch.replaceAll) {
+      throw new Error(
+        `Repair patch ambiguous: oldStr xuất hiện ${occurrences} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
+      );
+    }
+    plan.push({ index: source.indexOf(patch.oldStr), patch });
+  }
+
+  // 2) Apply theo thứ tự xuất hiện trong source (tránh overlap).
+  plan.sort((a, b) => a.index - b.index);
+
+  let updated = source;
+  for (const { patch } of plan) {
+    updated = patch.replaceAll
+      ? updated.split(patch.oldStr).join(patch.newStr)
+      : updated.replace(patch.oldStr, patch.newStr);
   }
   return updated;
 }

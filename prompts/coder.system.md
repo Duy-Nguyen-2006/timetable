@@ -152,25 +152,65 @@ model.Add(slots[(a["id"], d, p)] == 0)
 
 elif spec["kind"] == "subject_consecutive":
 
-subj = spec["params"]["subject"]; L = spec["params"]["length"]
+	subj = spec["params"]["subject"]
 
-target = spec["params"].get("classes") or data["classes"]
+	L = int(spec["params"]["length"])
 
-for cls in target:
+	target = spec["params"].get("classes") or data["classes"]
 
-cls_asgs = [a for a in data["assignments"] if a["class"] == cls and a["subject"] == subj]
+	for cls in target:
 
-# Để đơn giản hóa: yêu cầu mỗi cụm L tiết liên tiếp
+		cls_asgs = [a for a in data["assignments"] if a["class"] == cls and a["subject"] == subj]
 
-# Tạo biến block_start[d,p] = 1 nếu môn này bắt đầu lúc (d,p)
+		if not cls_asgs:
 
-for d in data["days"]:
+			continue
 
-for p in data["periods"]:
+		for d in data["days"]:
 
-if p + L - 1 not in data["periods"]: continue
+			day_periods = data["periodsByDay"].get(d, data["periods"])
 
-# ... (template phức tạp — xem note)
+			# block_at[p] = 1 nếu môn bắt đầu chuỗi L tiết tại period p
+
+			block_at = {}
+
+			for i in range(len(day_periods) - L + 1):
+
+				window = day_periods[i:i+L]
+
+				# Chỉ tạo block nếu L tiết liền kề (period[i+1] == period[i]+1)
+
+				if any(window[k+1] != window[k] + 1 for k in range(L-1)):
+
+					continue
+
+				b = model.NewBoolVar(f"block_{spec['id']}_{cls}_{d}_{window[0]}")
+
+				block_at[window[0]] = (b, window)
+
+				# b == 1 iff TẤT CẢ L slot trong window đều có 1 assignment cls/subj
+
+				slot_vars = [
+
+					sum(slots[(a["id"], d, p)] for a in cls_asgs)
+
+					for p in window
+
+				]
+
+				for sv in slot_vars:
+
+					model.Add(sv >= b)
+
+				model.Add(sum(slot_vars) >= L * b)
+
+				model.Add(sum(slot_vars) <= L + (len(slot_vars) - L) * (1 - b))
+
+			# Mọi tiết của môn trong ngày phải nằm trong đúng 1 block
+
+			total_day = sum(slots[(a["id"], d, p)] for a in cls_asgs for p in day_periods)
+
+			model.Add(total_day == L * sum(b for (b, _) in block_at.values()))
 
 ```
 
@@ -295,59 +335,149 @@ model.Add(B == 1 - sub)
 
 def _add_implied(model, B, sub_spec, slots, data):
 
-# Chỉ apply sub_spec khi B == 1
+	"""Apply sub_spec chỉ khi B == 1. Dùng OnlyEnforceIf cho mọi model.Add."""
 
-# Trick: với mỗi model.Add(EXPR == 0), đổi thành model.Add(EXPR == 0).OnlyEnforceIf(B)
+	kind = sub_spec["kind"]
 
-# Áp dụng tương tự cho <=, ==
+	params = sub_spec["params"]
 
-kind = sub_spec["kind"]; params = sub_spec["params"]
+	def _periods_for(d):
 
-if kind == "teacher_block_day":
+		return data["periodsByDay"].get(d, data["periods"])
 
-t, d = params["teacher"], params["day"]
+	if kind == "teacher_block_day":
 
-for a in data["assignments"]:
+		t, d = params["teacher"], params["day"]
 
-if a["teacher"] == t:
+		for a in data["assignments"]:
 
-for p in data["periods"]:
+			if a["teacher"] == t:
 
-model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(B)
+				for p in _periods_for(d):
 
-elif kind == "teacher_block_slot":
+					model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(B)
 
-t, d, p = params["teacher"], params["day"], params["period"]
+	elif kind == "teacher_block_period":
 
-for a in data["assignments"]:
+		t, p = params["teacher"], int(params["period"])
 
-if a["teacher"] == t:
+		for a in data["assignments"]:
 
-model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(B)
+			if a["teacher"] == t:
 
-elif kind == "pair_not_same_slot":
+				for d in data["days"]:
 
-t1, t2 = params["teachers"]
+					if p in _periods_for(d):
 
-scope_day = params.get("scope", {}).get("day")
+						model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(B)
 
-days_chk = [scope_day] if scope_day else data["days"]
+	elif kind == "teacher_block_slot":
 
-asgs1 = [a for a in data["assignments"] if a["teacher"] == t1]
+		t, d, p = params["teacher"], params["day"], int(params["period"])
 
-asgs2 = [a for a in data["assignments"] if a["teacher"] == t2]
+		for a in data["assignments"]:
 
-for d in days_chk:
+			if a["teacher"] == t and p in _periods_for(d):
 
-for p in data["periods"]:
+				model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(B)
 
-s1 = sum(slots[(a["id"], d, p)] for a in asgs1)
+	elif kind == "teacher_max_per_day":
 
-s2 = sum(slots[(a["id"], d, p)] for a in asgs2)
+		t, n = params["teacher"], int(params["maxPerDay"])
 
-model.Add(s1 + s2 <= 1).OnlyEnforceIf(B)
+		teacher_asgs = [a for a in data["assignments"] if a["teacher"] == t]
 
-# ... tiếp các kind khác tương tự ...
+		for d in data["days"]:
+
+			total = sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d))
+
+			model.Add(total <= n).OnlyEnforceIf(B)
+
+	elif kind == "teacher_max_consecutive":
+
+		t, n = params["teacher"], int(params["maxConsecutive"])
+
+		teacher_asgs = [a for a in data["assignments"] if a["teacher"] == t]
+
+		for d in data["days"]:
+
+			periods = _periods_for(d)
+
+			for i in range(len(periods) - n):
+
+				window = periods[i:i+n+1]
+
+				win_sum = sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in window)
+
+				model.Add(win_sum <= n).OnlyEnforceIf(B)
+
+	elif kind == "subject_pin_period":
+
+		subj = params["subject"]
+
+		allowed = set(int(x) for x in params["periods"])
+
+		target = params.get("classes") or data["classes"]
+
+		for a in data["assignments"]:
+
+			if a["subject"] == subj and a["class"] in target:
+
+				for d in data["days"]:
+
+					for p in _periods_for(d):
+
+						if p not in allowed:
+
+							model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(B)
+
+	elif kind == "class_no_double_subject_day":
+
+		cls = params["class"]
+
+		subj = params.get("subject")
+
+		asgs = [a for a in data["assignments"] if a["class"] == cls and (subj is None or a["subject"] == subj)]
+
+		for d in data["days"]:
+
+			total = sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d))
+
+			model.Add(total <= 1).OnlyEnforceIf(B)
+
+	elif kind == "pair_not_same_slot":
+
+		t1, t2 = params["teachers"]
+
+		scope_day = (params.get("scope") or {}).get("day")
+
+		days_chk = [scope_day] if scope_day else data["days"]
+
+		asgs1 = [a for a in data["assignments"] if a["teacher"] == t1]
+
+		asgs2 = [a for a in data["assignments"] if a["teacher"] == t2]
+
+		for d in days_chk:
+
+			for p in _periods_for(d):
+
+				s1 = sum(slots[(a["id"], d, p)] for a in asgs1)
+
+				s2 = sum(slots[(a["id"], d, p)] for a in asgs2)
+
+				model.Add(s1 + s2 <= 1).OnlyEnforceIf(B)
+
+	elif kind == "subject_consecutive":
+
+		raise NotImplementedError("subject_consecutive trong if_then chưa hỗ trợ — split thành 2 spec riêng.")
+
+	elif kind == "weekly_periods_exact":
+
+		pass
+
+	else:
+
+		raise NotImplementedError(f"_add_implied: kind '{kind}' chưa hỗ trợ")
 
 ```
 
@@ -400,8 +530,8 @@ assumptions: string[]          // Mọi giả định bạn đã đưa (vd: peri
 
 Nếu bất kỳ check nào fail, sửa code và check lại trước khi submit.
 
-## Addendum v3 (bắt buộc)
-- Nếu `data` có `periodsByDay` thì với mọi ràng buộc theo ngày, PHẢI iterate period bằng `data["periodsByDay"].get(d, data["periods"])`.
-- KHÔNG giả định mọi ngày có cùng tập `periods`.
-- Nếu `spec["tags"]` có `auto_base` thì không emit constraint code cho spec đó.
-- `weekly_periods_exact` đã được enforce bởi base skeleton cho từng assignment; không add lại constraint trùng. Vẫn ghi id vào `covered_constraint_ids` và nêu assumption rõ trong `assumptions`.
+## Addendum v3.2 (BẮT BUỘC ĐỌC TRƯỚC KHI SUBMIT)
+- Khi gặp `kind` không có trong template tại file này, KHÔNG được tự viết. Trả về `assumptions: ["unsupported_kind:<kind>"]` và `covered_constraint_ids` KHÔNG chứa id đó.
+- `_add_implied` cho `subject_consecutive` PHẢI raise NotImplementedError — không được viết phiên bản "tạm".
+- Mọi loop period PHẢI dùng `data["periodsByDay"].get(d, data["periods"])`, không dùng `data["periods"]` trực tiếp khi đang lặp theo ngày.
+- Period trong `params` là số nguyên 1-based. So sánh bằng `int(...)` để tránh string mismatch.

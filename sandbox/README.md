@@ -145,3 +145,18 @@ Sau đó bạn có thể sửa `agent.py` để dùng `bubblewrap_executor` thay
 - Giới hạn syscall bằng `--security-opt seccomp=...`
 
 Hiện tại mức độ isolation của setup này đã đủ tốt cho hầu hết các trường hợp sử dụng agent tự viết code.
+
+---
+
+## Cách production deploy chọn sandbox
+
+Set env var `TT_SANDBOX_MODE`:
+- `bwrap` (recommended cho Linux server)
+- `docker` (recommended cho Mac/Windows hoặc cần isolation mạnh hơn)
+- `none` (dev only, phải set `TT_SANDBOX_ALLOW_UNSAFE=1`)
+
+Auto-detect nếu không set:
+- Linux + bwrap installed → bwrap
+- Docker installed → docker
+- Else → error (refuse to run unsafe)
+

@@ -6,7 +6,7 @@ import { compressPayload, digestError } from './input-compressor';
 import { runPlannerTurn } from './planner';
 import { executeGeneratedCode } from './python-bridge';
 import { applyRepairPatches, runRepairTurn } from './repair';
-import { injectConstraintCode, loadSolverSkeleton, syntaxCheckPython } from './skeleton-injector';
+import { astCheckPython, injectConstraintCode, loadSolverSkeleton, syntaxCheckPython } from './skeleton-injector';
 import { runTranslatorTurn } from './translator';
 import type { AgentInputPayload, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { WorkspaceBoard } from './workspace';
@@ -90,11 +90,37 @@ function normalizeRoundTripMessage(message: string): string {
     .trim();
 }
 
+function buildCoderExhaustedMessage(lastFailureSummary: string): string {
+  const detail = lastFailureSummary.trim();
+  if (!detail) return 'Coder could not produce an executable schedule.';
+  return `Coder could not produce an executable schedule. Last failure: ${detail}`;
+}
+
+function buildRepeatedViolationMessage(sampleMessages: string[]): string {
+  const detail = sampleMessages.filter(Boolean).slice(0, 3).join(' | ');
+  if (!detail) {
+    return 'Không tạo được thời khóa biểu sau khi agent sửa lặp lại cùng một lỗi.';
+  }
+  return `Không tạo được thời khóa biểu sau khi agent sửa lặp lại cùng một lỗi: ${detail}`;
+}
+
+function shouldRepairExecutableFailure(
+  latestConstraintCode: string,
+  lastFailureSummary: string,
+  repairRound: number
+): boolean {
+  return Boolean(
+    latestConstraintCode.trim() &&
+    lastFailureSummary.trim() &&
+    repairRound < MAX_REPAIR_ROUNDS
+  );
+}
+
 export async function runLocalAgent(
   input: AgentInputPayload,
   config: LocalAgentConfig
 ): Promise<RunLocalAgentResult> {
-  const timeoutMs = config.timeoutMs ?? 180_000;
+  const timeoutMs = config.timeoutMs ?? 360_000;
   const startedAt = Date.now();
   const deadlineAt = startedAt + timeoutMs;
   const budget = new TokenBudgetGuard(TOKEN_CAP_PER_RUN);
@@ -164,21 +190,50 @@ export async function runLocalAgent(
         emit(config, { type: 'phase', phase: 'coding', message: `Coder attempt ${attempt}`, iteration: attempt });
 
         if (pendingRepairPatches?.length && latestConstraintCode) {
-          latestConstraintCode = applyRepairPatches(latestConstraintCode, pendingRepairPatches);
-          pendingRepairPatches = null;
-          emit(config, {
-            type: 'stage_completed',
-            stage: 'coder',
-            attempt,
-            message: 'Applied repair patches from previous round',
-          });
+          try {
+            latestConstraintCode = applyRepairPatches(latestConstraintCode, pendingRepairPatches);
+            pendingRepairPatches = null;
+            emit(config, {
+              type: 'stage_completed',
+              stage: 'coder',
+              attempt,
+              message: 'Applied repair patches from previous round',
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Repair patch failed';
+            previousAttemptSummary = digestError(`Repair patch apply failed: ${message}`);
+            board.setErrorDigest(previousAttemptSummary);
+            pendingRepairPatches = null;
+            coderRetry += 1;
+            emit(config, {
+              type: 'error',
+              message: `Repair patch apply failed at attempt ${attempt}: ${message}`,
+              fatal: false,
+            });
+            continue;
+          }
         } else {
           emit(config, { type: 'stage_started', stage: 'coder', attempt, message: 'Coder started' });
-          const coder = await runCoderTurn(pickStageConfig(config, 'coder'), {
-            dataset: compressed,
-            plan: planner.plan,
-            previousAttemptSummary,
-          });
+          let coder: Awaited<ReturnType<typeof runCoderTurn>>;
+          try {
+            coder = await runCoderTurn(pickStageConfig(config, 'coder'), {
+              dataset: compressed,
+              plan: planner.plan,
+              previousAttemptSummary,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Coder returned an invalid model response.';
+            previousAttemptSummary = digestError(message);
+            board.setErrorDigest(previousAttemptSummary);
+            totalToolCalls += 1;
+            coderRetry += 1;
+            emit(config, {
+              type: 'error',
+              message: `Coder attempt ${attempt} failed: ${previousAttemptSummary}`,
+              fatal: false,
+            });
+            continue;
+          }
           totalToolCalls += 1;
           consumeBudget(
             budget,
@@ -205,6 +260,19 @@ export async function runLocalAgent(
           continue;
         }
 
+        const astCheck = await astCheckPython(injected.solverCode);
+        if (!astCheck.ok) {
+          previousAttemptSummary = digestError(astCheck.error || 'AST check rejected the generated code.');
+          board.setErrorDigest(previousAttemptSummary);
+          coderRetry += 1;
+          emit(config, {
+            type: 'error',
+            message: `AST check failed at attempt ${attempt}: ${previousAttemptSummary}`,
+            fatal: false,
+          });
+          continue;
+        }
+
         board.setLatestGeneratedSolver(injected.solverCode);
         emit(config, { type: 'phase', phase: 'running', message: 'Đang chạy solver', iteration: attempt });
 
@@ -217,7 +285,22 @@ export async function runLocalAgent(
           constraints: solverConstraintSpecs,
         };
 
-        const execResult = await executeGeneratedCode(injected.solverCode, executePayload, { timeoutMs });
+        let execResult: Awaited<ReturnType<typeof executeGeneratedCode>>;
+        try {
+          execResult = await executeGeneratedCode(injected.solverCode, executePayload, { timeoutMs });
+        } catch (error) {
+          previousAttemptSummary = digestError(
+            error instanceof Error ? error.message : 'Solver execution failed.'
+          );
+          board.setErrorDigest(previousAttemptSummary);
+          coderRetry += 1;
+          emit(config, {
+            type: 'error',
+            message: `Solver execution attempt ${attempt} failed: ${previousAttemptSummary}`,
+            fatal: false,
+          });
+          continue;
+        }
         totalToolCalls += 1;
         emit(config, { type: 'execution_result', attempt, result: execResult });
 
@@ -268,10 +351,48 @@ export async function runLocalAgent(
       }
 
       if (!lastReport || !lastRoundTrip) {
+        if (shouldRepairExecutableFailure(latestConstraintCode, previousAttemptSummary, repairRound)) {
+          if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+            throw new Error(`Stopped by MAX_TOTAL_TOOL_CALLS=${MAX_TOTAL_TOOL_CALLS}.`);
+          }
+
+          repairRound += 1;
+          emit(config, {
+            type: 'phase',
+            phase: 'fixing',
+            message: `Đang repair lỗi chạy code ${repairRound}/${MAX_REPAIR_ROUNDS}`,
+            iteration: repairRound,
+          });
+
+          const repair = await runRepairTurn(pickStageConfig(config, 'repair'), {
+            plan: planner.plan,
+            constraintCode: latestConstraintCode,
+            violations: [],
+            compileOrRunError: previousAttemptSummary,
+          });
+          totalToolCalls += 1;
+          consumeBudget(budget, repair.usageTokens, previousAttemptSummary, repair.rawResponse ?? '');
+
+          if (!repair.patches.length) {
+            return {
+              success: false,
+              error: buildCoderExhaustedMessage(previousAttemptSummary),
+            };
+          }
+
+          pendingRepairPatches = repair.patches;
+          continue;
+        }
+
         return {
           success: false,
-          error: 'Coder gave up before producing an executable schedule.',
+          error: buildCoderExhaustedMessage(previousAttemptSummary),
         };
+      }
+
+      const sampleMessages = lastReport.hardViolations.slice(0, 3).map((violation) => violation.message);
+      if (!lastRoundTrip.ok) {
+        sampleMessages.unshift(lastRoundTrip.message);
       }
 
       const violationSignature = buildViolationSignature(
@@ -289,13 +410,12 @@ export async function runLocalAgent(
         repeatedViolationCount = 1;
       }
       if (repeatedViolationCount >= 2) {
-        throw new Error('Stopped early: stuck detection triggered (same hard violations repeated).');
+        return {
+          success: false,
+          error: buildRepeatedViolationMessage(sampleMessages),
+        };
       }
 
-      const sampleMessages = lastReport.hardViolations.slice(0, 3).map((violation) => violation.message);
-      if (!lastRoundTrip.ok) {
-        sampleMessages.unshift(lastRoundTrip.message);
-      }
       emit(config, {
         type: 'violations_found',
         count: lastReport.hardViolations.length,
@@ -338,5 +458,8 @@ export async function runLocalAgent(
 
 export const __localAgentInternal = {
   buildViolationSignature,
+  buildCoderExhaustedMessage,
+  buildRepeatedViolationMessage,
   normalizeRoundTripMessage,
+  shouldRepairExecutableFailure,
 };

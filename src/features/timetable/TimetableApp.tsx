@@ -65,6 +65,7 @@ import {
 } from './constants'
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
 import { normalizeAssignments } from './utils'
+import { parseQuickImportText } from './quick-import'
 
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
@@ -147,6 +148,11 @@ type ConstraintItem = {
   type: keyof typeof constraintTypes
   text: string
   weight?: number
+}
+
+type TimetableAppProps = {
+  onBackToLanding?: () => void
+  quickDatasetText?: string | null
 }
 
 type BulkAssignmentError = {
@@ -357,11 +363,11 @@ function InfoField({ icon: Icon, label, placeholder, value, onChange }) {
   )
 }
 
-export default function App({ onBackToLanding }) {
+export default function App({ onBackToLanding, quickDatasetText }: TimetableAppProps) {
   const [page, setPage] = useState('select')
   const [selectedDays, setSelectedDays] = useState(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
   const [selectedSessions, setSelectedSessions] = useState(['morning'])
-  const [periods, setPeriods] = useState(defaultPeriods)
+  const [periods, setPeriods] = useState<Record<'morning' | 'afternoon' | 'night', number>>(defaultPeriods)
   const [deletedPeriods, setDeletedPeriods] = useState({})
   const [teacherInput, setTeacherInput] = useState('')
   const [teacherImportMode, setTeacherImportMode] = useState('update')
@@ -391,6 +397,7 @@ export default function App({ onBackToLanding }) {
   const [agentTimeline, setAgentTimeline] = useState<AgentLifecycleEvent[]>([])
   const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
+  const [quickImportError, setQuickImportError] = useState<string | null>(null)
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
@@ -419,6 +426,48 @@ export default function App({ onBackToLanding }) {
       }
     } catch {}
   }, [])
+
+  useEffect(() => {
+    if (!quickDatasetText) return
+
+    try {
+      const quickData = parseQuickImportText(quickDatasetText)
+      const now = Date.now()
+      const nextConstraints: ConstraintItem[] = [
+        ...quickData.hardConstraints.map((text, index) => ({
+          id: `quick-hard-${now}-${index}`,
+          type: 'required' as const,
+          text,
+        })),
+        ...quickData.softConstraints.map((text, index) => ({
+          id: `quick-soft-${now}-${index}`,
+          type: 'preferred' as const,
+          text,
+          weight: 5,
+        })),
+      ]
+
+      setSelectedDays(quickData.selectedDays)
+      setSelectedSessions(quickData.selectedSessions)
+      setPeriods(quickData.periods)
+      setDeletedPeriods({})
+      setTeacherList(quickData.teachers)
+      setSubjectList(quickData.subjects)
+      setClassList(quickData.classes)
+      setAssignmentList(quickData.assignments)
+      setConstraintList(nextConstraints)
+      setAssignmentValidationMessage(null)
+      setAiError(null)
+      setAiResult(null)
+      setShowTechnicalErrors(false)
+      setQuickImportError(null)
+      setPage('select')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không đọc được dữ liệu nhập nhanh.'
+      setQuickImportError(message)
+      setPage('select')
+    }
+  }, [quickDatasetText])
 
   const sortedTeacherList = useMemo(() => sortAlphabetically(teacherList), [teacherList])
   const sortedSubjectList = useMemo(() => sortAlphabetically(subjectList), [subjectList])
@@ -920,7 +969,7 @@ export default function App({ onBackToLanding }) {
     setAgentTimeline((current) => [...current, event])
   }, [])
 
-    const handleGenerate = async (_useTemplate = false) => {
+    const handleGenerate = async (options?: { skipConstraintConfirm?: boolean }) => {
 
     if (activePeriodCount <= 0) {
       setAiError(NO_ACTIVE_PERIOD_MESSAGE)
@@ -954,7 +1003,7 @@ export default function App({ onBackToLanding }) {
       const normalizedAssignments = normalizeAssignments(assignmentList)
       const needConfirm = constraintConfirmations.length > 0
 
-    if (needConfirm) {
+    if (needConfirm && !options?.skipConstraintConfirm) {
       const ok = window.confirm('Vui lòng xác nhận: hệ thống đang hiểu ràng buộc đúng như bạn đã nhập. Nhấn OK để tiếp tục xếp lịch.')
       if (!ok) {
         setAiError('Bạn đã hủy để chỉnh lại ràng buộc trước khi xếp lịch.')
@@ -1163,6 +1212,12 @@ const handleDownloadExcel = useCallback(() => {
                 <ChevronRight size={14} strokeWidth={1.5} />
               </button>
             </div>
+
+            {quickImportError ? (
+              <div className="mb-4 rounded-md border border-red-400/30 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200">
+                Nhập dữ liệu nhanh thất bại: {quickImportError}
+              </div>
+            ) : null}
 
             <header className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
               <div>

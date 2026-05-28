@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 360
 MAX_STDOUT_LINES = 100
 
 
@@ -74,31 +74,45 @@ def run_user_code(code: str, timeout: int) -> dict[str, Any]:
                 "stderr": _truncate_output(compile_proc.stderr or ""),
             }
 
+        from sandbox.run import run_sandboxed
+
         try:
-            run_proc = subprocess.run(
-                [sys.executable, str(solver_path)],
-                capture_output=True,
-                text=True,
-                cwd=workspace,
+            sandbox_result = run_sandboxed(
+                file_path=str(solver_path),
                 timeout=timeout,
+                workspace_dir=str(workspace),
             )
-        except subprocess.TimeoutExpired as exc:
+        except Exception as exc:
+            return {
+                "phase": "run",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": _digest_error(str(exc)),
+                "stdout": "",
+                "stderr": str(exc),
+            }
+
+        stdout = sandbox_result.get("stdout", "") or ""
+        stderr = sandbox_result.get("stderr", "") or ""
+        return_code = sandbox_result.get("return_code", -1)
+
+        if "timed out" in stderr.lower() or sandbox_result.get("message") == "Timeout":
             return {
                 "phase": "run",
                 "ok": False,
                 "status": "timeout",
                 "durationMs": int((time.time() - started) * 1000),
                 "errorDigest": f"Execution timed out after {timeout}s",
-                "stdout": _truncate_output(exc.stdout or ""),
-                "stderr": _truncate_output(exc.stderr or ""),
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr),
             }
 
-        stdout = run_proc.stdout or ""
-        stderr = run_proc.stderr or ""
         upper_stdout = stdout.upper()
         marker_count = upper_stdout.count("SOLUTION_FOUND")
-        no_solution_marker = "NO_SOLUTION:" in upper_stdout
 
+        # Early return if SOLUTION_FOUND appears more than once, as this indicates multiple
+        # distinct solver solutions were outputted, which violates parsing guarantees.
         if marker_count > 1:
             return {
                 "phase": "parse",
@@ -137,9 +151,9 @@ def run_user_code(code: str, timeout: int) -> dict[str, Any]:
         schedule = result_json.get("schedule", []) if isinstance(result_json, dict) else []
         status_raw = result_json.get("status", "unknown") if isinstance(result_json, dict) else "unknown"
         status = _map_status(str(status_raw))
-        if marker_count == 1:
-            status = "optimal" if status == "unknown" else status
-        if no_solution_marker and status in {"optimal", "feasible"}:
+
+        # Validation sanity: nếu schedule trống mà status nói optimal/feasible → ép infeasible.
+        if status in {"optimal", "feasible"} and not schedule:
             status = "infeasible"
 
         unscheduled: list[str] = []
@@ -155,11 +169,21 @@ def run_user_code(code: str, timeout: int) -> dict[str, Any]:
                 if isinstance(item, dict) and str(item.get("id")) not in scheduled_ids
             ]
 
-        ok = run_proc.returncode == 0 and status in {"optimal", "feasible"}
+        ok = return_code == 0 and status in {"optimal", "feasible"}
         digest_source = stderr if stderr.strip() else stdout
 
         artifact_dir = Path.cwd() / ".ai_results"
         artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        # Cleanup: giữ tối đa 50 file gần nhất
+        _MAX_ARTIFACTS = 50
+        existing = sorted(artifact_dir.glob("result_*.json"), key=lambda p: p.stat().st_mtime)
+        for old in existing[:-_MAX_ARTIFACTS]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
         artifact_path = artifact_dir / f"result_{int(time.time() * 1000)}.json"
         artifact_path.write_text(json.dumps(result_json, ensure_ascii=False), encoding="utf-8")
 

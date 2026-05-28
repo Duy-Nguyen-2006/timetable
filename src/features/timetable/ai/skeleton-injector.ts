@@ -62,3 +62,33 @@ export async function syntaxCheckPython(code: string): Promise<{ ok: boolean; er
     };
   }
 }
+
+export async function astCheckPython(code: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const response = await fetch('/api/ai/python-ast-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      result?: { ok?: boolean; error?: string };
+      error?: string;
+    };
+
+    if (!response.ok || !payload.ok || !payload.result) {
+      return { ok: false, error: payload.error || 'AST check API failed.' };
+    }
+
+    return {
+      ok: Boolean(payload.result.ok),
+      error: payload.result.error,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'AST check failed.',
+    };
+  }
+}

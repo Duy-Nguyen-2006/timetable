@@ -221,7 +221,7 @@ def run_in_sandbox(
         output = (result.stdout or "") + (result.stderr or "")
 
         success = result.returncode == 0 and (
-            "SOLUTION FOUND" in output.upper() or "✅" in output
+            "SOLUTION_FOUND" in output.upper() or "✅" in output
         )
 
         return {

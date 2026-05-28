@@ -42,7 +42,7 @@ function createWindow(url) {
 }
 
 // IPC for Python execution (used by local AI agent)
-ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 180000) => {
+ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360000) => {
   return new Promise((resolve) => {
     const binary = getPythonBinary('code_executor')
     const jobDir = path.join(app.getPath('temp'), `tack-job-${Date.now()}`)

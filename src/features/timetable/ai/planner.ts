@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 import type { ConstraintSpec, Plan } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, PlannerTurnResult } from './types';
+import { invokeChat } from './chat-client';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
 
@@ -23,19 +25,7 @@ const planSchema = z.object({
   risks: z.array(z.string()),
 });
 
-function defaultInvokeChat(payload: Record<string, unknown>): Promise<{ content?: string; usage?: ChatUsage }> {
-  return fetch('/api/ai/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).then(async (response) => {
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.ok) {
-      throw new Error(body?.error || `Chat API failed with status ${response.status}`);
-    }
-    return { content: String(body.content ?? ''), usage: body.usage as ChatUsage | undefined };
-  });
-}
+const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
 
 function loadPlannerSystemPrompt(): Promise<string> {
   return fetch('/prompts/planner.system.md')
@@ -142,7 +132,7 @@ export async function runPlannerTurn(
 
   try {
     const response = await invokeChat(payload);
-    const candidate = planSchema.parse(JSON.parse(response.content ?? '{}'));
+    const candidate = planSchema.parse(parseModelJson(response.content));
     return {
       plan: validatePlanCoverage(candidate, input.constraintSpecs),
       rawResponse: response.content,
