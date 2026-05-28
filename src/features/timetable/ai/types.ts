@@ -136,7 +136,7 @@ export interface CoderTurnResult {
 
 export interface RepairTurnResult {
   summary: string;
-  patches: Array<{ oldStr: string; newStr: string; reason: string }>;
+  patches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }>;
   assumptions: string[];
   rawResponse?: string;
   usageTokens?: number;

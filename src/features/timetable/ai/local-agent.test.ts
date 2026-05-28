@@ -122,6 +122,10 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
       return Response.json({ ok: true, result: { ok: true } });
     }
 
+    if (url.endsWith('/api/ai/python-ast-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
     if (url.endsWith('/api/ai/python-execute')) {
       const body = JSON.parse(String(init?.body ?? '{}')) as { code?: string };
       if (body.code?.includes("raise RuntimeError('bad')")) {
@@ -264,6 +268,10 @@ test('runLocalAgent returns a clear repeated-violation error instead of stopped 
     }
 
     if (url.endsWith('/api/ai/python-syntax-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-ast-check')) {
       return Response.json({ ok: true, result: { ok: true } });
     }
 

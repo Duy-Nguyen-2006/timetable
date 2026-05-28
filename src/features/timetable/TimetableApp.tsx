@@ -367,7 +367,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [page, setPage] = useState('select')
   const [selectedDays, setSelectedDays] = useState(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
   const [selectedSessions, setSelectedSessions] = useState(['morning'])
-  const [periods, setPeriods] = useState(defaultPeriods)
+  const [periods, setPeriods] = useState<Record<'morning' | 'afternoon' | 'night', number>>(defaultPeriods)
   const [deletedPeriods, setDeletedPeriods] = useState({})
   const [teacherInput, setTeacherInput] = useState('')
   const [teacherImportMode, setTeacherImportMode] = useState('update')

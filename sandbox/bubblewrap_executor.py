@@ -79,7 +79,6 @@ def run_with_bubblewrap(
         "--bind", str(workspace_dir), "/workspace",   # only writable area
         "--chdir", "/workspace",
         "--unshare-all",          # new user, pid, net, ipc, uts, cgroup, mount namespaces
-        "--share-net",            # REMOVE this line if you want full network block (may break some things)
         "--die-with-parent",
         "--new-session",
         "python", str(file_path.name),
@@ -95,7 +94,7 @@ def run_with_bubblewrap(
             timeout=timeout
         )
         output = (result.stdout or "") + (result.stderr or "")
-        success = result.returncode == 0 and "SOLUTION FOUND" in output.upper()
+        success = result.returncode == 0 and "SOLUTION_FOUND" in output.upper()
 
         return {
             "success": success,

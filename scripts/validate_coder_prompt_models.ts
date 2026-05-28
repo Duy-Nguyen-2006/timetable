@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import assert from 'node:assert';
 import path from 'node:path';
 
 type CoderResult = {
@@ -123,23 +125,47 @@ function hasForbiddenNestedSlots(code: string): boolean {
   return /slots\[[^\]]+\]\[[^\]]+\]\[[^\]]+\]/.test(code);
 }
 
-async function main() {
-  if (!MODELS.length) {
-    console.log(JSON.stringify({ ok: false, reason: 'No models configured' }, null, 2));
-    process.exit(1);
+async function validatePromptStatic() {
+  const promptContent = fsSync.readFileSync(path.join(process.cwd(), 'prompts', 'coder.system.md'), 'utf8');
+
+  const forbiddenPatterns = [
+    /template phức tạp.*xem note/i,
+    /tiếp các kind khác tương tự/i,
+    /\bTODO\b/i,
+    /\bFIXME\b/i,
+    /\.\.\.\s*\(.*\)/, // "... (anything)" pattern
+  ];
+
+  for (const pat of forbiddenPatterns) {
+    assert.ok(!pat.test(promptContent), `Coder prompt vẫn còn placeholder: ${pat}`);
   }
-  if (!PROVIDER_API_KEY) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          reason: 'Missing provider API key. Set CODER_PROVIDER_API_KEY or OPENROUTER_API_KEY.',
-        },
-        null,
-        2
-      )
+
+  // Test: cả 10 kind đều có template trong _add_implied (loại trừ weekly_periods_exact và subject_consecutive là raise/pass)
+  const kinds = [
+    'teacher_block_day', 'teacher_block_period', 'teacher_block_slot',
+    'teacher_max_per_day', 'teacher_max_consecutive',
+    'subject_pin_period', 'subject_consecutive', 'class_no_double_subject_day',
+    'weekly_periods_exact', 'pair_not_same_slot',
+  ];
+  const addImpliedSection = promptContent.split('def _add_implied')[1] ?? '';
+  for (const k of kinds) {
+    assert.ok(
+      addImpliedSection.includes(`kind == "${k}"`) || addImpliedSection.includes(`kind == '${k}'`),
+      `_add_implied thiếu kind: ${k}`
     );
-    process.exit(1);
+  }
+
+  console.log('Coder prompt static validation passed');
+}
+
+async function main() {
+  // 1) Static validation (always runs)
+  await validatePromptStatic();
+
+  // 2) Provider smoke (skip if no key)
+  if (!PROVIDER_API_KEY || !MODELS.length) {
+    console.log('Skipping provider smoke (no API key or models defined)');
+    return;
   }
 
   const systemPrompt = await loadSystemPrompt();

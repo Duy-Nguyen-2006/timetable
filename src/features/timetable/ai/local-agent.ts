@@ -6,7 +6,7 @@ import { compressPayload, digestError } from './input-compressor';
 import { runPlannerTurn } from './planner';
 import { executeGeneratedCode } from './python-bridge';
 import { applyRepairPatches, runRepairTurn } from './repair';
-import { injectConstraintCode, loadSolverSkeleton, syntaxCheckPython } from './skeleton-injector';
+import { astCheckPython, injectConstraintCode, loadSolverSkeleton, syntaxCheckPython } from './skeleton-injector';
 import { runTranslatorTurn } from './translator';
 import type { AgentInputPayload, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { WorkspaceBoard } from './workspace';
@@ -190,14 +190,28 @@ export async function runLocalAgent(
         emit(config, { type: 'phase', phase: 'coding', message: `Coder attempt ${attempt}`, iteration: attempt });
 
         if (pendingRepairPatches?.length && latestConstraintCode) {
-          latestConstraintCode = applyRepairPatches(latestConstraintCode, pendingRepairPatches);
-          pendingRepairPatches = null;
-          emit(config, {
-            type: 'stage_completed',
-            stage: 'coder',
-            attempt,
-            message: 'Applied repair patches from previous round',
-          });
+          try {
+            latestConstraintCode = applyRepairPatches(latestConstraintCode, pendingRepairPatches);
+            pendingRepairPatches = null;
+            emit(config, {
+              type: 'stage_completed',
+              stage: 'coder',
+              attempt,
+              message: 'Applied repair patches from previous round',
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Repair patch failed';
+            previousAttemptSummary = digestError(`Repair patch apply failed: ${message}`);
+            board.setErrorDigest(previousAttemptSummary);
+            pendingRepairPatches = null;
+            coderRetry += 1;
+            emit(config, {
+              type: 'error',
+              message: `Repair patch apply failed at attempt ${attempt}: ${message}`,
+              fatal: false,
+            });
+            continue;
+          }
         } else {
           emit(config, { type: 'stage_started', stage: 'coder', attempt, message: 'Coder started' });
           let coder: Awaited<ReturnType<typeof runCoderTurn>>;
@@ -243,6 +257,19 @@ export async function runLocalAgent(
           previousAttemptSummary = digestError(syntax.error || 'Python syntax error');
           board.setErrorDigest(previousAttemptSummary);
           coderRetry += 1;
+          continue;
+        }
+
+        const astCheck = await astCheckPython(injected.solverCode);
+        if (!astCheck.ok) {
+          previousAttemptSummary = digestError(astCheck.error || 'AST check rejected the generated code.');
+          board.setErrorDigest(previousAttemptSummary);
+          coderRetry += 1;
+          emit(config, {
+            type: 'error',
+            message: `AST check failed at attempt ${attempt}: ${previousAttemptSummary}`,
+            fatal: false,
+          });
           continue;
         }
 

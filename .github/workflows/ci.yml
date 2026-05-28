@@ -20,6 +20,8 @@ jobs:
       - run: python -m venv .venv
       - run: ./.venv/bin/pip install -U pip pytest ortools
       - run: npm run lint
+      - run: npm run test:prompt
+      - run: npx tsx --test "src/**/*.test.ts"
       - run: npm run build
       - name: Provider smoke tests
         env:

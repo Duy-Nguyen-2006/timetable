@@ -166,7 +166,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChatPayload;
     const baseURL = normalizeBaseURL(String(body.baseURL ?? '').trim());
-    const apiKey = String(body.apiKey ?? '').trim();
+    const apiKey = request.headers.get('x-provider-key')?.trim() || String(body.apiKey ?? '').trim();
     const model = String(body.model ?? '').trim();
     const messages = Array.isArray(body.messages) ? body.messages : [];
 

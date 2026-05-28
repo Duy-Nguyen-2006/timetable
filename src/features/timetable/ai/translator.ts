@@ -5,6 +5,7 @@ import { parseConstraint } from '@/lib/constraint-parser';
 import type { ConstraintSpec } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
+import { invokeChat } from './chat-client';
 
 type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
 
@@ -35,19 +36,7 @@ const translatorResponseSchema = z.object({
   constraintSpecs: z.array(constraintSpecSchema),
 });
 
-function defaultInvokeChat(payload: Record<string, unknown>): Promise<{ content?: string; usage?: ChatUsage }> {
-  return fetch('/api/ai/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }).then(async (response) => {
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.ok) {
-      throw new Error(body?.error || `Chat API failed with status ${response.status}`);
-    }
-    return { content: String(body.content ?? ''), usage: body.usage as ChatUsage | undefined };
-  });
-}
+const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
 
 function includesLabel(text: string, label: string): boolean {
   return text.toLocaleLowerCase('vi').includes(label.toLocaleLowerCase('vi'));
