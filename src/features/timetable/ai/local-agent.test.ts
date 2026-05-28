@@ -322,7 +322,7 @@ test('runLocalAgent returns a clear repeated-violation error instead of stopped 
     );
 
     assert.equal(result.success, false);
-    assert.equal(repairCalls, 1);
+    assert.equal(repairCalls, 2);
     assert.match(result.error ?? '', /^Không tạo được thời khóa biểu/);
     assert.doesNotMatch(result.error ?? '', /Stopped early/i);
   } finally {

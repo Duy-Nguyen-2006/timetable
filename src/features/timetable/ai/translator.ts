@@ -77,6 +77,103 @@ function extractDayId(text: string, days: Array<{ id: string; label: string }>):
   return null;
 }
 
+function buildTranslatorPeriods(input: AgentInputPayload): number[] {
+  const periodSet = new Set<number>();
+  const periodsByDay = buildTranslatorPeriodsByDay(input);
+
+  for (const periods of Object.values(periodsByDay)) {
+    for (const period of periods) {
+      if (Number.isFinite(period) && period > 0) periodSet.add(period);
+    }
+  }
+
+  return [...periodSet].sort((a, b) => a - b);
+}
+
+function buildTranslatorPeriodsByDay(input: AgentInputPayload): Record<string, number[]> {
+  const periodsByDay: Record<string, number[]> = {};
+  const allDaysHaveDayLevelCount = input.days.every((day) => {
+    const value = Number(input.periodCounts[day.id]);
+    return Number.isFinite(value) && value > 0;
+  });
+  const hasSessionCounts = input.sessions.some((session) => {
+    const value = Number(input.periodCounts[session.id]);
+    return Number.isFinite(value) && value > 0;
+  });
+
+  for (const day of input.days) {
+    const activePeriods: number[] = [];
+    const dayLevelValue = Number(input.periodCounts[day.id]);
+    const dayHasOwnCount = Number.isFinite(dayLevelValue) && dayLevelValue > 0;
+
+    if ((allDaysHaveDayLevelCount || dayHasOwnCount) && !hasSessionCounts) {
+      const deletedPeriods = new Set<number>();
+      for (const [key, isDeleted] of Object.entries(input.deletedPeriods)) {
+        if (!isDeleted) continue;
+        const [keyDay, , keyPeriodRaw] = key.split('-');
+        const keyPeriod = Number(keyPeriodRaw);
+        if (keyDay === day.id && Number.isFinite(keyPeriod)) deletedPeriods.add(keyPeriod);
+      }
+      for (let period = 1; period <= dayLevelValue; period += 1) {
+        if (!deletedPeriods.has(period)) activePeriods.push(period);
+      }
+      periodsByDay[day.id] = activePeriods;
+      continue;
+    }
+
+    let offset = 0;
+    for (const session of input.sessions) {
+      const sessionMax = Number(input.periodCounts[session.id] ?? 0);
+      for (let period = 1; period <= sessionMax; period += 1) {
+        const key = `${day.id}-${session.id}-${period}`;
+        if (!input.deletedPeriods[key]) activePeriods.push(offset + period);
+      }
+      offset += sessionMax;
+    }
+    periodsByDay[day.id] = activePeriods;
+  }
+
+  return periodsByDay;
+}
+
+function splitFallbackConstraintText(text: string): string[] {
+  if (/(nếu|neu)[\s\S]*(thì|thi)/iu.test(text)) {
+    return [text.trim()].filter(Boolean);
+  }
+
+  const hasPredicate = (clause: string) =>
+    /(không|khong|chỉ|chi|phải|phai|tối\s*đa|toi\s*da|max|đúng|dung|chính\s*xác|chinh\s*xac|liên\s*tiếp|lien\s*tiep|cùng|trùng|cung|trung)/iu.test(
+      clause,
+    );
+
+  return text
+    .split(/(?:;|\n|\r|\s+(?:đồng\s+thời|dong\s+thoi)\s+)/iu)
+    .flatMap((segment) => {
+      const clauses: string[] = [];
+      let remainder = segment.trim();
+      while (remainder) {
+        const match = /\s+(?:và)\s+/iu.exec(remainder);
+        if (!match) {
+          clauses.push(remainder);
+          break;
+        }
+
+        const before = remainder.slice(0, match.index).trim();
+        const after = remainder.slice(match.index + match[0].length).trim();
+        if (!hasPredicate(before) || !hasPredicate(after)) {
+          clauses.push(remainder);
+          break;
+        }
+
+        clauses.push(before);
+        remainder = after;
+      }
+      return clauses;
+    })
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
+
 function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   const teacherLabels = [...new Set(input.assignments.map((assignment) => assignment.teacher.label))];
   const classLabels = [...new Set(input.assignments.map((assignment) => assignment.class.label))];
@@ -84,16 +181,20 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   const dayIds = Object.fromEntries(input.days.map((day) => [day.id, day.id]));
   const sessionIds = Object.fromEntries(input.sessions.map((session) => [session.id, session.id]));
 
-  return input.constraints.map((constraint, index) => {
-    const id = `c${index + 1}`;
-    const parsed = parseConstraint(constraint.text, {
-      teacherLabels,
-      classLabels,
-      subjectLabels,
-      dayIds,
-      sessionIds,
-    });
-    const severity = constraint.type === 'required' ? 'hard' : 'soft';
+  let nextId = 1;
+  return input.constraints.flatMap((rawConstraint) => {
+    const clauses = splitFallbackConstraintText(rawConstraint.text);
+    return clauses.map((clause) => {
+      const constraint = { ...rawConstraint, text: clause };
+      const id = `c${nextId++}`;
+      const parsed = parseConstraint(constraint.text, {
+        teacherLabels,
+        classLabels,
+        subjectLabels,
+        dayIds,
+        sessionIds,
+      });
+      const severity = constraint.type === 'required' ? 'hard' : 'soft';
 
     if (/nếu|neu/iu.test(constraint.text) && /thì|thi/iu.test(constraint.text)) {
       const [ifClauseRaw, thenClauseRaw = ''] = constraint.text.split(/thì|thi/iu);
@@ -341,6 +442,7 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       },
       notes: 'fallback_parser',
     } satisfies ConstraintSpec;
+    });
   });
 }
 
@@ -488,12 +590,14 @@ export async function runTranslatorTurn(
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<TranslatorTurnResult> {
   const systemPrompt = await loadTranslatorSystemPrompt();
+  const periods = buildTranslatorPeriods(input);
   const context = {
     teachers: [...new Set(input.assignments.map((assignment) => assignment.teacher.label))],
     classes: [...new Set(input.assignments.map((assignment) => assignment.class.label))],
     subjects: [...new Set(input.assignments.map((assignment) => assignment.subject.label))],
     days: input.days,
-    periods: [...new Set(Object.values(input.periodCounts))],
+    periods,
+    periodsByDay: buildTranslatorPeriodsByDay(input),
   };
 
   const payload = {
@@ -594,5 +698,8 @@ export async function runTranslatorTurn(
 
 export const __translatorInternal = {
   sanitizeSpecs,
+  buildTranslatorPeriods,
+  buildTranslatorPeriodsByDay,
+  splitFallbackConstraintText,
   fallbackFromRuleParser,
 };

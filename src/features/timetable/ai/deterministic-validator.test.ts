@@ -223,6 +223,50 @@ describe('validator edge cases', () => {
     assert.equal(report.violations.length, 0);
   });
 
+  it('subject_consecutive follows Rule A for remainder periods', () => {
+    const subjectConsecutiveRule = spec('subject_consecutive_rule_a', 'subject_consecutive', {
+      subject: 'Toán',
+      length: 2,
+    });
+
+    const threePeriodsReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+      ],
+      [subjectConsecutiveRule]
+    );
+    assert.equal(threePeriodsReport.violations.length, 0);
+
+    const fivePeriodsReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 2, 'Toán', 'Sơn'),
+        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
+      ],
+      [subjectConsecutiveRule]
+    );
+    assert.equal(fivePeriodsReport.violations.length, 0);
+  });
+
+  it('subject_consecutive fails when Rule A required run count is not met', () => {
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'tue', 4, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
+        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
+      ],
+      [spec('subject_consecutive_rule_a_fail', 'subject_consecutive', { subject: 'Toán', length: 2 })]
+    );
+
+    assert.equal(report.violations.length, 1);
+  });
+
   it('weekly_periods_exact skips validation with auto_base tag', () => {
     const autoBaseSpec = spec('weekly_periods_auto_base', 'weekly_periods_exact', {
       assignmentId: 'asg_1',

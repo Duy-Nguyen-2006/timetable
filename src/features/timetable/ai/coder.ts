@@ -16,6 +16,10 @@ const coderResponseSchema = z.object({
 
 const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
 
+function isAiCodedSpec(spec: ConstraintSpec): boolean {
+  return spec.kind === 'custom_dsl';
+}
+
 function loadCoderSystemPrompt(): Promise<string> {
   return fetch('/prompts/coder.system.md')
     .then(async (response) => {
@@ -29,11 +33,11 @@ function loadCoderSystemPrompt(): Promise<string> {
 
 function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): CoderTurnResult {
   const customIds = specs
-    .filter((spec) => spec.kind === 'custom_dsl')
+    .filter(isAiCodedSpec)
     .map((spec) => spec.id);
 
   const hardCustomIds = specs
-    .filter((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl')
+    .filter((spec) => spec.severity === 'hard' && isAiCodedSpec(spec))
     .map((spec) => spec.id);
 
   const customIdSet = new Set(customIds);
@@ -94,13 +98,11 @@ export async function runCoderTurn(
   },
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<CoderTurnResult> {
-  const customSpecs = payload.dataset.constraints.filter(
-    (spec) => spec.kind === 'custom_dsl'
-  );
+  const customSpecs = payload.dataset.constraints.filter(isAiCodedSpec);
 
   if (customSpecs.length === 0) {
     return {
-      plan_summary: 'No custom_dsl constraints. Built-in registry handles all constraints.',
+      plan_summary: 'No AI-coded constraints. Built-in registry handles all constraints.',
       constraint_code: 'pass',
       covered_constraint_ids: [],
       assumptions: ['built_in_registry_handles_non_custom_constraints'],

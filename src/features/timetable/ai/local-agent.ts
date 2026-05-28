@@ -467,7 +467,7 @@ export async function runLocalAgent(
         previousViolationSignature = violationSignature;
         repeatedViolationCount = 1;
       }
-      if (repeatedViolationCount >= 2) {
+      if (repeatedViolationCount >= 2 && violationRepairRound >= MAX_VIOLATION_REPAIR_ROUNDS) {
         return {
           success: false,
           error: buildRepeatedViolationMessage(sampleMessages),

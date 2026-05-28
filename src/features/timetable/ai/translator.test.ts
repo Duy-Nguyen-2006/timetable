@@ -53,6 +53,89 @@ test('sanitize converts unknown day to custom_dsl', () => {
   assert.equal(result[0].kind, 'custom_dsl');
 });
 
+test('translator periods expands session counts instead of sending count values only', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 5, afternoon: 4 },
+  };
+
+  assert.deepEqual(__translatorInternal.buildTranslatorPeriods(input), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+test('translator periods uses active union from periodsByDay', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'mon', label: 'Thứ 2' },
+      { id: 'tue', label: 'Thứ 3' },
+    ],
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 2, afternoon: 1 },
+    deletedPeriods: { 'mon-morning-2': true, 'tue-afternoon-1': true },
+  };
+
+  assert.deepEqual(__translatorInternal.buildTranslatorPeriods(input), [1, 2, 3]);
+});
+
+test('translator periodsByDay reflects session offsets and deleted periods', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'mon', label: 'Thứ 2' },
+      { id: 'tue', label: 'Thứ 3' },
+    ],
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 2, afternoon: 1 },
+    deletedPeriods: { 'mon-morning-2': true },
+  };
+
+  assert.deepEqual(__translatorInternal.buildTranslatorPeriodsByDay(input), {
+    mon: [1, 3],
+    tue: [1, 2, 3],
+  });
+});
+
+test('fallback parser splits independent clauses', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    assignments: [
+      ...sampleInput.assignments,
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Hương' },
+        subject: { id: 's2', label: 'Văn' },
+        class: { id: 'c2', label: '6B' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Sơn không dạy thứ 2 và Hương không dạy tiết 1' }],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs.length, 2);
+  assert.deepEqual(specs.map((spec) => spec.id), ['c1', 'c2']);
+  assert.equal(specs[0].kind, 'teacher_block_day');
+  assert.equal(specs[1].kind, 'teacher_block_period');
+});
+
+test('fallback parser does not split if_then clauses', () => {
+  const clauses = __translatorInternal.splitFallbackConstraintText(
+    'Nếu Sơn và Hương dạy thứ 2 thì Hương không dạy thứ 3'
+  );
+
+  assert.equal(clauses.length, 1);
+});
+
 test('fallback parser returns at least one spec per constraint', () => {
   const result = __translatorInternal.fallbackFromRuleParser(sampleInput);
   assert.equal(result.length, 1);

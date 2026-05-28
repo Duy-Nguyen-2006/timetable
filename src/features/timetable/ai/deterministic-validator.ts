@@ -319,38 +319,44 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
     return true;
   });
 
-  const byClassDay = new Map<string, ScheduleEntry[]>();
+  const byClass = new Map<string, ScheduleEntry[]>();
   for (const entry of target) {
-    const key = `${entry.class}::${entry.day}`;
-    byClassDay.set(key, [...(byClassDay.get(key) ?? []), entry]);
+    byClass.set(entry.class, [...(byClass.get(entry.class) ?? []), entry]);
   }
 
-  for (const entries of byClassDay.values()) {
+  for (const entries of byClass.values()) {
     if (entries.length < length) continue;
-    const periods = entries
-      .map((entry) => toPeriod(entry.period))
-      .filter((period): period is number => period !== null)
-      .sort((a, b) => a - b);
-    const totalPeriodsForSubject = periods.length;
-    // Lưu ý: KHÔNG kiểm tra (total % length) vì một ngày có thể có 1 block
-    // đúng độ dài + lẻ 1 tiết ở ngày khác, không vi phạm subject_consecutive.
-    // (fix bug #13 — trước đây false-positive khi total=3, length=2.)
+    const totalPeriodsForSubject = entries.length;
+    // Rule A: subject_consecutive chỉ yêu cầu floor(total / length) block liên tiếp.
+    // Nếu total % length != 0, phần dư được phép xếp lẻ ở cùng ngày hoặc ngày khác;
+    // KHÔNG báo violation chỉ vì có tiết lẻ và không yêu cầu total chia hết cho length.
 
-    // Đếm số streak liên tiếp đủ dài length
+    // Đếm số streak liên tiếp đủ dài length trong từng ngày, không nối streak qua ngày khác.
     let runsOfCorrectLength = 0;
-    let streak = 1;
-
-    for (let i = 1; i < periods.length; i += 1) {
-      if (periods[i] === periods[i - 1] + 1) {
-        streak += 1;
-      } else {
-        if (streak >= length) runsOfCorrectLength += Math.floor(streak / length);
-        streak = 1;
-      }
+    const byDay = new Map<string, ScheduleEntry[]>();
+    for (const entry of entries) {
+      byDay.set(entry.day, [...(byDay.get(entry.day) ?? []), entry]);
     }
-    if (streak >= length) runsOfCorrectLength += Math.floor(streak / length);
 
-    // Cần ít nhất floor(total / length) block đủ độ dài.
+    for (const dayEntries of byDay.values()) {
+      const periods = dayEntries
+        .map((entry) => toPeriod(entry.period))
+        .filter((period): period is number => period !== null)
+        .sort((a, b) => a - b);
+      if (periods.length < length) continue;
+
+      let streak = 1;
+      for (let i = 1; i < periods.length; i += 1) {
+        if (periods[i] === periods[i - 1] + 1) {
+          streak += 1;
+        } else {
+          if (streak >= length) runsOfCorrectLength += Math.floor(streak / length);
+          streak = 1;
+        }
+      }
+      if (streak >= length) runsOfCorrectLength += Math.floor(streak / length);
+    }
+
     const requiredRuns = Math.floor(totalPeriodsForSubject / length);
     if (requiredRuns > 0 && runsOfCorrectLength < requiredRuns) {
       violations.push({

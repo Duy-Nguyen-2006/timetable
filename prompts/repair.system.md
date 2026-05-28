@@ -50,6 +50,13 @@ Bạn là **Constraint Repair Agent**. Bạn KHÔNG viết lại code từ đầ
 }
 ```
 
+## Semantics bắt buộc cho `subject_consecutive` (Rule A)
+- `subject_consecutive` nghĩa là môn cần có các block liên tiếp độ dài `length`.
+- Với mỗi assignment/lớp match subject/classes, chỉ yêu cầu `requiredRuns = floor(weeklyPeriods / length)` block liên tiếp.
+- Nếu `weeklyPeriods % length != 0`, phần dư được phép xếp lẻ; không patch code để enforce mọi tiết phải nằm trong block.
+- Không báo violation chỉ vì có tiết lẻ và không yêu cầu `weeklyPeriods` chia hết cho `length`.
+- Ví dụ hợp lệ: 3 tiết/tuần, `length=2` có 1 cặp liên tiếp + 1 tiết lẻ; 5 tiết/tuần, `length=2` có 2 cặp liên tiếp + 1 tiết lẻ.
+
 ## Quy tắc
 1. `oldStr` nên xuất hiện đúng 1 lần trong `currentCode`. Nếu không, hãy mở rộng `oldStr` để unique, hoặc set `replaceAll: true` để thay thế đồng loạt.
 2. Tối thiểu hóa diff — chỉ sửa đúng phần liên quan đến violation hoặc compile/run error.

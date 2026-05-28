@@ -61,6 +61,189 @@ def build_custom_constraints(model, slots, data):
             return day_periods
         return periods
 
+    def _build_condition_literal(condition):
+        op = condition.get("op") if isinstance(condition, dict) else None
+        lit = model.NewBoolVar(f"if_then_cond_{abs(hash(str(condition))) % 100000000}")
+
+        if op == "teacher_teaches_on_day":
+            teacher = condition.get("teacher")
+            day = condition.get("day")
+            day_slots = [
+                slots[(a["id"], day, p)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for p in _periods_for(day)
+            ]
+            if day_slots:
+                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(day_slots) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
+
+        if op == "teacher_teaches_at_slot":
+            teacher = condition.get("teacher")
+            day = condition.get("day")
+            period = int(condition.get("period"))
+            slot_vars = [
+                slots[(a["id"], day, period)]
+                for a in assignments
+                if a["teacher"] == teacher and period in _periods_for(day)
+            ]
+            if slot_vars:
+                model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(slot_vars) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
+
+        if op == "and":
+            args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
+            if not args:
+                model.Add(lit == 0)
+                return lit
+            for arg in args:
+                model.Add(lit <= arg)
+            model.Add(lit >= sum(args) - len(args) + 1)
+            return lit
+
+        if op == "or":
+            args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
+            if not args:
+                model.Add(lit == 0)
+                return lit
+            for arg in args:
+                model.Add(lit >= arg)
+            model.Add(lit <= sum(args))
+            return lit
+
+        if op == "not":
+            arg = _build_condition_literal(condition.get("arg", {}))
+            model.Add(lit + arg == 1)
+            return lit
+
+        model.Add(lit == 0)
+        return lit
+
+    def _add_subject_consecutive(spec, guard=None):
+        params = spec.get("params", {})
+        subj = params.get("subject")
+        length = int(params.get("length", 2) or 2)
+        if length <= 1:
+            return
+        target_classes = set(params.get("classes") or data["classes"])
+        for a in assignments:
+            if a["subject"] != subj or a["class"] not in target_classes:
+                continue
+            # Rule A: require only floor(weeklyPeriods / length) consecutive blocks.
+            # Any remainder (weeklyPeriods % length) may be scheduled as loose periods;
+            # do not require every subject period to belong to a consecutive block.
+            required_runs = int(a.get("weeklyPeriods", 0)) // length
+            if required_runs <= 0:
+                continue
+            run_vars = []
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(0, max(0, len(day_periods) - length + 1)):
+                    window = day_periods[i:i + length]
+                    if len(window) != length or any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    run = model.NewBoolVar(f"run_{a['id']}_{d}_{window[0]}_{length}")
+                    window_vars = [slots[(a["id"], d, p)] for p in window]
+                    for var in window_vars:
+                        model.Add(run <= var)
+                    model.Add(run >= sum(window_vars) - length + 1)
+                    run_vars.append(run)
+            if run_vars:
+                ct = model.Add(sum(run_vars) >= required_runs)
+                if guard is not None:
+                    ct.OnlyEnforceIf(guard)
+
+    def _apply_then_constraint(then_spec, guard):
+        kind = then_spec.get("kind")
+        params = then_spec.get("params", {})
+
+        if kind == "teacher_block_day":
+            t = params.get("teacher")
+            d = params.get("day")
+            for a in assignments:
+                if a["teacher"] == t:
+                    for p in _periods_for(d):
+                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+
+        elif kind == "teacher_block_period":
+            t = params.get("teacher")
+            p = int(params.get("period"))
+            for a in assignments:
+                if a["teacher"] == t:
+                    for d in days:
+                        if p in _periods_for(d):
+                            model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+
+        elif kind == "teacher_block_slot":
+            t = params.get("teacher")
+            d = params.get("day")
+            p = int(params.get("period"))
+            if p in _periods_for(d):
+                for a in assignments:
+                    if a["teacher"] == t:
+                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+
+        elif kind == "teacher_max_per_day":
+            t = params.get("teacher")
+            n = int(params.get("maxPerDay"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            for d in days:
+                model.Add(
+                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                ).OnlyEnforceIf(guard)
+
+        elif kind == "subject_pin_period":
+            subj = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            for a in assignments:
+                if a["subject"] == subj and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+
+        elif kind == "class_no_double_subject_day":
+            cls = params.get("class")
+            subj = params.get("subject")
+            asgs = [
+                a for a in assignments
+                if a["class"] == cls and (subj is None or a["subject"] == subj)
+            ]
+            for d in days:
+                model.Add(
+                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= 1
+                ).OnlyEnforceIf(guard)
+
+        elif kind == "pair_not_same_slot":
+            teachers = params.get("teachers", [])
+            if len(teachers) != 2:
+                return
+            t1, t2 = teachers
+            scope_day = (params.get("scope") or {}).get("day")
+            days_to_check = [scope_day] if scope_day else days
+            asgs1 = [a for a in assignments if a["teacher"] == t1]
+            asgs2 = [a for a in assignments if a["teacher"] == t2]
+            for d in days_to_check:
+                for p in _periods_for(d):
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in asgs1) +
+                        sum(slots[(a["id"], d, p)] for a in asgs2)
+                        <= 1
+                    ).OnlyEnforceIf(guard)
+
+        elif kind == "subject_consecutive":
+            _add_subject_consecutive(then_spec, guard)
+
+        else:
+            raise NotImplementedError(f"Unsupported if_then then kind: {kind}")
+
     for spec in constraints:
         kind = spec.get("kind")
         params = spec.get("params", {})
@@ -172,15 +355,16 @@ def build_custom_constraints(model, slots, data):
                     )
 
         elif kind == "subject_consecutive":
-            # Để deterministic-validator + repair LLM xử lý ở post-solve.
-            # Hằng số ràng buộc liên tiếp không đưa vào CP-SAT để tránh
-            # NotImplementedError crash trước cả khi có solution. (fix bug #17)
-            continue
+            _add_subject_consecutive(spec)
 
         elif kind == "if_then":
-            # Tương tự subject_consecutive: condition phụ thuộc vào nghiệm,
-            # check ở post-solve thay vì gài cứng vào model. (fix bug #17)
-            continue
+            condition = params.get("if")
+            then_specs = params.get("then", [])
+            if condition and isinstance(then_specs, list):
+                guard = _build_condition_literal(condition)
+                for then_spec in then_specs:
+                    if isinstance(then_spec, dict):
+                        _apply_then_constraint(then_spec, guard)
 
         elif kind == "custom_dsl":
             # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
