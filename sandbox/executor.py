@@ -30,6 +30,7 @@ from typing import Dict, Any, Optional
 
 # Name of the Docker image we will build/use
 SANDBOX_IMAGE = "timetable-sandbox:latest"
+SANDBOX_WORKSPACE_CONTAINER_PATH = "/sandbox_workspace"
 
 
 def ensure_image_built() -> bool:
@@ -80,6 +81,7 @@ def run_in_sandbox(
     timeout: int = 120,
     memory_limit: str = "4g",
     cpu_limit: int = 2,
+    strict: bool = True,
     workspace_dir: Optional[str] = None,
     extra_mounts: Optional[Dict[str, str]] = None,
     env_vars: Optional[Dict[str, str]] = None,
@@ -92,6 +94,7 @@ def run_in_sandbox(
         timeout: Max seconds the container is allowed to run.
         memory_limit: Docker memory limit (e.g. "2g", "512m").
         cpu_limit: Number of CPU cores (e.g. 1.5, 2).
+        strict: If True, raise RuntimeError when sandbox cannot be initialized.
         workspace_dir: Directory that will be mounted as /workspace inside container.
                        Everything outside this dir is invisible to the code.
         extra_mounts: Additional host_path -> container_path (read-only) mounts.
@@ -108,6 +111,10 @@ def run_in_sandbox(
             - sandbox: True
     """
     if not ensure_image_built():
+        if strict:
+            raise RuntimeError(
+                "[SANDBOX] Docker image unavailable and strict=True. Refusing to execute untrusted code."
+            )
         return {
             "success": False,
             "return_code": -1,
@@ -135,6 +142,18 @@ def run_in_sandbox(
         # Default: use the directory containing the file being executed
         workspace_dir = str(file_path.parent)
     workspace_dir = Path(workspace_dir).resolve()
+    try:
+        file_path.relative_to(workspace_dir)
+    except ValueError:
+        return {
+            "success": False,
+            "return_code": -1,
+            "stdout": "",
+            "stderr": f"File must be inside sandbox workspace directory: {workspace_dir}",
+            "combined_output": "SANDBOX ERROR: file outside allowed directory",
+            "message": "Sandbox workspace policy violation",
+            "sandbox": True
+        }
 
     # Create a unique container name for easier cleanup
     container_name = f"sandbox-run-{int(time.time() * 1000)}"
@@ -164,10 +183,10 @@ def run_in_sandbox(
         "-u", "sandbox",
 
         # Mount only the workspace (read-write)
-        "-v", f"{workspace_dir}:/workspace:rw",
+        "-v", f"{workspace_dir}:{SANDBOX_WORKSPACE_CONTAINER_PATH}:rw",
 
         # Working directory inside container
-        "-w", "/workspace",
+        "-w", SANDBOX_WORKSPACE_CONTAINER_PATH,
     ]
 
     # Add extra read-only mounts if provided (e.g. datasets, libraries)
@@ -184,11 +203,11 @@ def run_in_sandbox(
     # The actual command
     cmd.extend([
         SANDBOX_IMAGE,
-        "python", str(file_path.name)   # run the file by name inside /workspace
+        "python", str(file_path.name)   # run the file by name inside sandbox workspace
     ])
 
     print(f"[Sandbox] Running in isolated container: {file_path.name}")
-    print(f"[Sandbox] Workspace mounted: {workspace_dir} → /workspace")
+    print(f"[Sandbox] Workspace mounted: {workspace_dir} → {SANDBOX_WORKSPACE_CONTAINER_PATH}")
     print(f"[Sandbox] Limits: memory={memory_limit}, cpus={cpu_limit}, network=none")
 
     try:

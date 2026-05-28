@@ -29,17 +29,19 @@ import * as XLSX from 'xlsx'
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
 import { SettingsModal } from './SettingsModal'
-import type { AIProviderConfig } from './ai/types'
+import type {
+  AIProviderConfig,
+  AgentInputPayload,
+  AgentLifecycleEvent,
+  AgentLifecyclePhase,
+  LocalAgentFinalResult,
+} from './ai/types'
+import type { DeterministicValidationReport } from './ai/constraint-spec'
 import { Settings as SettingsIcon } from 'lucide-react'
 
-// Temporary shims for types that belonged to the removed remote AI layer (allows clean build)
-type AgentLifecyclePhase = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle';
-type AgentLifecycleEvent = any;
-type TimetableSolveResult = any;
-type ConstraintCheckItem = any;
-type DeterministicValidationReport = any;
-type CheckerReport = any;
-type SolverRequestPayload = any;
+type TimetableSolveResult = LocalAgentFinalResult
+type SolverRequestPayload = Pick<AgentInputPayload, 'constraints'>
+type AgentProgressStep = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -68,7 +70,7 @@ const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
 
 const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
-const STEP_LABELS: Record<AgentLifecyclePhase, string> = {
+const STEP_LABELS: Record<AgentProgressStep, string> = {
   thinking: 'Suy nghi',
   coding: 'Viet code',
   running: 'Chay thu',
@@ -77,105 +79,46 @@ const STEP_LABELS: Record<AgentLifecyclePhase, string> = {
   idle: 'Idle',
 }
 
-function formatDuration(ms: number) {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(ms >= 10_000 ? 0 : 1)}s`
-}
-
-function formatNullableNumber(value: number | null | undefined) {
-  if (value === null || value === undefined) return '—'
-  return value.toLocaleString('vi-VN')
-}
-
-function getVerdictBadge(verdict: TimetableSolveResult['verdict']) {
-  switch (verdict) {
-    case 'accept':
-      return {
-        label: 'Accepted',
-        className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-      }
-    case 'retry':
-      return {
-        label: 'Retry',
-        className: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
-      }
-    case 'infeasible':
-      return {
-        label: 'Infeasible',
-        className: 'border-red-400/30 bg-red-400/10 text-red-300',
-      }
+function toProgressStep(phase: AgentLifecyclePhase): AgentProgressStep {
+  switch (phase) {
+    case 'coding':
+    case 'running':
+    case 'checking':
+    case 'fixing':
+      return phase
+    case 'translator':
+    case 'planner':
+    case 'thinking':
+      return 'thinking'
+    case 'idle':
+      return 'idle'
     default:
-      return {
-        label: 'Error',
-        className: 'border-white/15 bg-white/[0.04] text-white/70',
-      }
+      return 'thinking'
   }
-}
-
-function getCheckSeverityBadge(severity: ConstraintCheckItem['severity']) {
-  switch (severity) {
-    case 'base':
-      return 'border-red-400/25 bg-red-400/10 text-red-300'
-    case 'hard':
-      return 'border-amber-400/25 bg-amber-400/10 text-amber-300'
-    default:
-      return 'border-sky-400/25 bg-sky-400/10 text-sky-300'
-  }
-}
-
-function getCheckStatusBadge(passed: boolean) {
-  return passed
-    ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300'
-    : 'border-red-400/25 bg-red-400/10 text-red-300'
-}
-
-function renderList(items: string[] | undefined | null, emptyLabel = 'Không có') {
-  if (!items?.length) return <span className="text-white/35">{emptyLabel}</span>
-  return (
-    <ul className="space-y-1">
-      {items.map((item, index) => (
-        <li key={`${item}-${index}`} className="text-xs text-white/60">
-          • {item}
-        </li>
-      ))}
-    </ul>
-  )
 }
 
 function buildReportRows(
   title: string,
-  report: DeterministicValidationReport | CheckerReport | null | undefined,
+  report: DeterministicValidationReport | null | undefined,
 ): string[][] {
   if (!report) return [[title, 'Không có dữ liệu']]
 
   const rows: string[][] = [
-    [title, report.summary],
+    [title, ''],
     ['Base constraint pass', report.baseConstraintPass ? 'Yes' : 'No'],
     ['Hard constraint pass', report.hardConstraintPass ? 'Yes' : 'No'],
-    ['Soft score', String(report.softConstraintScore)],
+    ['Soft constraint pass', report.softConstraintPass ? 'Yes' : 'No'],
+    ['Unchecked constraints', report.uncheckedConstraintIds?.join(' | ') || 'None'],
   ]
 
-  if ('valid' in report) {
-    rows.push(['Overall valid', report.valid ? 'Yes' : 'No'])
-    rows.push(['Unchecked constraints', report.uncheckedConstraintIds.join(' | ') || 'None'])
-  }
-
-  if ('verdict' in report) {
-    rows.push(['Verdict', report.verdict])
-    rows.push(['Retry instructions', report.retryInstructions.join(' | ') || 'None'])
-  }
-
   rows.push([])
-  rows.push(['constraintId', 'severity', 'passed', 'reason', 'suggestion', 'original'])
-  const checks = 'checks' in report ? report.checks : report.violations
-  checks.forEach((check) => {
+  rows.push(['constraintId', 'kind', 'message', 'offending entries'])
+  report.violations.forEach((check) => {
     rows.push([
       check.constraintId,
-      check.severity,
-      check.passed ? 'Yes' : 'No',
-      check.reason,
-      check.suggestion ?? '',
-      check.original,
+      check.kind,
+      check.message,
+      String(check.offendingEntries?.length ?? 0),
     ])
   })
 
@@ -189,36 +132,6 @@ function MetricCard({ label, value }: { label: string; value: ReactNode }) {
       <div className="mt-1 text-sm text-white/70">{value}</div>
     </div>
   )
-}
-
-function getLifecycleStatusClass(status: AgentLifecycleEvent['status']) {
-  switch (status) {
-    case 'completed':
-      return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300'
-    case 'active':
-      return 'border-sky-400/25 bg-sky-400/10 text-sky-300'
-    case 'failed':
-      return 'border-red-400/25 bg-red-400/10 text-red-300'
-    default:
-      return 'border-white/15 bg-white/[0.04] text-white/70'
-  }
-}
-
-function getLifecyclePhaseClass(phase: AgentLifecyclePhase) {
-  switch (phase) {
-    case 'thinking':
-      return 'border-white/15 bg-white/[0.04] text-white/70'
-    case 'coding':
-      return 'border-blue-400/25 bg-blue-400/10 text-blue-300'
-    case 'running':
-      return 'border-cyan-400/25 bg-cyan-400/10 text-cyan-300'
-    case 'checking':
-      return 'border-violet-400/25 bg-violet-400/10 text-violet-300'
-    case 'fixing':
-      return 'border-amber-400/25 bg-amber-400/10 text-amber-300'
-    default:
-      return 'border-white/15 bg-white/[0.04] text-white/70'
-  }
 }
 
 type AssignmentItem = {
@@ -471,7 +384,7 @@ export default function App({ onBackToLanding }) {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
-  const [agentStep, setAgentStep] = useState<'idle' | 'thinking' | 'coding' | 'running' | 'checking' | 'fixing'>('idle')
+  const [agentStep, setAgentStep] = useState<AgentProgressStep>('idle')
   const [agentIteration, setAgentIteration] = useState(0)
   const [agentMaxIterations, setAgentMaxIterations] = useState(5)
   const [agentElapsed, setAgentElapsed] = useState(0)
@@ -485,13 +398,22 @@ export default function App({ onBackToLanding }) {
   const [isFirstRun, setIsFirstRun] = useState(false)
 
   const AI_PROVIDER_STORAGE_KEY = 'tack_ai_provider_config'
+  const encodeProviderConfig = (config: AIProviderConfig) =>
+    btoa(unescape(encodeURIComponent(JSON.stringify(config))))
+  const decodeProviderConfig = (raw: string): AIProviderConfig => {
+    try {
+      return JSON.parse(decodeURIComponent(escape(atob(raw)))) as AIProviderConfig
+    } catch {
+      return JSON.parse(raw) as AIProviderConfig
+    }
+  }
 
   useEffect(() => {
     // Load local AI provider config
     try {
       const saved = localStorage.getItem(AI_PROVIDER_STORAGE_KEY)
       if (saved) {
-        setAiProvider(JSON.parse(saved))
+        setAiProvider(decodeProviderConfig(saved))
       } else {
         setIsFirstRun(true)
       }
@@ -1091,13 +1013,7 @@ export default function App({ onBackToLanding }) {
               // Map new local agent events to existing UI state (reusing all the beautiful timeline UI)
               if (event.type === 'status' || event.type === 'phase') {
                 setAgentStatus(event.message)
-                setAgentStep(event.type === 'phase' ? (event.phase as any) : 'thinking')
-              }
-              if (event.type === 'running_code') {
-                setAgentStep('running')
-              }
-              if (event.type === 'reviewer_started') {
-                setAgentStep('checking')
+                setAgentStep(event.type === 'phase' ? toProgressStep(event.phase) : 'thinking')
               }
               pushTimelineEvent({
                 id: crypto.randomUUID(),
@@ -1115,13 +1031,7 @@ export default function App({ onBackToLanding }) {
 
 
         if (agentResult && agentResult.success && agentResult.finalResult) {
-          const normalizedResult = {
-            status: 'solved',
-            message: 'Đã tạo thời khóa biểu thành công.',
-            violations: [],
-            ...agentResult.finalResult,
-          }
-          setAiResult(normalizedResult);
+          setAiResult(agentResult.finalResult as any);
           setAgentStatus("Hoàn thành!");
           setAgentStep("idle");
         } else if (agentResult?.error) {
@@ -1186,64 +1096,28 @@ const handleDownloadExcel = useCallback(() => {
 
       const checkerRows = buildReportRows('Checker report', aiResult.checkerReport)
       const deterministicRows = buildReportRows('Deterministic validation', aiResult.deterministicReport)
-      const softWarningRows: string[][] = [
-        ['constraintId', 'severity', 'passed', 'reason', 'suggestion', 'original'],
-        ...((aiResult.checkerReport?.userSoftWarnings ?? []).map((check) => [
-          check.constraintId,
-          check.severity,
-          check.passed ? 'Yes' : 'No',
-          check.reason,
-          check.suggestion ?? '',
-          check.original,
-        ])),
-      ]
       const diagnosticsRows: string[][] = [
 
       ['Field', 'Value'],
       ['Status', aiResult.status],
-      ['Verdict', aiResult.verdict],
       ['Message', aiResult.message],
-      ['Final reason', aiResult.finalReason ?? ''],
-      ['Overall assessment', aiResult.overallAssessment ?? ''],
-      ['Artifact path', aiResult.artifactSummary?.path ?? ''],
-      ['Artifact entrypoint', aiResult.artifactSummary?.entrypoint ?? ''],
-      ['Artifact source hash', aiResult.artifactSummary?.sourceHash ?? ''],
-      ['Artifact summary', aiResult.artifactSummary?.summary ?? ''],
-      ['Artifact assumptions', aiResult.artifactSummary?.assumptions.join(' | ') ?? ''],
       ['Diagnostics', aiResult.diagnostics.join(' | ') || ''],
       ['Execution errors', aiResult.executionErrors.map((item) => `${item.constraintId}: ${item.error}`).join(' | ')],
       ['Validation errors', aiResult.validationErrors.map((item) => `${item.constraintId}: ${item.error}`).join(' | ')],
       ['IIS constraint ids', aiResult.iisConstraintIds.join(' | ')],
       ['Conflicting constraints', aiResult.conflictingConstraints.map((item) => `${item.id}: ${item.text}`).join(' | ')],
-      ['Telemetry duration', String(aiResult.telemetry?.totalDurationMs ?? '')],
-      ['Telemetry compile attempts', String(aiResult.telemetry?.compileAttempts ?? '')],
-      ['Telemetry repair attempts', String(aiResult.telemetry?.repairAttempts ?? '')],
-      ['Telemetry solver attempts', String(aiResult.telemetry?.solverAttempts ?? '')],
-      ['Telemetry llm calls', String(aiResult.telemetry?.llmCallCount ?? '')],
-      ['Telemetry total attempts', String(aiResult.telemetry?.totalAttempts ?? '')],
-      ['Telemetry chars in', String(aiResult.telemetry?.tokenEstimateCharsIn ?? '')],
-      ['Telemetry chars out', String(aiResult.telemetry?.tokenEstimateCharsOut ?? '')],
-      ['Telemetry no progress count', String(aiResult.telemetry?.noProgressCount ?? '')],
-      ['Telemetry guardrail stop reason', aiResult.telemetry?.guardrailStopReason ?? ''],
       [],
-      ['Attempt', 'Phase', 'Status', 'Summary', 'Details', 'Artifact Path', 'Source Hash', 'Started At', 'Finished At'],
+      ['Stage', 'Summary', 'At'],
       ...(aiResult.attemptHistorySummary ?? []).map((attempt) => [
-        String(attempt.attempt),
-        attempt.phase,
-        attempt.status,
+        attempt.stage,
         attempt.summary,
-        attempt.details?.join(' | ') ?? '',
-        attempt.artifactPath ?? '',
-        attempt.sourceHash ?? '',
-        attempt.startedAt ?? '',
-        attempt.finishedAt ?? '',
+        attempt.at,
       ]),
     ]
 
       XLSX.utils.book_append_sheet(wb, timetableSheet, 'Thời khóa biểu')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(checkerRows), 'Checker report')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deterministicRows), 'Validation report')
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(softWarningRows), 'Soft warnings')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagnosticsRows), 'Diagnostics')
 
     XLSX.writeFile(wb, 'thoi-khoa-bieu.xlsx')
@@ -2724,304 +2598,114 @@ const handleDownloadExcel = useCallback(() => {
 
                       {aiResult && !aiLoading && (
                         <div className="mb-4 space-y-4">
-                          {aiResult.telemetry && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-start justify-between gap-3">
-                                <div>
-                                  <h3 className="text-sm font-semibold text-white">Telemetry & orchestration</h3>
-                                  <p className="text-xs text-white/40">Tổng quan tiến trình solver, checker và guardrail.</p>
-                                </div>
-                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${getVerdictBadge(aiResult.verdict).className}`}>
-                                  {getVerdictBadge(aiResult.verdict).label}
-                                </span>
-                              </div>
-                              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                                <MetricCard label="Status" value={aiResult.status} />
-                                <MetricCard label="Verdict" value={aiResult.verdict} />
-                                <MetricCard label="Duration" value={formatDuration(aiResult.telemetry.totalDurationMs)} />
-                                <MetricCard label="Guardrail" value={aiResult.telemetry.guardrailStopReason ?? '—'} />
-                                <MetricCard label="Compile attempts" value={formatNullableNumber(aiResult.telemetry.compileAttempts)} />
-                                <MetricCard label="Repair attempts" value={formatNullableNumber(aiResult.telemetry.repairAttempts)} />
-                                <MetricCard label="Solver attempts" value={formatNullableNumber(aiResult.telemetry.solverAttempts)} />
-                                <MetricCard label="LLM calls" value={formatNullableNumber(aiResult.telemetry.llmCallCount)} />
-                                <MetricCard label="Chars in" value={formatNullableNumber(aiResult.telemetry.tokenEstimateCharsIn)} />
-                                <MetricCard label="Chars out" value={formatNullableNumber(aiResult.telemetry.tokenEstimateCharsOut)} />
-                                <MetricCard label="Loop attempts" value={formatNullableNumber(aiResult.telemetry.totalAttempts)} />
-                                <MetricCard label="No-progress count" value={formatNullableNumber(aiResult.telemetry.noProgressCount)} />
-                              </div>
-                            </section>
-                          )}
+                          <section className={`${panelClass} p-4`}>
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <h3 className="text-sm font-semibold text-white">Kết quả pipeline</h3>
+                              <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                                {aiResult.status}
+                              </span>
+                            </div>
+                            <p className="mb-3 text-xs text-white/55">{aiResult.message}</p>
+                            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                              <MetricCard label="Base constraints" value={aiResult.deterministicReport.baseConstraintPass ? 'Pass' : 'Fail'} />
+                              <MetricCard label="Hard constraints" value={aiResult.deterministicReport.hardConstraintPass ? 'Pass' : 'Fail'} />
+                              <MetricCard label="Soft constraints" value={aiResult.deterministicReport.softConstraintPass ? 'Pass' : 'Fail'} />
+                              <MetricCard label="Violations" value={aiResult.deterministicReport.violations.length} />
+                            </div>
+                          </section>
 
-                          {(aiResult.artifactSummary || aiResult.solverStats) && (
+                          {aiResult.deterministicReport.hardViolations.length > 0 ? (
                             <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <Hash size={16} strokeWidth={1.5} className="text-sky-300" />
-                                </span>
-                                <div>
-                                  <h3 className="text-sm font-semibold text-white">Artifact & solver runtime</h3>
-                                  <p className="text-xs text-white/40">Thông tin artifact Python và thống kê solve lần cuối.</p>
-                                </div>
-                              </div>
-                              <div className="grid gap-2 lg:grid-cols-2">
-                                <div className={`${panelMutedClass} space-y-2 p-3`}>
-                                  <p className="text-[10px] uppercase tracking-widest text-white/35">Artifact summary</p>
-                                  <p className="text-sm text-white/70">{aiResult.artifactSummary?.summary ?? 'Không có artifact summary.'}</p>
-                                  <div className="space-y-1 text-xs text-white/45">
-                                    <p><span className="text-white/30">Path:</span> {aiResult.artifactSummary?.path ?? '—'}</p>
-                                    <p><span className="text-white/30">Entrypoint:</span> {aiResult.artifactSummary?.entrypoint ?? '—'}</p>
-                                    <p><span className="text-white/30">Source hash:</span> {aiResult.artifactSummary?.sourceHash ?? '—'}</p>
-                                  </div>
-                                  <div>
-                                    <p className="mb-1 text-[10px] uppercase tracking-widest text-white/35">Assumptions</p>
-                                    {renderList(aiResult.artifactSummary?.assumptions, 'Không có assumptions')}
-                                  </div>
-                                </div>
-                                <div className={`${panelMutedClass} p-3`}>
-                                  <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Solver stats</p>
-                                  <div className="grid gap-2 sm:grid-cols-2">
-                                    <MetricCard label="Wall time (s)" value={formatNullableNumber(aiResult.solverStats?.wallTimeSeconds)} />
-                                    <MetricCard label="Objective" value={formatNullableNumber(aiResult.solverStats?.objectiveValue)} />
-                                    <MetricCard label="Best bound" value={formatNullableNumber(aiResult.solverStats?.bestBound)} />
-                                    <MetricCard label="Conflicts" value={formatNullableNumber(aiResult.solverStats?.numConflicts)} />
-                                    <MetricCard label="Branches" value={formatNullableNumber(aiResult.solverStats?.numBranches)} />
-                                    <MetricCard label="Request ID" value={aiResult.requestId ?? '—'} />
-                                  </div>
-                                </div>
-                              </div>
-                            </section>
-                          )}
-
-                          {aiResult.deterministicReport && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center justify-between gap-3">
-                                <div>
-                                  <h3 className="text-sm font-semibold text-white">Deterministic validation</h3>
-                                  <p className="text-xs text-white/40">Layer kiểm tra base/hard/soft constraints sau solver run.</p>
-                                </div>
-                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${aiResult.deterministicReport.valid ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-red-400/30 bg-red-400/10 text-red-300'}`}>
-                                  {aiResult.deterministicReport.valid ? 'Valid' : 'Invalid'}
-                                </span>
-                              </div>
-                              <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                                <MetricCard label="Base constraints" value={aiResult.deterministicReport.baseConstraintPass ? 'Pass' : 'Fail'} />
-                                <MetricCard label="Hard constraints" value={aiResult.deterministicReport.hardConstraintPass ? 'Pass' : 'Fail'} />
-                                <MetricCard label="Soft score" value={formatNullableNumber(aiResult.deterministicReport.softConstraintScore)} />
-                                <MetricCard label="Unchecked" value={formatNullableNumber(aiResult.deterministicReport.uncheckedConstraintIds.length)} />
-                              </div>
-                              <p className="mb-3 text-sm text-white/65">{aiResult.deterministicReport.summary}</p>
+                              <h3 className="mb-3 text-sm font-semibold text-white">Hard violations</h3>
                               <div className="space-y-2">
-                                {aiResult.deterministicReport.checks.map((check) => (
-                                  <div key={`det-${check.constraintId}`} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
-                                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckSeverityBadge(check.severity)}`}>{check.severity}</span>
-                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckStatusBadge(check.passed)}`}>{check.passed ? 'Pass' : 'Fail'}</span>
-                                      <span className="text-xs text-white/35">{check.constraintId}</span>
-                                    </div>
-                                    <p className="text-sm text-white/75">{check.original}</p>
-                                    <p className="mt-1 text-xs text-white/45">{check.reason}</p>
-                                    {check.suggestion ? <p className="mt-1 text-xs text-sky-300/70">Gợi ý: {check.suggestion}</p> : null}
+                                {aiResult.deterministicReport.hardViolations.map((violation, index) => (
+                                  <div key={`${violation.constraintId}-${index}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3">
+                                    <p className="text-xs font-medium text-red-300/80">{violation.constraintId}</p>
+                                    <p className="mt-1 text-sm text-white/75">{violation.message}</p>
                                   </div>
                                 ))}
                               </div>
-                              {aiResult.deterministicReport.uncheckedConstraintIds.length > 0 ? (
-                                <div className="mt-3 rounded-md border border-amber-400/15 bg-amber-400/[0.04] p-3 text-xs text-amber-200/80">
-                                  Chưa kiểm tra được: {aiResult.deterministicReport.uncheckedConstraintIds.join(', ')}
+                            </section>
+                          ) : null}
+
+                          {aiResult.deterministicReport.uncheckedConstraintIds.length > 0 ? (
+                            <section className={`${panelClass} p-4`}>
+                              <p className="text-xs text-amber-200/80">
+                                Chưa kiểm tra được: {aiResult.deterministicReport.uncheckedConstraintIds.join(', ')}
+                              </p>
+                            </section>
+                          ) : null}
+
+                          {(agentTimeline.length > 0 || (aiResult.attemptHistorySummary?.length ?? 0) > 0) && (
+                            <section className={`${panelClass} p-4`}>
+                              <h3 className="mb-3 text-sm font-semibold text-white">Timeline</h3>
+                              {agentTimeline.length > 0 ? (
+                                <div className="space-y-2">
+                                  {agentTimeline.map((event) => (
+                                    <div key={event.id} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
+                                      <p className="text-xs text-white/35">{new Date(event.timestamp).toLocaleTimeString('vi-VN')}</p>
+                                      <p className="text-sm font-medium text-white/80">{event.title}</p>
+                                      <p className="text-xs text-white/45">{event.detail}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {(aiResult.attemptHistorySummary?.length ?? 0) > 0 ? (
+                                <div className="mt-3 space-y-2">
+                                  {aiResult.attemptHistorySummary.map((attempt, index) => (
+                                    <div key={`${attempt.stage}-${index}`} className="rounded-md border border-white/[0.06] bg-[#101010] p-3">
+                                      <p className="text-xs text-white/35">{attempt.at}</p>
+                                      <p className="text-sm text-white/75">{attempt.stage}: {attempt.summary}</p>
+                                    </div>
+                                  ))}
                                 </div>
                               ) : null}
                             </section>
                           )}
 
-                          {aiResult.checkerReport && (
+                          {((aiResult.executionErrors && aiResult.executionErrors.length > 0) ||
+                            (aiResult.validationErrors && aiResult.validationErrors.length > 0)) && (
                             <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center justify-between gap-3">
-                                <div>
-                                  <h3 className="text-sm font-semibold text-white">Checker report</h3>
-                                  <p className="text-xs text-white/40">Kết luận cuối cùng từ lớp checker sau deterministic validation.</p>
-                                </div>
-                                <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${getVerdictBadge(aiResult.checkerReport.verdict === 'accept' ? 'accept' : aiResult.checkerReport.verdict === 'infeasible' ? 'infeasible' : aiResult.checkerReport.verdict === 'retry' ? 'retry' : 'error').className}`}>
-                                  {aiResult.checkerReport.verdict}
+                              <button
+                                type="button"
+                                onClick={() => setShowTechnicalErrors(!showTechnicalErrors)}
+                                className="mb-3 flex w-full items-center gap-2 text-left text-sm text-white/50 hover:text-white/70 transition-colors"
+                              >
+                                <ChevronDown
+                                  size={14}
+                                  className={`transition-transform ${showTechnicalErrors ? 'rotate-180' : ''}`}
+                                  strokeWidth={1.5}
+                                />
+                                <span>Lỗi kỹ thuật</span>
+                                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px]">
+                                  {(aiResult.executionErrors?.length || 0) + (aiResult.validationErrors?.length || 0)}
                                 </span>
-                              </div>
-                              <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                                <MetricCard label="Base constraints" value={aiResult.checkerReport.baseConstraintPass ? 'Pass' : 'Fail'} />
-                                <MetricCard label="Hard constraints" value={aiResult.checkerReport.hardConstraintPass ? 'Pass' : 'Fail'} />
-                                <MetricCard label="Soft score" value={formatNullableNumber(aiResult.checkerReport.softConstraintScore)} />
-                                <MetricCard label="Violations" value={formatNullableNumber(aiResult.checkerReport.violations.length)} />
-                              </div>
-                              <p className="mb-3 text-sm text-white/65">{aiResult.checkerReport.summary}</p>
-                              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+                              </button>
+                              {showTechnicalErrors && (
                                 <div className="space-y-2">
-                                  {aiResult.checkerReport.violations.map((check) => (
-                                    <div key={`checker-${check.constraintId}`} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
-                                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckSeverityBadge(check.severity)}`}>{check.severity}</span>
-                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getCheckStatusBadge(check.passed)}`}>{check.passed ? 'Pass' : 'Fail'}</span>
-                                        <span className="text-xs text-white/35">{check.constraintId}</span>
-                                      </div>
-                                      <p className="text-sm text-white/75">{check.original}</p>
-                                      <p className="mt-1 text-xs text-white/45">{check.reason}</p>
-                                      {check.suggestion ? <p className="mt-1 text-xs text-sky-300/70">Gợi ý: {check.suggestion}</p> : null}
+                                  {aiResult.validationErrors?.map((e, idx) => (
+                                    <div key={`val-${e.constraintId}-${idx}`} className="rounded border border-red-400/15 bg-red-400/[0.03] p-2.5">
+                                      <p className="text-xs font-medium text-red-300/70">Validation Error — {e.constraintId}</p>
+                                      <p className="mt-0.5 text-xs text-white/40">{e.error}</p>
+                                    </div>
+                                  ))}
+                                  {aiResult.executionErrors?.map((e, idx) => (
+                                    <div key={`exec-${e.constraintId}-${idx}`} className="rounded border border-amber-400/15 bg-amber-400/[0.03] p-2.5">
+                                      <p className="text-xs font-medium text-amber-300/70">Execution Error — {e.constraintId}</p>
+                                      <p className="mt-0.5 text-xs text-white/40 font-mono">{e.error}</p>
                                     </div>
                                   ))}
                                 </div>
-                                  <div className="space-y-4">
-                                    <div className={`${panelMutedClass} p-3`}>
-                                      <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Retry instructions</p>
-                                      {renderList(aiResult.checkerReport.retryInstructions, 'Checker không yêu cầu retry')}
-                                    </div>
-                                    <div className={`${panelMutedClass} p-3`}>
-                                      <p className="mb-2 text-[10px] uppercase tracking-widest text-white/35">Soft warnings for user</p>
-                                      {(aiResult.checkerReport.userSoftWarnings?.length ?? 0) > 0 ? (
-                                        <ul className="space-y-2">
-                                          {aiResult.checkerReport.userSoftWarnings.map((warning) => (
-                                            <li key={`soft-warning-${warning.constraintId}`} className="text-xs text-white/60">
-                                              <span className="font-medium text-white/75">{warning.original}</span>
-                                              <span className="text-white/35"> — {warning.reason}</span>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      ) : (
-                                        <span className="text-white/35">Không có cảnh báo ràng buộc mềm.</span>
-                                      )}
-                                    </div>
-                                  </div>
-
-                              </div>
+                              )}
                             </section>
                           )}
-
-                            {((aiResult.lifecycleEvents?.length ?? agentTimeline.length) > 0 || (aiResult.attemptHistorySummary?.length ?? 0) > 0) && (
-                              <section className={`${panelClass} p-4`}>
-                                <div className="mb-4 flex items-center gap-2.5">
-                                  <span className={iconShellClass}>
-                                    <ClipboardList size={16} strokeWidth={1.5} className="text-violet-300" />
-                                  </span>
-                                  <div>
-                                    <h3 className="text-sm font-semibold text-white">Agent execution timeline</h3>
-                                    <p className="text-xs text-white/40">Generate -&gt; sandbox run -&gt; checker -&gt; retry, hien thi theo thu tu thoi gian.</p>
-                                  </div>
-                                </div>
-                                <div className="space-y-3">
-                                  {(aiResult.lifecycleEvents ?? agentTimeline).map((event) => (
-                                    <div key={event.id} className="rounded-md border border-white/[0.06] bg-[#141414] p-3">
-                                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getLifecyclePhaseClass(event.phase)}`}>{STEP_LABELS[event.phase]}</span>
-                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${getLifecycleStatusClass(event.status)}`}>{event.status}</span>
-                                        {event.attempt ? <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/70">Attempt {event.attempt}</span> : null}
-                                        <span className="text-[10px] text-white/25">{new Date(event.timestamp).toLocaleTimeString('vi-VN')}</span>
-                                      </div>
-                                      <p className="text-sm font-medium text-white/80">{event.title}</p>
-                                      <p className="mt-1 text-xs text-white/45">{event.detail}</p>
-                                      <div className="mt-3 grid gap-2 text-xs text-white/35 sm:grid-cols-2 xl:grid-cols-4">
-                                        <p>Artifact: {event.artifactPath ?? '—'}</p>
-                                        <p>Sandbox log: {event.logPath ?? '—'}</p>
-                                        <p>Source hash: {event.sourceHash ?? '—'}</p>
-                                        <p>Tags: {event.tags?.join(', ') ?? '—'}</p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                {(aiResult.attemptHistorySummary?.length ?? 0) > 0 ? (
-                                  <div className="mt-5 border-t border-white/[0.06] pt-4">
-                                    <div className="mb-3 flex items-center justify-between gap-3">
-                                      <div>
-                                        <h4 className="text-sm font-semibold text-white">Attempt history</h4>
-                                        <p className="text-xs text-white/40">Tóm tắt coder/checker/validation cho từng vòng lặp.</p>
-                                      </div>
-                                    </div>
-                                    <div className="space-y-2">
-                                      {aiResult.attemptHistorySummary?.map((attempt, index) => (
-                                        <div key={`${attempt.phase}-${attempt.attempt}-${index}`} className="rounded-md border border-white/[0.06] bg-[#101010] p-3">
-                                          <div className="mb-2 flex flex-wrap items-center gap-2">
-                                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-white/70">Attempt {attempt.attempt}</span>
-                                            <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-0.5 text-[10px] font-medium text-violet-300">{attempt.phase}</span>
-                                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${attempt.status === 'success' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : attempt.status === 'retry' ? 'border-amber-400/25 bg-amber-400/10 text-amber-300' : attempt.status === 'failed' ? 'border-red-400/25 bg-red-400/10 text-red-300' : 'border-white/15 bg-white/[0.04] text-white/70'}`}>{attempt.status}</span>
-                                          </div>
-                                          <p className="text-sm text-white/75">{attempt.summary}</p>
-                                          {attempt.details?.length ? <div className="mt-2">{renderList(attempt.details)}</div> : null}
-                                          <div className="mt-2 grid gap-1 text-xs text-white/35 sm:grid-cols-2">
-                                            <p>Artifact: {attempt.artifactPath ?? '—'}</p>
-                                            <p>Source hash: {attempt.sourceHash ?? '—'}</p>
-                                            <p>Started: {attempt.startedAt ?? '—'}</p>
-                                            <p>Finished: {attempt.finishedAt ?? '—'}</p>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : null}
-                              </section>
-                            )}
-
                         </div>
                       )}
 
-                      {/* Hard violations — red, serious */}
-                        {aiResult && aiResult.violations && aiResult.violations.filter(v => v.violated).length > 0 && aiResult.verdict === 'retry' && (
-
-                        <div className="mb-4 rounded-md border border-red-500/20 bg-red-500/[0.04] p-4">
-                          <div className="mb-2 flex items-center justify-between">
-                            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
-                              <AlertTriangle size={14} strokeWidth={2} />
-                              <span>{aiResult.violations.filter(v => v.violated).length} ràng buộc cứng bị vi phạm</span>
-                            </div>
-                            <button
-                              onClick={() => handleGenerate()}
-                              disabled={aiLoading}
-                              className="flex items-center gap-1.5 rounded-md bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.1] hover:text-white disabled:opacity-50"
-                            >
-                              <RotateCcw size={12} strokeWidth={2} />
-                              Thử lại
-                            </button>
-                          </div>
-                          <div className="space-y-1.5">
-                            {aiResult.violations.filter(v => v.violated).map((v, i) => (
-                              <div key={i} className="rounded bg-white/[0.02] px-2.5 py-1.5 text-xs">
-                                <div className="flex items-start gap-2">
-                                  <span className="mt-0.5 shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">Vi phạm</span>
-                                  <div>
-                                    <span className="text-white/70">{v.original}</span>
-                                    <span className="ml-1.5 text-white/30">— {v.reason}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Soft violations — yellow, informational */}
-                        {aiResult && aiResult.violations && aiResult.violations.filter(v => !v.violated).length > 0 && aiResult.status === 'solved' && (
-
-                        <div className="mb-4 rounded-md border border-yellow-500/20 bg-yellow-500/[0.04] p-4">
-                          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-yellow-400">
-                            <AlertTriangle size={14} strokeWidth={2} />
-                            <span>{aiResult.violations.filter(v => !v.violated).length} ràng buộc mềm chưa đạt tối ưu</span>
-                          </div>
-                          <div className="space-y-2">
-                            {aiResult.violations.filter(v => !v.violated).map((v, i) => (
-                              <div key={i} className="rounded bg-white/[0.02] px-2.5 py-2 text-xs space-y-0.5">
-                                <p className="text-white/70 font-medium">"{v.original}"</p>
-                                <p className="text-white/40">{v.reason}</p>
-                                {v.conflictsWith && (
-                                  <p className="text-yellow-400/60">Xung đột với: {v.conflictsWith}</p>
-                                )}
-                                {v.suggestion && (
-                                  <p className="text-blue-400/60">Gợi ý: {v.suggestion}</p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Success message */}
-                      {aiResult?.status === 'solved' && (aiResult.violations?.length ?? 0) === 0 && (
+                      {aiResult?.status === 'solved' && aiResult.deterministicReport.hardConstraintPass && (
                         <div className="mb-4 flex items-center gap-2 rounded-md border border-green-500/20 bg-green-500/[0.04] px-4 py-2.5 text-xs text-green-400">
                           <Check size={14} strokeWidth={2} />
-                          <span>Tất cả ràng buộc thỏa mãn</span>
+                          <span>Tất cả ràng buộc cứng thỏa mãn</span>
                         </div>
                       )}
 
@@ -3123,212 +2807,6 @@ const handleDownloadExcel = useCallback(() => {
 
 
                       </section>
-
-                      {/* ========== AI Overall Assessment ========== */}
-                      {aiResult && !aiLoading && aiResult.overallAssessment && (
-                        <section className={`${panelClass} p-4`}>
-                          <div className="flex items-center gap-2.5">
-                            <span className={iconShellClass}>
-                              <Check size={16} strokeWidth={1.5} className="text-[#4DB848]" />
-                            </span>
-                            <div>
-                              <h2 className="text-sm font-semibold text-white">Đánh giá tổng quan</h2>
-                              <p className="text-xs text-white/40">{aiResult.overallAssessment}</p>
-                            </div>
-                          </div>
-                        </section>
-                      )}
-
-                      {aiResult && !aiLoading && aiResult.status === 'error' && aiResult.message.includes('Coder không tạo được') && (
-                        <section className={`${panelClass} p-4`}>
-                          <div className="mb-3 flex items-center gap-2.5">
-                            <span className={iconShellClass}>
-                              <AlertTriangle size={16} strokeWidth={1.5} className="text-amber-400" />
-                            </span>
-                            <div>
-                              <h2 className="text-sm font-semibold text-white">Lỗi xếp lịch</h2>
-                              <p className="text-xs text-white/40">{aiResult.message}</p>
-                            </div>
-                          </div>
-                          <div className="mb-3 max-h-48 space-y-2 overflow-auto">
-                            {aiResult.diagnostics.map((diagnostic, index) => (
-                              <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-xs text-white/55">
-                                {diagnostic}
-                              </div>
-                            ))}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleGenerate(true)}
-                            className="inline-flex items-center gap-2 rounded-md border border-white/[0.12] bg-white/[0.04] px-4 py-2 text-sm font-medium text-white/70 transition-colors hover:bg-white/[0.08]"
-                          >
-                            <RotateCcw size={16} strokeWidth={1.5} />
-                            Thử lại bằng template
-                          </button>
-                        </section>
-                      )}
-
-                      {/* ========== Solve / Verification Results ========== */}
-                      {aiResult && !aiLoading && (
-                        <>
-                          {aiResult.telemetry && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <Check size={16} strokeWidth={1.5} className="text-[#4DB848]" />
-                                </span>
-                                <div>
-                                  <h2 className="text-sm font-semibold text-white">Quá trình xếp lịch</h2>
-                                  <p className="text-xs text-white/40">{aiResult.message}</p>
-                                </div>
-                              </div>
-                              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Duration</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.totalDurationMs}ms</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">LLM calls</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.llmCallCount}</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Solver attempts</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.solverAttempts}</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Status</p><p className="mt-1 text-sm text-white/70">{aiResult.status}</p></div>
-                                <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Chars in</p><p className="mt-1 text-sm text-white/70">{aiResult.telemetry.tokenEstimateCharsIn}</p></div>
-                              </div>
-                            </section>
-                          )}
-
-                          {/* a) Hard violations detail panel */}
-                          {aiResult.violations && aiResult.violations.filter((v) => v.violated).length > 0 && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-red-400" />
-                                </span>
-                                <div>
-                                  <h2 className="text-sm font-semibold text-white">Ràng buộc cứng bị vi phạm</h2>
-                                  <p className="text-xs text-white/40">Solver cần sửa lại để đảm bảo các ràng buộc bắt buộc này</p>
-                                </div>
-                              </div>
-                              <div className="space-y-2">
-                                {aiResult.violations.filter((v) => v.violated).map((v, idx) => (
-                                  <div key={`${v.constraintId}-${idx}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3 space-y-1">
-                                    <p className="text-sm text-white/80 font-medium">"{v.original}"</p>
-                                    <p className="text-xs text-red-300/70">{v.reason}</p>
-                                    {v.conflictsWith && (
-                                      <p className="text-xs text-white/40">Xung đột với: <span className="text-white/60">{v.conflictsWith}</span></p>
-                                    )}
-                                    {v.suggestion && (
-                                      <p className="text-xs text-blue-400/60">Gợi ý: {v.suggestion}</p>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </section>
-                          )}
-
-                          {/* c2) Soft violations detail panel */}
-                          {aiResult.violations && aiResult.violations.filter((v) => !v.violated).length > 0 && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-yellow-400" />
-                                </span>
-                                <div>
-                                  <h2 className="text-sm font-semibold text-white">Ràng buộc mềm chưa đạt tối ưu</h2>
-                                  <p className="text-xs text-white/40">Thời khóa biểu đã tạo được, nhưng một số ưu tiên chưa đạt</p>
-                                </div>
-                              </div>
-                              <div className="space-y-2">
-                                {aiResult.violations.filter((v) => !v.violated).map((v, idx) => (
-                                  <div key={`${v.constraintId}-${idx}`} className="rounded-md border border-yellow-400/15 bg-yellow-400/[0.03] p-3 space-y-1">
-                                    <p className="text-sm text-white/80 font-medium">"{v.original}"</p>
-                                    <p className="text-xs text-white/40">{v.reason}</p>
-                                    {v.conflictsWith && (
-                                      <p className="text-xs text-yellow-400/60">Xung đột với: {v.conflictsWith}</p>
-                                    )}
-                                    {v.suggestion && (
-                                      <p className="text-xs text-blue-400/60">Gợi ý: {v.suggestion}</p>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </section>
-                          )}
-
-                          {/* d) Infeasible reason (only when status='infeasible') */}
-                          {aiResult.status === 'infeasible' && (
-                            <section className={`${panelClass} p-4`}>
-                              <div className="mb-4 flex items-center gap-2.5">
-                                <span className={iconShellClass}>
-                                  <AlertTriangle size={16} strokeWidth={1.5} className="text-red-400" />
-                                </span>
-                                <div>
-                                  <h2 className="text-sm font-semibold text-white">Không thể tạo thời khóa biểu</h2>
-                                  <p className="text-xs text-white/40">Các ràng buộc sau xung đột nhau, không có lịch nào thỏa mãn đồng thời</p>
-                                </div>
-                              </div>
-                              {(aiResult.conflictingConstraints ?? []).length > 0 ? (
-                                <div className="rounded-md border border-red-400/15 bg-red-400/[0.03] p-4">
-                                  <p className="mb-3 text-xs text-white/50">Nguyên nhân — các ràng buộc xung đột:</p>
-                                  <div className="space-y-2">
-                                    {(aiResult.conflictingConstraints ?? []).map((c) => (
-                                      <div key={c.id} className="flex items-start gap-2 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5">
-                                        <span className="mt-0.5 shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-400">
-                                          Cứng
-                                        </span>
-                                        <p className="text-sm text-white/70">"{c.text}"</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <p className="mt-3 text-xs text-red-300/60">
-                                    Hãy bỏ hoặc nới lỏng một trong các ràng buộc trên, hoặc thêm nhiều slot thời gian hơn.
-                                  </p>
-                                </div>
-                              ) : (
-                                <div className="rounded-md border border-red-400/15 bg-red-400/[0.03] p-4">
-                                  <p className="text-sm text-white/60">
-                                    {aiResult.diagnostics?.[0] ?? 'Không xác định được ràng buộc cụ thể gây xung đột. Thử giảm số ràng buộc cứng hoặc tăng số slot thời gian.'}
-                                  </p>
-                                </div>
-                              )}
-                            </section>
-                          )}
-
-                          {/* e) Technical errors (collapsible, only shown when there are errors) */}
-                          {((aiResult.executionErrors && aiResult.executionErrors.length > 0) ||
-                            (aiResult.validationErrors && aiResult.validationErrors.length > 0)) && (
-                            <section className={`${panelClass} p-4`}>
-                              <button
-                                type="button"
-                                onClick={() => setShowTechnicalErrors(!showTechnicalErrors)}
-                                className="mb-3 flex w-full items-center gap-2 text-left text-sm text-white/50 hover:text-white/70 transition-colors"
-                              >
-                                <ChevronDown
-                                  size={14}
-                                  className={`transition-transform ${showTechnicalErrors ? 'rotate-180' : ''}`}
-                                  strokeWidth={1.5}
-                                />
-                                <span>Lỗi kỹ thuật</span>
-                                <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px]">
-                                  {(aiResult.executionErrors?.length || 0) + (aiResult.validationErrors?.length || 0)}
-                                </span>
-                              </button>
-                              {showTechnicalErrors && (
-                                <div className="space-y-2">
-                                  {aiResult.validationErrors?.map((e, idx) => (
-                                    <div key={`val-${e.constraintId}-${idx}`} className="rounded border border-red-400/15 bg-red-400/[0.03] p-2.5">
-                                      <p className="text-xs font-medium text-red-300/70">Validation Error — {e.constraintId}</p>
-                                      <p className="mt-0.5 text-xs text-white/40">{e.error}</p>
-                                    </div>
-                                  ))}
-                                  {aiResult.executionErrors?.map((e, idx) => (
-                                    <div key={`exec-${e.constraintId}-${idx}`} className="rounded border border-amber-400/15 bg-amber-400/[0.03] p-2.5">
-                                      <p className="text-xs font-medium text-amber-300/70">Execution Error — {e.constraintId}</p>
-                                      <p className="mt-0.5 text-xs text-white/40 font-mono">{e.error}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </section>
-                          )}
-                        </>
-                      )}
-
                       <section className={`${panelClass} p-4`}>
                         <div className="mb-4 flex items-center gap-2.5">
                           <span className={iconShellClass}>
@@ -3424,90 +2902,6 @@ const handleDownloadExcel = useCallback(() => {
                       </aside>
                     </div>
 
-                    {false && (aiLoading || aiResult || aiError) && (
-                      <section className={`${panelClass} mt-4 overflow-hidden p-4`}>
-                        <div className="mb-4 flex items-center gap-2.5">
-                          <span className={iconShellClass}>
-                            <Sparkles size={16} strokeWidth={1.5} />
-                          </span>
-                          <div>
-                            <h2 className="text-sm font-semibold text-white">Kết quả xếp thời khóa biểu</h2>
-                            <p className="text-xs text-white/40">Được tạo tự động bởi AI</p>
-                          </div>
-                        </div>
-
-                        {aiLoading && (
-                          <div className="flex items-center justify-center gap-3 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] py-12 text-sm text-white/30">
-                            <Loader2 size={18} className="animate-spin" strokeWidth={1.5} />
-                            <span>AI đang xếp thời khóa biểu, vui lòng chờ...</span>
-                          </div>
-                        )}
-
-                        {aiError && !aiLoading && (
-                          <div className="rounded-md border border-[#4DB848]/20 bg-[#4DB848]/[0.03] p-4">
-                            <p className="font-medium text-white">Lỗi xảy ra:</p>
-                            <p className="mt-2 text-sm text-white/50">{aiError}</p>
-                            <button
-                              type="button"
-                              onClick={() => handleGenerate()}
-                              className={ghostButtonClass + ' mt-3'}
-                            >
-                              <RotateCcw size={14} strokeWidth={1.5} />
-                              Thử lại
-                            </button>
-                          </div>
-                        )}
-
-                        {aiResult && !aiLoading && (() => {
-                          const currentResult = aiResult as TimetableSolveResult
-                          const currentSolverStats = currentResult.solverStats
-
-                          return (
-                            <div className="space-y-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4 text-white">
-                              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
-                                <div>
-                                  <p className="text-sm font-semibold text-white">{currentResult.message}</p>
-                                  <p className="mt-1 text-xs text-white/35">
-                                    Trạng thái: {currentResult.status === 'solved' ? 'Đã xếp được lịch' : currentResult.status === 'infeasible' ? 'Không khả thi' : 'Có lỗi'}
-                                  </p>
-                                </div>
-                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${currentResult.status === 'solved' ? 'border-[#4DB848]/25 bg-[#4DB848]/10 text-[#4DB848]' : currentResult.status === 'infeasible' ? 'border-amber-500/25 bg-amber-500/10 text-amber-300' : 'border-red-500/25 bg-red-500/10 text-red-300'}`}>
-                                  {currentResult.status === 'solved' ? 'Solved' : currentResult.status === 'infeasible' ? 'Infeasible' : 'Error'}
-                                </span>
-                              </div>
-
-                              {currentSolverStats ? (() => {
-                                const stats = currentSolverStats!
-                                return (
-                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Wall time</p><p className="mt-1 text-sm text-white/70">{stats.wallTimeSeconds.toFixed(3)}s</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Objective</p><p className="mt-1 text-sm text-white/70">{stats.objectiveValue ?? '—'}</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Best bound</p><p className="mt-1 text-sm text-white/70">{stats.bestBound ?? '—'}</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Conflicts</p><p className="mt-1 text-sm text-white/70">{stats.numConflicts}</p></div>
-                                  <div className={`${panelMutedClass} p-3`}><p className="text-[10px] uppercase tracking-widest text-white/35">Branches</p><p className="mt-1 text-sm text-white/70">{stats.numBranches}</p></div>
-                                </div>
-                                )
-                              })() : null}
-
-                              {currentResult.diagnostics?.length ? (
-                                <div className="space-y-2">
-                                  {currentResult.diagnostics.map((diagnostic, index) => (
-                                    <div key={`${diagnostic}-${index}`} className="rounded border border-white/[0.06] bg-[#141414] px-3 py-2 text-sm text-white/55">
-                                      {diagnostic}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-sm text-white/45">Không có chẩn đoán bổ sung.</p>
-                              )}
-
-                            </div>
-                          )
-                        })()}
-                      </section>
-                    )}
-
-
                 </section>
               )}
           </main>
@@ -3523,7 +2917,7 @@ const handleDownloadExcel = useCallback(() => {
         initialConfig={aiProvider || undefined}
         onSave={(config) => {
           setAiProvider(config);
-          try { localStorage.setItem("tack_ai_provider_config", JSON.stringify(config)); } catch {}
+          try { localStorage.setItem(AI_PROVIDER_STORAGE_KEY, encodeProviderConfig(config)); } catch {}
           setIsFirstRun(false);
         }}
         requireValid={isFirstRun}

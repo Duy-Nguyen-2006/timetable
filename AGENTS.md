@@ -1,68 +1,55 @@
-# Workspace notes
+# AGENTS.md - Tack Timetable
 
-- Repo: `timetable`
-- Local workspace: `/home/duy/Downloads/timetable`
-- Primary stack: Next.js (App Router) + React + TypeScript + Tailwind CSS
-- Secondary stack: Python timetable solver and validator
-- Roo MCP config: [`.mcp.json`](.mcp.json)
-- Optional operator context source: `/home/duy/.claude/CLAUDE.md`
+## Context
+Dự án là ứng dụng điện tử (Electron + Next.js) kết hợp AI để xếp thời khóa biểu bằng OR-Tools.
+Luồng chính: UI nhập liệu -> AI Local Agent (TS) sinh code Python -> Thực thi an toàn trong Sandbox -> Validate -> Trả kết quả.
 
-## Core rules
-- Nêu assumption rõ ràng khi requirement còn mơ hồ.
-- Ưu tiên cách đơn giản nhất đủ giải quyết yêu cầu.
-- Chỉ sửa đúng phần cần sửa; không refactor ngoài scope.
-- Không chép secret/token/password từ `.env*`, `/home/duy/.claude/CLAUDE.md` hoặc nguồn khác vào repo files.
-- Khi cần docs/setup/config của thư viện, ưu tiên Context7 MCP.
-- Nếu có nhiều implementation options, chọn option ít rủi ro nhất trước.
-## Workflow
-- Trước khi sửa code, đọc codebase hiện tại bằng công cụ phù hợp (ưu tiên search/read theo scope nhỏ).
-- Với task dài, tạo checklist tiến độ rõ ràng và verify ngay theo từng bước (không dồn verify về cuối).
-- Verify ngay sau từng đầu mục; không dồn verify về cuối.
-- Trước khi sửa function/class/method, chạy impact analysis (call sites, API contract, data flow).
-- Trước khi commit/push, chạy detect-changes và các lệnh verify liên quan.
-- Nếu index stale, chạy lại phân tích index (vd: `gitnexus analyze`).
-- Nếu đổi UI, verify bằng `agent-browser` hoặc screenshot compare.
+## Workflow Rules (BẮT BUỘC)
+1. **Impact Analysis**: TRƯỚC KHI SỬA BẤT KỲ FILE NÀO, PHẢI DÙNG `gitnexus_impact` hoặc `gitnexus_context` để xem hàm nào đang gọi nó. Không được phép sửa mù quáng.
+2. **Refactor**: Nếu đổi tên hàm/class, dùng `gitnexus_rename`, cấm find-and-replace thủ công.
+3. **Scope**: Chỉ sửa đúng phần được yêu cầu. Không tự ý refactor toàn bộ hệ thống nếu không được bảo.
+4. **Verify**: Mọi thay đổi logic solver phải đi kèm test case.
 
-## Important files
-- Agent rules file: [`AGENTS.md`](AGENTS.md)
-- Product/docs: [`README.md`](README.md)
-- Next.js app shell: [`src/app/layout.tsx`](src/app/layout.tsx), [`src/app/page.tsx`](src/app/page.tsx), [`src/app/globals.css`](src/app/globals.css)
-- API routes: [`src/app/api/`](src/app/api/)
-- Timetable feature UI: [`src/features/timetable/`](src/features/timetable/)
-- Reusable components: [`src/components/ui/`](src/components/ui/)
-- Core libs: [`src/lib/`](src/lib/)
-- Python execution host: [`python/code_executor.py`](python/code_executor.py)
-- AI orchestrators/helpers: [`agent.py`](agent.py), [`reviewer_agent.py`](reviewer_agent.py), [`output_formatter.py`](output_formatter.py)
-- Sandbox executors: [`sandbox/executor.py`](sandbox/executor.py), [`sandbox/bubblewrap_executor.py`](sandbox/bubblewrap_executor.py)
+## Tech Stack
+- **Frontend**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn/ui.
+- **Desktop**: Electron 37 (Main process quản lý Python executor).
+- **Backend/AI**: Python 3.11+ (OR-Tools), OpenAI SDK (proxy qua Next.js routes).
+- **Testing**: Jest/Vitest (TS), Pytest (Python).
 
-## Environment & secrets
-- Env files: `.env`, `.env.local`.
-- Không commit API keys/tokens thật.
-- Nếu cần thêm biến môi trường, cập nhật docs kèm ví dụ placeholder.
+## Critical Architecture
+1. **AI Pipeline** (`src/features/timetable/ai/`):
+   - Chạy hoàn toàn phía client/browser thông qua `runLocalAgent`.
+   - Gồm 6 stage: Translator -> Planner -> Coder -> Sandbox -> Validator -> Repair.
 
-## Verify checklist (minimum)
-- Frontend (Next.js): `npm run lint` (nếu có), `npm run build`.
-- API routes thay đổi: test route bằng request thật hoặc integration test ([`/api/ai/chat`](src/app/api/ai/chat/route.ts), [`/api/provider/test`](src/app/api/provider/test/route.ts)).
-- UI thay đổi: verify render + interaction chính + responsive cơ bản.
+2. **Python Execution**:
+   - Code Python được sinh ra chạy qua `python/code_executor.py`.
+   - Cơ chế Sandbox (Docker/Bubblewrap) là bắt buộc để bảo mật.
 
-## Deploy notes
-- Nếu deploy server thật, xác nhận target host/path trước khi đồng bộ file.
-- Không giả định VPS là git repo; ưu tiên `rsync/scp` khi môi trường không hỗ trợ `git pull`.
-- Tránh ghi đè nhầm file env hoặc file runtime cấu hình production.
+3. **Data Flow**:
+   - Dữ liệu đầu vào chuẩn hóa qua `AgentInputPayload`.
+   - Kết quả trả về dưới dạng JSON (`result.json`), không parse từ stdout hỗn độn.
 
-## External context summary
-- `/home/duy/.claude/CLAUDE.md` có thể chứa operator-only context (hạ tầng, credentials, notes).
-- Chỉ đọc trực tiếp khi task thật sự cần hạ tầng/docs/credential liên quan.
-- Không ghi lại secret từ nguồn đó vào commit, docs, logs, hay file trong repo.
+## Security & Safety
+- **Security**: Tuyệt đối không commit `.env`, API keys, hay secrets. Không hardcode credentials.
+- **Sandbox**: Không được phép chạy code AI trực tiếp trên host mà không qua isolation.
+- **Typing**: Dùng TypeScript strict. Tránh `any` trừ khi giao tiếp với Python raw JSON.
 
-## GitHub
-- Dùng remote hiện tại của repo `timetable`.
-- Nếu cần đổi remote, ghi rõ lý do và xác nhận trước khi push.
+## Key Files
+- **Entry**: `src/app/page.tsx` -> `src/features/timetable/TimetableApp.tsx`
+- **AI Core**: `src/features/timetable/ai/local-agent.ts` (Orchestrator chính)
+- **Python Bridge**: `src/features/timetable/ai/python-bridge.ts` & `python/code_executor.py`
+- **Prompts**: `prompts/*.md` (Source of truth cho behavior AI)
+- **Tools**: Dùng GitNexus MCP để phân tích dependency (`gitnexus_impact`, `gitnexus_context`).
+
+## Workflows
+1. **Dev**: `npm run dev` (Next.js) + `npm run electron` (nếu cần test native).
+2. **Build**: `npm run build` (tạo standalone) -> `electron-builder`.
+3. **Verify**: Chạy `npm run lint` và `npm test` trước khi commit.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **timetable** (1735 symbols, 2968 relationships, 67 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **timetable** (1889 symbols, 3006 relationships, 55 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

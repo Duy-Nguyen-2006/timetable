@@ -1,13 +1,10 @@
-/**
- * Local AI Agent Types for Tack Timetable
- * Based on the approved architecture plan.
- */
-
-import type { OpenAI } from 'openai';
-
-// ============================================
-// Settings / Provider Config
-// ============================================
+import type {
+  ConstraintSpec,
+  DeterministicValidationReport,
+  Plan,
+  ScheduleEntry,
+  Violation,
+} from './constraint-spec';
 
 export interface AIProviderConfig {
   baseURL: string;
@@ -15,9 +12,11 @@ export interface AIProviderConfig {
   model: string;
 }
 
-// ============================================
-// Input Payload sent to the Python solver / generated code
-// ============================================
+export interface ChatUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
 
 export interface NormalizedEntity {
   id: string;
@@ -45,43 +44,65 @@ export interface AgentInputPayload {
   deletedPeriods: Record<string, boolean>;
   assignments: NormalizedAssignment[];
   constraints: ConstraintItemInput[];
-  // Additional context the generated Python code may need
   metadata?: {
     schoolName?: string;
     semester?: string;
   };
 }
 
-// ============================================
-// Python Executor I/O (stdin/stdout contract)
-// ============================================
-
 export interface ExecutionResult {
-  success: boolean;
-  has_solution: boolean;
-  stdout: string;
-  stderr: string;
-  execution_time_ms: number;
-  error_type: 'timeout' | 'exception' | 'no_solution' | 'parse_error' | null;
-  result?: {
+  phase: 'compile' | 'run' | 'parse';
+  ok: boolean;
+  status: 'optimal' | 'feasible' | 'infeasible' | 'unknown' | 'timeout' | 'crashed';
+  durationMs: number;
+  resultPath?: string;
+  resultSummary?: {
+    scheduledCount: number;
+    unscheduledAssignments: string[];
+  };
+  resultData?: {
     classes: string[];
     days: string[];
-    periods: (string | number)[];
-    schedule: Array<{
-      class: string;
-      day: string;
-      period: string | number;
-      subject: string;
-      teacher: string;
-    }>;
+    periods: Array<number | string>;
+    status?: string;
+    schedule: ScheduleEntry[];
   };
+  errorDigest?: string;
+  stdout?: string;
+  stderr?: string;
 }
 
-// ============================================
-// Agent Lifecycle (reused/extended from existing UI)
-// ============================================
+export interface LocalAgentFinalResult {
+  classes: string[];
+  days: string[];
+  periods: Array<number | string>;
+  schedule: ScheduleEntry[];
+  status: 'solved';
+  message: string;
+  deterministicReport: DeterministicValidationReport;
+  checkerReport: DeterministicValidationReport;
+  violations: Violation[];
+  diagnostics: string[];
+  executionErrors: Array<{ constraintId: string; error: string }>;
+  validationErrors: Array<{ constraintId: string; error: string }>;
+  iisConstraintIds: string[];
+  conflictingConstraints: Array<{ id: string; text: string }>;
+  attemptHistorySummary: Array<{
+    stage: string;
+    summary: string;
+    at: string;
+  }>;
+}
 
-export type AgentLifecyclePhase = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle';
+export type AgentLifecyclePhase =
+  | 'thinking'
+  | 'coding'
+  | 'running'
+  | 'checking'
+  | 'fixing'
+  | 'translator'
+  | 'planner'
+  | 'idle';
 
 export interface AgentLifecycleEvent {
   id: string;
@@ -94,50 +115,56 @@ export interface AgentLifecycleEvent {
   tags?: string[];
 }
 
-// ============================================
-// Orchestrator Events (for streaming progress to UI)
-// ============================================
-
 export type AgentEvent =
   | { type: 'status'; message: string; iteration: number; maxIterations?: number }
   | { type: 'phase'; phase: AgentLifecyclePhase; message: string; iteration: number }
-  | { type: 'coder_started'; attempt: number; message: string }
-  | { type: 'coder_code_generated'; attempt: number; codeLength: number }
-  | { type: 'running_code'; attempt: number; message?: string }
+  | { type: 'stage_started'; stage: string; attempt?: number; message: string }
+  | { type: 'stage_completed'; stage: string; attempt?: number; message: string }
+  | { type: 'violations_found'; count: number; sample?: string[] }
   | { type: 'execution_result'; attempt: number; result: ExecutionResult }
-  | { type: 'coder_self_fix'; attempt: number; errorSummary: string }
-  | { type: 'reviewer_started'; message: string }
-  | { type: 'reviewer_result'; approved: boolean; feedback?: string }
-  | { type: 'final_result'; result: any } // Will be TimetableSolveResult shape
+  | { type: 'final_result'; result: LocalAgentFinalResult }
   | { type: 'error'; message: string; fatal?: boolean };
 
-// ============================================
-// LLM Response Shapes (internal)
-// ============================================
-
 export interface CoderTurnResult {
-  code: string;
-  explanation?: string;
+  plan_summary: string;
+  constraint_code: string;
+  covered_constraint_ids: string[];
+  assumptions: string[];
   rawResponse?: string;
+  usageTokens?: number;
 }
 
-export interface ReviewerResult {
-  approved: boolean;
-  feedback: string;
+export interface RepairTurnResult {
+  summary: string;
+  patches: Array<{ oldStr: string; newStr: string; reason: string }>;
+  assumptions: string[];
   rawResponse?: string;
+  usageTokens?: number;
 }
 
-// ============================================
-// Main Orchestrator Config
-// ============================================
+export interface TranslatorTurnResult {
+  constraintSpecs: ConstraintSpec[];
+  rawResponse?: string;
+  usageTokens?: number;
+}
+
+export interface PlannerTurnResult {
+  plan: Plan;
+  rawResponse?: string;
+  usageTokens?: number;
+}
 
 export interface LocalAgentConfig extends AIProviderConfig {
-  timeoutMs?: number; // default 180000 (3 minutes)
+  modelTranslator?: string;
+  modelPlanner?: string;
+  modelCoder?: string;
+  modelRepair?: string;
+  timeoutMs?: number;
   onEvent?: (event: AgentEvent) => void;
 }
 
-// ============================================
-// Re-export useful existing types if needed
-// ============================================
-
-export type { NormalizedAssignment as LegacyNormalizedAssignment } from '../utils';
+export type SolveArtifact = {
+  schedule: ScheduleEntry[];
+  report: DeterministicValidationReport;
+  violations: Violation[];
+};

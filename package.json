@@ -1,12 +1,19 @@
 {
   "name": "timetable",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "AI-assisted timetable generator (Coder + Reviewer loop, Python sandbox + execution, OR-Tools ready)",
   "scripts": {
+    "presync:skeleton": "node scripts/sync_solver_template.mjs",
+    "predev": "npm run presync:skeleton",
     "dev": "NODE_OPTIONS=--disable-warning=DEP0205 next dev",
+    "prebuild": "npm run presync:skeleton",
     "build": "NODE_OPTIONS=--disable-warning=DEP0205 next build && node scripts/post-build.js",
+    "prestart": "npm run presync:skeleton",
     "start": "next start",
+    "pretest": "npm run presync:skeleton",
+    "test": "sh -c 'if [ \"$1\" ]; then tsx --test \"src/**/*$1*.test.ts\"; else tsx --test \"src/**/*.test.ts\"; fi' --",
+    "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "lint": "eslint .",
     "electron": "electron .",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never"
@@ -78,6 +85,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.1.1",
     "tailwindcss": "^4.3.0",
+    "tsx": "^4.22.3",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
   },
