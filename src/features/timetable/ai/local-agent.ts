@@ -141,6 +141,7 @@ export async function runLocalAgent(
     const solverConstraintSpecs = translator.constraintSpecs.filter(
       (spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base'))
     );
+    const hasCustomConstraintSpecs = solverConstraintSpecs.some((spec) => spec.kind === 'custom_dsl');
     board.setConstraintSpecs(translator.constraintSpecs);
     board.setDataset(compressed);
 
@@ -262,7 +263,7 @@ export async function runLocalAgent(
           continue;
         }
 
-        const astCheck = latestConstraintCode.trim()
+        const astCheck = hasCustomConstraintSpecs && latestConstraintCode.trim()
           ? await astCheckPython(latestConstraintCode)
           : { ok: true };
         if (!astCheck.ok) {
@@ -321,10 +322,24 @@ export async function runLocalAgent(
           message: 'Đang deterministic validate',
           iteration: attempt,
         });
-        const report = validateSchedule(execResult.resultData.schedule, translator.constraintSpecs, {
+        const scheduleWithAssignmentIds = execResult.resultData.schedule.map((entry) => {
+          if (entry.assignmentId) return entry;
+
+          const matchingAssignments = compressed.assignments.filter(
+            (assignment) =>
+              assignment.class === entry.class &&
+              assignment.subject === entry.subject &&
+              assignment.teacher === entry.teacher
+          );
+
+          if (matchingAssignments.length !== 1) return entry;
+          return { ...entry, assignmentId: matchingAssignments[0].id };
+        });
+
+        const report = validateSchedule(scheduleWithAssignmentIds, translator.constraintSpecs, {
           assignments: compressed.assignments,
         });
-        const roundTrip = verifyCpSatRoundTrip(execResult.resultData.schedule, compressed.assignments, {
+        const roundTrip = verifyCpSatRoundTrip(scheduleWithAssignmentIds, compressed.assignments, {
           days: compressed.days,
           periodsByDay: compressed.periodsByDay,
           periods: compressed.periods,
@@ -342,6 +357,7 @@ export async function runLocalAgent(
         if (report.hardConstraintPass && report.baseConstraintPass && roundTrip.ok && uncoveredHardUncheckedIds.length === 0) {
           const finalResult = {
             ...execResult.resultData,
+            schedule: scheduleWithAssignmentIds,
             status: 'solved' as const,
             message: 'Đã tạo thời khóa biểu thành công.',
             deterministicReport: report,

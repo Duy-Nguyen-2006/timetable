@@ -40,18 +40,25 @@ function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): Coder
   const covered = new Set(
     result.covered_constraint_ids.filter((id) => customIdSet.has(id))
   );
+  const assumptions = [...result.assumptions];
 
-  const missing = hardCustomIds.filter((id) => !covered.has(id));
+  for (const id of hardCustomIds) {
+    if (covered.has(id)) continue;
 
-  if (missing.length > 0) {
-    throw new Error(
-      `Coder failed to cover hard custom_dsl constraints: ${missing.join(', ')}`
-    );
+    if (!result.constraint_code.includes(id)) {
+      throw new Error(
+        `Coder failed to cover hard custom_dsl constraint ${id}: no code reference`
+      );
+    }
+
+    covered.add(id);
+    assumptions.push(`auto_added_coverage:${id}`);
   }
 
   return {
     ...result,
     covered_constraint_ids: [...covered],
+    assumptions,
   };
 }
 

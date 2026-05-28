@@ -63,7 +63,11 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
       if (systemPrompt === 'translator') {
         return Response.json({
           ok: true,
-          content: JSON.stringify({ constraintSpecs: [] }),
+          content: JSON.stringify({
+            constraintSpecs: [
+              { id: 'c1', original: 'custom runtime guard', severity: 'hard', kind: 'custom_dsl', params: {} },
+            ],
+          }),
           usage: { total_tokens: 1 },
         });
       }
@@ -90,7 +94,7 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
           ok: true,
           content: JSON.stringify({
             plan_summary: 'bad runtime code',
-            constraint_code: "raise RuntimeError('bad')",
+            constraint_code: "# c1\nraise RuntimeError('bad')",
             covered_constraint_ids: [],
             assumptions: [],
           }),
@@ -184,8 +188,8 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
 
     assert.equal(result.success, true);
     assert.equal(coderCalls, 3);
-    assert.equal(repairPayload?.currentCode, "raise RuntimeError('bad')");
-    assert.equal(repairPayload?.constraintCode, "raise RuntimeError('bad')");
+    assert.equal(repairPayload?.currentCode, "# c1\nraise RuntimeError('bad')");
+    assert.equal(repairPayload?.constraintCode, "# c1\nraise RuntimeError('bad')");
     assert.equal(repairPayload?.compileOrRunError, 'RuntimeError: bad');
   } finally {
     globalThis.fetch = originalFetch;

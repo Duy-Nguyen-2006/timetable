@@ -1,4 +1,3 @@
-```
 # Dependencies
 node_modules/
 .python-version
@@ -10,9 +9,18 @@ __pycache__/
 *.pyd
 
 # Build artifacts
+.next/
 dist/
 build/
 target/
+release/
+*.tsbuildinfo
+
+# Runtime artifacts
+.ai_results/
+
+# Next.js generated files
+next-env.d.ts
 
 # Logs
 *.log
@@ -47,4 +55,3 @@ __pycache__/
 *.so
 .pytest_cache/
 .mypy_cache/
-```

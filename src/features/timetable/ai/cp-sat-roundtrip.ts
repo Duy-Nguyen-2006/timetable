@@ -27,20 +27,27 @@ export function verifyCpSatRoundTrip(
 
   for (const entry of schedule) {
     const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
+    const matchingAssignments = assignments.filter(
+      (assignment) =>
+        entry.class === assignment.class &&
+        entry.subject === assignment.subject &&
+        entry.teacher === assignment.teacher
+    );
+    const resolvedAssignmentId = assignmentId || (matchingAssignments.length === 1 ? matchingAssignments[0].id : '');
 
-    if (!assignmentId) {
+    if (!resolvedAssignmentId) {
       return {
         ok: false,
         message: `Round-trip missing assignmentId for ${entry.class}/${entry.subject}/${entry.teacher}`,
       };
     }
 
-    const assignment = assignmentById.get(assignmentId);
+    const assignment = assignmentById.get(resolvedAssignmentId);
 
     if (!assignment) {
       return {
         ok: false,
-        message: `Round-trip unknown assignmentId: ${assignmentId}`,
+        message: `Round-trip unknown assignmentId: ${resolvedAssignmentId}`,
       };
     }
 
@@ -51,7 +58,7 @@ export function verifyCpSatRoundTrip(
     ) {
       return {
         ok: false,
-        message: `Round-trip assignment tuple mismatch for ${assignmentId}`,
+        message: `Round-trip assignment tuple mismatch for ${resolvedAssignmentId}`,
       };
     }
 
@@ -80,7 +87,16 @@ export function verifyCpSatRoundTrip(
 
   for (const assignment of assignments) {
     const count = schedule.filter(
-      (entry) => String(entry.assignmentId ?? '') === assignment.id
+      (entry) => {
+        const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
+        if (assignmentId) return assignmentId === assignment.id;
+
+        return (
+          entry.class === assignment.class &&
+          entry.subject === assignment.subject &&
+          entry.teacher === assignment.teacher
+        );
+      }
     ).length;
 
     if (count !== assignment.weeklyPeriods) {

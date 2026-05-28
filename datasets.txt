@@ -1,3 +1,367 @@
+DATASET 1
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Thủy
+Hiếu
+Lan
+Thắng
+Phương
+Subjects:
+Toán
+Văn
+Tiếng Anh
+GDTC
+KHTN
+LS&ĐL
+CN
+GDCD
+Classes:
+6A
+6B
+Assignments:
+Sơn-Toán-6A-4
+Sơn-Toán-6B-4
+Dung-Văn-6A-4
+Dung-Văn-6B-4
+Hương-Tiếng Anh-6A-3
+Hương-Tiếng Anh-6B-3
+Thủy-GDTC-6A-2
+Thủy-GDTC-6B-2
+Hiếu-KHTN-6A-3
+Hiếu-KHTN-6B-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Thắng-CN-6A-1
+Thắng-CN-6B-1
+Phương-GDCD-6A-1
+Phương-GDCD-6B-1
+Hard constraints:
+Sơn không dạy thứ 2
+Hương không dạy tiết 1
+Soft constraints:
+Toán nên xếp tiết 1-2
+Văn nên liên tiếp 2 tiết
+
+DATASET 2
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Phương
+Thủy
+Hiếu
+Lan
+Thắng
+Trọng
+Subjects:
+Toán
+Văn
+Tiếng Anh
+GDTC
+KHTN
+LS&ĐL
+CN
+GDCD
+Classes:
+6A
+6B
+7A
+7B
+Assignments:
+Sơn-Toán-7A-4
+Sơn-Toán-7B-4
+Dung-Toán-6A-4
+Dung-Toán-6B-4
+Hương-Văn-6A-4
+Hương-Văn-6B-4
+Thuận-Văn-7A-4
+Thuận-Văn-7B-4
+Phương-Tiếng Anh-6A-3
+Phương-Tiếng Anh-6B-3
+Phương-Tiếng Anh-7A-3
+Phương-Tiếng Anh-7B-3
+Thủy-GDTC-6A-2
+Thủy-GDTC-6B-2
+Thủy-GDTC-7A-2
+Thủy-GDTC-7B-2
+Hiếu-KHTN-6A-3
+Hiếu-KHTN-6B-3
+Hiếu-KHTN-7A-3
+Hiếu-KHTN-7B-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Lan-LS&ĐL-7A-2
+Lan-LS&ĐL-7B-2
+Thắng-CN-6A-1
+Thắng-CN-6B-1
+Thắng-CN-7A-1
+Thắng-CN-7B-1
+Trọng-GDCD-6A-1
+Trọng-GDCD-6B-1
+Trọng-GDCD-7A-1
+Trọng-GDCD-7B-1
+Hard constraints:
+Sơn không dạy thứ 5
+Thuận chỉ dạy thứ 3 4 5
+Soft constraints:
+Mỗi ngày mỗi lớp nên có Toán hoặc Văn
+KHTN nên xếp tiết 1
+
+DATASET 3
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Phương
+Trọng
+Hung
+Liễu
+Thúy
+Hiếu
+Lộc
+Học
+Ngân
+Lan
+Thủy
+Thắng
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Classes:
+6A
+6B
+7A
+7B
+8A
+8B
+9A
+9B
+Assignments:
+Sơn-Toán-7A-4
+Sơn-Toán-7B-4
+Sơn-Toán-8B-4
+Sơn-Toán-9B-4
+Dung-Toán-6A-4
+Dung-Toán-6B-4
+Dung-Toán-8A-4
+Dung-Toán-9A-4
+Hương-Văn-6A-4
+Hương-Văn-6B-4
+Hương-Văn-8A-4
+Thuận-Văn-7A-4
+Thuận-Văn-9A-4
+Phương-Văn-7B-4
+Trọng-Văn-8B-4
+Trọng-Văn-9B-4
+Hung-Tiếng Anh-6A-3
+Hung-Tiếng Anh-6B-3
+Hung-Tiếng Anh-7A-3
+Hung-Tiếng Anh-7B-3
+Hung-Tiếng Anh-8A-3
+Hung-Tiếng Anh-8B-3
+Liễu-Tiếng Anh-9A-3
+Liễu-Tiếng Anh-9B-3
+Thúy-KHTN-6A-3
+Thúy-KHTN-6B-3
+Hiếu-KHTN-7A-3
+Hiếu-KHTN-7B-3
+Lộc-KHTN-8A-3
+Lộc-KHTN-8B-3
+Học-KHTN-9A-3
+Học-KHTN-9B-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Lan-LS&ĐL-9A-2
+Lan-LS&ĐL-9B-2
+Ngân-LS&ĐL-7A-2
+Ngân-LS&ĐL-7B-2
+Ngân-LS&ĐL-8A-2
+Ngân-LS&ĐL-8B-2
+Thủy-GDTC-6A-2
+Thủy-GDTC-6B-2
+Thủy-GDTC-7A-2
+Thủy-GDTC-7B-2
+Thủy-GDTC-8A-2
+Thủy-GDTC-8B-2
+Thủy-GDTC-9A-2
+Thủy-GDTC-9B-2
+Thắng-CN-6A-1
+Thắng-CN-6B-1
+Thắng-CN-7A-1
+Thắng-CN-7B-1
+Thắng-CN-8A-1
+Thắng-CN-8B-1
+Thắng-CN-9A-1
+Thắng-CN-9B-1
+Phương-GDCD-6A-1
+Phương-GDCD-6B-1
+Phương-GDCD-7A-1
+Phương-GDCD-7B-1
+Phương-GDCD-8A-1
+Phương-GDCD-8B-1
+Phương-GDCD-9A-1
+Phương-GDCD-9B-1
+Hard constraints:
+Thúy không dạy thứ 2
+Sơn không dạy tiết 4 thứ 6
+Hung không dạy tiết 1 thứ 4
+Liễu chỉ dạy thứ 3 4 5
+GDTC không xếp tiết 1
+GDTC không xếp tiết 4
+Toán phải block 2 tiết
+Văn phải block 2 tiết
+Soft constraints:
+Không xếp Toán Văn tiết 4
+KHTN nên tiết 1-2
+Mỗi ngày mỗi lớp nên có Toán hoặc Văn
+CN GDCD không liên tiếp
+Mỗi giáo viên không dạy quá 4 tiết liên tiếp
+Toán Văn nên tiết 1-2 lớp 9
+
+DATASET 4
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Hung
+Thúy
+Hiếu
+Lan
+Thủy
+Phương
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Classes:
+6A
+7A
+8A
+9A
+Assignments:
+Sơn-Toán-7A-4
+Sơn-Toán-8A-4
+Sơn-Toán-9A-4
+Dung-Toán-6A-4
+Hương-Văn-6A-4
+Hương-Văn-7A-4
+Hương-Văn-8A-4
+Hương-Văn-9A-4
+Hung-Tiếng Anh-6A-3
+Hung-Tiếng Anh-7A-3
+Hung-Tiếng Anh-8A-3
+Hung-Tiếng Anh-9A-3
+Thúy-KHTN-6A-3
+Thúy-KHTN-7A-3
+Thúy-KHTN-8A-3
+Thúy-KHTN-9A-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-7A-2
+Lan-LS&ĐL-8A-2
+Lan-LS&ĐL-9A-2
+Thủy-GDTC-6A-2
+Thủy-GDTC-7A-2
+Thủy-GDTC-8A-2
+Thủy-GDTC-9A-2
+Hiếu-CN-6A-1
+Hiếu-CN-7A-1
+Hiếu-CN-8A-1
+Hiếu-CN-9A-1
+Phương-GDCD-6A-1
+Phương-GDCD-7A-1
+Phương-GDCD-8A-1
+Phương-GDCD-9A-1
+Hard constraints:
+Hương không dạy thứ 2 thứ 3
+Thúy không dạy thứ 5
+KHTN bắt buộc tiết 1
+Văn bắt buộc tiết 2-3
+Soft constraints:
+Thủy nên dạy sáng sớm
+CN nên tiết 4
+Mỗi giáo viên 1 ngày nghỉ tối thiểu
+
+DATASET 5
+Days: Mon-Fri
+Time: Afternoon
+Max periods: 3
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Thủy
+Lan
+Phương
+Hiếu
+Subjects:
+Toán
+Văn
+Tiếng Anh
+GDTC
+LS&ĐL
+CN
+GDCD
+Classes:
+6A
+6B
+7A
+Assignments:
+Sơn-Toán-6A-3
+Sơn-Toán-6B-3
+Sơn-Toán-7A-3
+Dung-Văn-6A-3
+Dung-Văn-6B-3
+Dung-Văn-7A-3
+Hương-Tiếng Anh-6A-3
+Hương-Tiếng Anh-6B-3
+Hương-Tiếng Anh-7A-3
+Thuận-GDTC-6A-2
+Thuận-GDTC-6B-2
+Thuận-GDTC-7A-2
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Lan-LS&ĐL-7A-2
+Phương-CN-6A-1
+Phương-CN-6B-1
+Phương-CN-7A-1
+Hiếu-GDCD-6A-1
+Hiếu-GDCD-6B-1
+Hiếu-GDCD-7A-1
+Hard constraints:
+Sơn không dạy chiều thứ 5
+Dung chỉ dạy chiều
+Soft constraints:
+Toán Văn nên tiết đầu
+Mỗi lớp nên có Toán hoặc Văn mỗi ngày
+
 DATASET 6
 Days: Mon-Fri
 Time: Morning-Afternoon
