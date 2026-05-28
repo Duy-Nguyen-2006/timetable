@@ -168,6 +168,7 @@ src/
 AGENTS.md
 Caddyfile
 components.json
+datasets.txt
 eslint.config.mjs
 next.config.ts
 package.json
@@ -181,409 +182,6 @@ Upgrade_Plan.md
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="examples/datasets.txt">
-DATASET 6
-Days: Mon-Fri
-Time: Morning-Afternoon
-Max periods: 7
-Teachers:
-Sơn
-Dung
-Hương
-Thuận
-Phương
-Trọng
-Hung
-Liễu
-Thúy
-Hiếu
-Lộc
-Học
-Ngân
-Lan
-Thủy
-Thắng
-Tin
-Tùng
-Liên
-Hoa
-Subjects:
-Toán
-Văn
-Tiếng Anh
-KHTN
-LS&ĐL
-GDTC
-CN
-GDCD
-Tin
-HĐTN
-Classes:
-6A
-6B
-7A
-7B
-8A
-8B
-9A
-9B
-Assignments:
-Sơn-Toán-7A-5
-Sơn-Toán-7B-5
-Sơn-Toán-8B-5
-Sơn-Toán-9B-5
-Dung-Toán-6A-5
-Dung-Toán-6B-5
-Dung-Toán-8A-5
-Dung-Toán-9A-5
-Hương-Văn-6A-5
-Hương-Văn-6B-5
-Hương-Văn-8A-5
-Thuận-Văn-7A-5
-Thuận-Văn-9A-5
-Phương-Văn-7B-5
-Trọng-Văn-8B-5
-Trọng-Văn-9B-5
-Hung-Tiếng Anh-6A-4
-Hung-Tiếng Anh-6B-4
-Hung-Tiếng Anh-7A-4
-Hung-Tiếng Anh-7B-4
-Hung-Tiếng Anh-8A-4
-Hung-Tiếng Anh-8B-4
-Liễu-Tiếng Anh-9A-4
-Liễu-Tiếng Anh-9B-4
-Thúy-KHTN-6A-4
-Thúy-KHTN-6B-4
-Hiếu-KHTN-7A-4
-Hiếu-KHTN-7B-4
-Lộc-KHTN-8A-4
-Lộc-KHTN-8B-4
-Học-KHTN-9A-4
-Học-KHTN-9B-4
-Lan-LS&ĐL-6A-3
-Lan-LS&ĐL-6B-3
-Lan-LS&ĐL-9A-3
-Lan-LS&ĐL-9B-3
-Ngân-LS&ĐL-7A-3
-Ngân-LS&ĐL-7B-3
-Ngân-LS&ĐL-8A-3
-Ngân-LS&ĐL-8B-3
-Thủy-GDTC-6A-3
-Thủy-GDTC-6B-3
-Thủy-GDTC-7A-3
-Thủy-GDTC-7B-3
-Thủy-GDTC-8A-3
-Thủy-GDTC-8B-3
-Thủy-GDTC-9A-3
-Thủy-GDTC-9B-3
-Thắng-CN-6A-2
-Thắng-CN-6B-2
-Thắng-CN-7A-2
-Thắng-CN-7B-2
-Thắng-CN-8A-2
-Thắng-CN-8B-2
-Thắng-CN-9A-2
-Thắng-CN-9B-2
-Phương-GDCD-6A-2
-Phương-GDCD-6B-2
-Phương-GDCD-7A-2
-Phương-GDCD-7B-2
-Phương-GDCD-8A-2
-Phương-GDCD-8B-2
-Phương-GDCD-9A-2
-Phương-GDCD-9B-2
-Tùng-HĐTN-6A-4
-Tùng-HĐTN-6B-4
-Tùng-HĐTN-7A-4
-Tùng-HĐTN-7B-4
-Tùng-HĐTN-8A-4
-Tùng-HĐTN-8B-4
-Tùng-HĐTN-9A-4
-Liên-Tin-7B-3
-Liên-Tin-8B-2
-Liên-Tin-9B-3
-Hoa-HĐTN-7A-3
-Hoa-HĐTN-8A-3
-Hoa-HĐTN-9A-3
-Hoa-HĐTN-9B-4
-Hoa-HĐTN-6A-2
-Hoa-HĐTN-6B-2
-Hoa-HĐTN-8B-1
-Tin-Tin-6A-1
-Tin-Tin-6B-1
-Hard constraints:
-Thúy không dạy thứ 2
-Sơn không dạy tiết 7 thứ 6
-Toán buổi sáng
-KHTN buổi sáng
-Văn buổi sáng
-Soft constraints:
-Không xếp Toán tiết 7
-Không xếp Văn tiết 7
-HĐTN nên buổi chiều
-Mỗi giáo viên không dạy quá 6 tiết liên tiếp
-</file>
-
-<file path="examples/Format.csv">
-UBND XÃ TRƯỜNG VĂN,,,,,THỜI KHÓA BIỂU BUỔI SÁNG ,,,,,,,,,,,Số 2,
-TRƯỜNG THCS TRƯỜNG SƠN,,,,,HỌC KỲ II- NĂM HỌC 2025-2026 ( Thực hiện từ 09/02/2026),,,,,,,,,,,,
-Thứ,Tiết,6A,GV Dạy,6B,GV Dạy,7A,GV Dạy,7B,GV Dạy,8A,GV Dạy,8B,GV Dạy,9A,GV Dạy,9B,GV Dạy
-2,1,HĐTN,Lan,HĐTN,Thúy,HĐTN,Lộc,HĐTN ,Dung,HĐTN,Hương,HĐTN,Ngân,HĐTN,Thuận,HĐTN,Trọng
-,2,KHTN ,Thìn,N.thuật ,Thắng,N.thuật ,Thơ,TA ,Hùng,GDTC ,Thủy,CN ,Học,Toán,Sơn,Văn,Trọng
-,3,N.thuật,Thắng,KHTN ,Thìn,TA ,Hùng,Toán,Sơn,Toán ,Dung,N.thuật ,Thơ,KHTN ,Thúy,GDTC ,Thủy
-,4,Toán ,Dung,GDTC ,Thủy,N.thuật ,Thắng,N.thuật ,Thơ,KHTN ,Hiếu,KHTN ,Yên,KHTN ,Thìn,Toán ,Sơn
-,5,,,,,,,,,N.thuật ,Thơ,GDTC ,Thủy,CN ,Học,N.thuật ,Thắng
-3,1,Văn,Phương,KHTN,Thúy,TA,Hùng,GDTC,Thủy,Văn,Hương,LS&ĐL,Ngân,LS&ĐL,Lan,Văn,Trọng
-,2,KHTN,Thúy,LS&ĐL,Lan,LS&ĐL,Ngân,Văn,Phương,Văn,Hương,TA,Hùng,GDTC,Thủy,Văn,Trọng
-,3,KHTN,Thúy,Văn,Hương,LS&ĐL,Ngân,TA,Hùng,GDTC,Thủy,Văn,Trọng,KHTN,Lộc,LS&ĐL,Lan
-,4,LS&ĐL,Lan,Văn,Hương,GDTC,Thủy,LS&ĐL,Ngân,TA,Hùng,Văn,Trọng,GDCD,Phương,KHTN,Thúy
-4,1,CN,Thúy,TA,Hùng,Toán,Sơn,GDTC,Thủy,CN,Học,Toán,Dung,Văn,Thuận,GDCD,Phương
-,2,TA,Hùng,GDTC,Thủy,Văn,Thuận,GDCD,Phương,Toán,Dung,KHTN,Học,Toán,Sơn,KHTN,Thúy
-,3,Toán,Dung,CN,Thúy,Văn,Thuận,Văn,Phương,KHTN,Học,GDTC,Thủy,Tin học,Sơn,KHTN,Lộc
-,4,GDTC,Thủy,Toán,Dung,KHTN,Hiếu,Văn,Phương,TA,Hùng,KHTN,Yên,GDĐP,Thuận,Toán,Sơn
-5,1,N.thuật,Thơ,TA ,Hùng,GDTC,Thủy,Toán,Sơn,Toán,Dung,LS&ĐL,Ngân,Văn,Thuận,LS&ĐL,Lan
-,2,GDTC,Thủy,N.thuật,Thơ,CN,Hiếu,LS&ĐL,Ngân,KHTN,Lộc,Toán,Dung,Văn,Thuận,Toán,Sơn
-,3,Toán,Dung,LS&ĐL,Lan,Văn,Thuận,CN,Hiếu,LS&ĐL,Ngân,TA ,Hùng,GDTC,Thủy,N.thuật,Thơ
-,4,TA ,Hùng,Toán,Dung,Toán,Sơn,KHTN,Hiếu,LS&ĐL,Ngân,KHTN,Lộc,N.thuật,Thơ,GDTC,Thủy
-6,1,Văn,Phương,Toán,Dung,LS&ĐL,Ngân,Toán,Sơn,N.thuật,Thắng,CN ,Học,KHTN,Thúy,HĐTN,Trọng
-,2,Văn,Phương,Văn,Hương,Toán,Sơn,N.thuật,Thắng,KHTN,Hiếu,Toán,Dung,TA,Liệu,Văn,Trọng
-,3,KHTN,Thìn,LS&ĐL,Lan,KHTN,Hiếu,KHTN,Học,Toán,Dung,Văn,Trọng,Toán,Sơn,TA,Liệu
-,4,LS&ĐL,Lan,KHTN,Thìn,HĐTN,Lộc,KHTN,Hiếu,LS&ĐL,Ngân,N.thuật,Thắng,CN ,Học,TA,Liệu
-,5,SHL,Lan,SHL,Thúy,SHL,Học,SHL,Phương,SHL,Hương,SHL,Ngân,SHL,Thuận,SHL,Trọng
-,,,THỜI KHÓA BIỂU BUỔI CHIỀU,,,,,,,,,,,,,,
-3,1,GDCD,Phương,KHTN,Thúy,KHTN,Học,KHTN,Hiếu,Văn,Hương,GDĐP,Trọng,Toán,Sơn,TA,Liệu
-,2,GDĐP,Hương,HĐTN,Thúy,Tin học,Hiếu,HĐTN,Dung,CN,Học,GDCD,Phương,TA,Liệu,HĐTN,Trọng
-,3,Văn,Phương,GDCD,Trọng,KHTN,Hiếu,Toán,Sơn,HĐTN,Hương,Toán,Dung,TA,Liệu,CN,Học
-4,1,LS&ĐL,Lan,Văn,Hương,TA,Hùng,LS&ĐL,Ngân,Tin học,Hiếu,Văn,Trọng,Văn,Thuận,KHTN,Học
-,2,Tin học,Hiếu,GDĐP,Hương,GDĐP,Thuận,TA,Hùng,GDĐP,Trọng,LS&ĐL,Ngân,LS&ĐL,Lan,CN,Học
-,3,HĐTN,Lan,TA,Hùng,HĐTN,Học,Tin học,Hiếu,Văn,Hương,HĐTN,Ngân,HĐTN,Thuận,GDĐP,Trọng
-5,1,HĐTN,Lan,Tin học,Hiếu,Văn,Thuận,HĐTN,Dung,GDCD,Phương,TA,Hùng,N.Thuật,Thắng,Toán,Sơn
-,2,TA,Hùng,Toán,Dung,GDCD,Phương,GDĐP,Thuận,HĐTN,Thắng,Tin học,Hiếu,LS&ĐL,Lan,Tin,Sơn
-,3,Toán,Dung,HĐTN,Thắng,Toán,Sơn,Văn,Phương,TA,Hùng,HĐTN,Ngân,HĐTN,Thuận,LS&ĐL,Lan
-</file>
-
-<file path="public/templates/solver_skeleton.py">
-import json
-from ortools.sat.python import cp_model
-
-with open("input.json", encoding="utf-8") as f:
-    data = json.load(f)
-
-classes = data["classes"]
-days = data["days"]
-periods = data["periods"]
-periods_by_day = data.get("periodsByDay") or {}
-assignments = data["assignments"]
-constraints = data["constraints"]
-
-model = cp_model.CpModel()
-
-
-def periods_for_day(day_id):
-    day_periods = periods_by_day.get(day_id)
-    if isinstance(day_periods, list) and day_periods:
-        return day_periods
-    return periods
-
-
-slots = {}
-for a in assignments:
-    for d in days:
-        for p in periods_for_day(d):
-            slots[(a["id"], d, p)] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
-
-# Mỗi assignment đúng weeklyPeriods
-for a in assignments:
-    model.Add(
-        sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
-        == a["weeklyPeriods"]
-    )
-
-# Mỗi class/day/period tối đa 1 assignment
-for c in classes:
-    for d in days:
-        for p in periods_for_day(d):
-            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["class"] == c) <= 1)
-
-# Mỗi teacher/day/period tối đa 1 assignment
-teachers = list({a["teacher"] for a in assignments})
-for t in teachers:
-    for d in days:
-        for p in periods_for_day(d):
-            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["teacher"] == t) <= 1)
-
-
-def build_custom_constraints(model, slots, data):
-    assignments = data["assignments"]
-    days = data["days"]
-    periods = data["periods"]
-    periods_by_day = data.get("periodsByDay") or {}
-    constraints = data["constraints"]
-
-    def _periods_for(d):
-        day_periods = periods_by_day.get(d)
-        if isinstance(day_periods, list) and day_periods:
-            return day_periods
-        return periods
-
-    for spec in constraints:
-        kind = spec.get("kind")
-        params = spec.get("params", {})
-        severity = spec.get("severity", "hard")
-
-        if severity != "hard":
-            continue
-
-        if kind == "weekly_periods_exact":
-            continue
-
-        elif kind == "teacher_block_day":
-            t = params.get("teacher")
-            d = params.get("day")
-            for a in assignments:
-                if a["teacher"] == t:
-                    for p in _periods_for(d):
-                        model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "teacher_block_period":
-            t = params.get("teacher")
-            p = int(params.get("period"))
-            for a in assignments:
-                if a["teacher"] == t:
-                    for d in days:
-                        if p in _periods_for(d):
-                            model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "teacher_block_slot":
-            t = params.get("teacher")
-            d = params.get("day")
-            p = int(params.get("period"))
-            if p in _periods_for(d):
-                for a in assignments:
-                    if a["teacher"] == t:
-                        model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "teacher_max_per_day":
-            t = params.get("teacher")
-            n = int(params.get("maxPerDay"))
-            teacher_asgs = [a for a in assignments if a["teacher"] == t]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
-                )
-
-        elif kind == "teacher_max_consecutive":
-            t = params.get("teacher")
-            n = int(params.get("maxConsecutive"))
-            teacher_asgs = [a for a in assignments if a["teacher"] == t]
-            for d in days:
-                day_periods = _periods_for(d)
-                for i in range(len(day_periods) - n):
-                    window = day_periods[i:i + n + 1]
-                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
-                        continue
-                    model.Add(
-                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in window) <= n
-                    )
-
-        elif kind == "subject_pin_period":
-            subj = params.get("subject")
-            allowed = set(int(x) for x in params.get("periods", []))
-            target_classes = set(params.get("classes") or data["classes"])
-            for a in assignments:
-                if a["subject"] == subj and a["class"] in target_classes:
-                    for d in days:
-                        for p in _periods_for(d):
-                            if p not in allowed:
-                                model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "class_no_double_subject_day":
-            cls = params.get("class")
-            subj = params.get("subject")
-            asgs = [
-                a for a in assignments
-                if a["class"] == cls and (subj is None or a["subject"] == subj)
-            ]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= 1
-                )
-
-        elif kind == "pair_not_same_slot":
-            teachers = params.get("teachers", [])
-            if len(teachers) != 2:
-                raise NotImplementedError(f"Invalid pair_not_same_slot: {spec.get('id')}")
-            t1, t2 = teachers
-            scope_day = (params.get("scope") or {}).get("day")
-            days_to_check = [scope_day] if scope_day else days
-            asgs1 = [a for a in assignments if a["teacher"] == t1]
-            asgs2 = [a for a in assignments if a["teacher"] == t2]
-
-            for d in days_to_check:
-                for p in _periods_for(d):
-                    model.Add(
-                        sum(slots[(a["id"], d, p)] for a in asgs1) +
-                        sum(slots[(a["id"], d, p)] for a in asgs2)
-                        <= 1
-                    )
-
-        elif kind == "subject_consecutive":
-            raise NotImplementedError(
-                f"subject_consecutive registry chưa implement an toàn: {spec.get('id')}"
-            )
-
-        elif kind == "if_then":
-            raise NotImplementedError(
-                f"if_then registry chưa implement an toàn: {spec.get('id')}"
-            )
-
-        elif kind == "custom_dsl":
-            # <<< AI_FILL_HERE >>>
-            pass
-
-        else:
-            raise NotImplementedError(f"Unsupported constraint kind: {kind}")
-
-
-build_custom_constraints(model, slots, data)
-
-solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 60.0
-status = solver.Solve(model)
-
-result = {
-    "classes": classes,
-    "days": days,
-    "periods": periods,
-    "assignments": assignments,
-    "status": solver.StatusName(status).lower(),
-    "schedule": [],
-}
-
-if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-    for a in assignments:
-        for d in days:
-            for p in periods_for_day(d):
-                if solver.Value(slots[(a["id"], d, p)]) == 1:
-                    result["schedule"].append(
-                        {
-                            "assignmentId": a["id"],
-                            "class": a["class"],
-                            "day": d,
-                            "period": p,
-                            "subject": a["subject"],
-                            "teacher": a["teacher"],
-                        }
-                    )
-    with open("result.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
-    print("SOLUTION_FOUND")
-else:
-    with open("result.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
-    print(f"NO_SOLUTION:{solver.StatusName(status)}")
-</file>
 
 <file path="src/app/globals.css">
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400&family=JetBrains+Mono:wght@400&display=swap');
@@ -1566,6 +1164,187 @@ contextBridge.exposeInMainWorld('electron', {
 });
 </file>
 
+<file path="examples/datasets.txt">
+DATASET 6
+Days: Mon-Fri
+Time: Morning-Afternoon
+Max periods: 7
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Phương
+Trọng
+Hung
+Liễu
+Thúy
+Hiếu
+Lộc
+Học
+Ngân
+Lan
+Thủy
+Thắng
+Tin
+Tùng
+Liên
+Hoa
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Tin
+HĐTN
+Classes:
+6A
+6B
+7A
+7B
+8A
+8B
+9A
+9B
+Assignments:
+Sơn-Toán-7A-5
+Sơn-Toán-7B-5
+Sơn-Toán-8B-5
+Sơn-Toán-9B-5
+Dung-Toán-6A-5
+Dung-Toán-6B-5
+Dung-Toán-8A-5
+Dung-Toán-9A-5
+Hương-Văn-6A-5
+Hương-Văn-6B-5
+Hương-Văn-8A-5
+Thuận-Văn-7A-5
+Thuận-Văn-9A-5
+Phương-Văn-7B-5
+Trọng-Văn-8B-5
+Trọng-Văn-9B-5
+Hung-Tiếng Anh-6A-4
+Hung-Tiếng Anh-6B-4
+Hung-Tiếng Anh-7A-4
+Hung-Tiếng Anh-7B-4
+Hung-Tiếng Anh-8A-4
+Hung-Tiếng Anh-8B-4
+Liễu-Tiếng Anh-9A-4
+Liễu-Tiếng Anh-9B-4
+Thúy-KHTN-6A-4
+Thúy-KHTN-6B-4
+Hiếu-KHTN-7A-4
+Hiếu-KHTN-7B-4
+Lộc-KHTN-8A-4
+Lộc-KHTN-8B-4
+Học-KHTN-9A-4
+Học-KHTN-9B-4
+Lan-LS&ĐL-6A-3
+Lan-LS&ĐL-6B-3
+Lan-LS&ĐL-9A-3
+Lan-LS&ĐL-9B-3
+Ngân-LS&ĐL-7A-3
+Ngân-LS&ĐL-7B-3
+Ngân-LS&ĐL-8A-3
+Ngân-LS&ĐL-8B-3
+Thủy-GDTC-6A-3
+Thủy-GDTC-6B-3
+Thủy-GDTC-7A-3
+Thủy-GDTC-7B-3
+Thủy-GDTC-8A-3
+Thủy-GDTC-8B-3
+Thủy-GDTC-9A-3
+Thủy-GDTC-9B-3
+Thắng-CN-6A-2
+Thắng-CN-6B-2
+Thắng-CN-7A-2
+Thắng-CN-7B-2
+Thắng-CN-8A-2
+Thắng-CN-8B-2
+Thắng-CN-9A-2
+Thắng-CN-9B-2
+Phương-GDCD-6A-2
+Phương-GDCD-6B-2
+Phương-GDCD-7A-2
+Phương-GDCD-7B-2
+Phương-GDCD-8A-2
+Phương-GDCD-8B-2
+Phương-GDCD-9A-2
+Phương-GDCD-9B-2
+Tùng-HĐTN-6A-4
+Tùng-HĐTN-6B-4
+Tùng-HĐTN-7A-4
+Tùng-HĐTN-7B-4
+Tùng-HĐTN-8A-4
+Tùng-HĐTN-8B-4
+Tùng-HĐTN-9A-4
+Liên-Tin-7B-3
+Liên-Tin-8B-2
+Liên-Tin-9B-3
+Hoa-HĐTN-7A-3
+Hoa-HĐTN-8A-3
+Hoa-HĐTN-9A-3
+Hoa-HĐTN-9B-4
+Hoa-HĐTN-6A-2
+Hoa-HĐTN-6B-2
+Hoa-HĐTN-8B-1
+Tin-Tin-6A-1
+Tin-Tin-6B-1
+Hard constraints:
+Thúy không dạy thứ 2
+Sơn không dạy tiết 7 thứ 6
+Toán buổi sáng
+KHTN buổi sáng
+Văn buổi sáng
+Soft constraints:
+Không xếp Toán tiết 7
+Không xếp Văn tiết 7
+HĐTN nên buổi chiều
+Mỗi giáo viên không dạy quá 6 tiết liên tiếp
+</file>
+
+<file path="examples/Format.csv">
+UBND XÃ TRƯỜNG VĂN,,,,,THỜI KHÓA BIỂU BUỔI SÁNG ,,,,,,,,,,,Số 2,
+TRƯỜNG THCS TRƯỜNG SƠN,,,,,HỌC KỲ II- NĂM HỌC 2025-2026 ( Thực hiện từ 09/02/2026),,,,,,,,,,,,
+Thứ,Tiết,6A,GV Dạy,6B,GV Dạy,7A,GV Dạy,7B,GV Dạy,8A,GV Dạy,8B,GV Dạy,9A,GV Dạy,9B,GV Dạy
+2,1,HĐTN,Lan,HĐTN,Thúy,HĐTN,Lộc,HĐTN ,Dung,HĐTN,Hương,HĐTN,Ngân,HĐTN,Thuận,HĐTN,Trọng
+,2,KHTN ,Thìn,N.thuật ,Thắng,N.thuật ,Thơ,TA ,Hùng,GDTC ,Thủy,CN ,Học,Toán,Sơn,Văn,Trọng
+,3,N.thuật,Thắng,KHTN ,Thìn,TA ,Hùng,Toán,Sơn,Toán ,Dung,N.thuật ,Thơ,KHTN ,Thúy,GDTC ,Thủy
+,4,Toán ,Dung,GDTC ,Thủy,N.thuật ,Thắng,N.thuật ,Thơ,KHTN ,Hiếu,KHTN ,Yên,KHTN ,Thìn,Toán ,Sơn
+,5,,,,,,,,,N.thuật ,Thơ,GDTC ,Thủy,CN ,Học,N.thuật ,Thắng
+3,1,Văn,Phương,KHTN,Thúy,TA,Hùng,GDTC,Thủy,Văn,Hương,LS&ĐL,Ngân,LS&ĐL,Lan,Văn,Trọng
+,2,KHTN,Thúy,LS&ĐL,Lan,LS&ĐL,Ngân,Văn,Phương,Văn,Hương,TA,Hùng,GDTC,Thủy,Văn,Trọng
+,3,KHTN,Thúy,Văn,Hương,LS&ĐL,Ngân,TA,Hùng,GDTC,Thủy,Văn,Trọng,KHTN,Lộc,LS&ĐL,Lan
+,4,LS&ĐL,Lan,Văn,Hương,GDTC,Thủy,LS&ĐL,Ngân,TA,Hùng,Văn,Trọng,GDCD,Phương,KHTN,Thúy
+4,1,CN,Thúy,TA,Hùng,Toán,Sơn,GDTC,Thủy,CN,Học,Toán,Dung,Văn,Thuận,GDCD,Phương
+,2,TA,Hùng,GDTC,Thủy,Văn,Thuận,GDCD,Phương,Toán,Dung,KHTN,Học,Toán,Sơn,KHTN,Thúy
+,3,Toán,Dung,CN,Thúy,Văn,Thuận,Văn,Phương,KHTN,Học,GDTC,Thủy,Tin học,Sơn,KHTN,Lộc
+,4,GDTC,Thủy,Toán,Dung,KHTN,Hiếu,Văn,Phương,TA,Hùng,KHTN,Yên,GDĐP,Thuận,Toán,Sơn
+5,1,N.thuật,Thơ,TA ,Hùng,GDTC,Thủy,Toán,Sơn,Toán,Dung,LS&ĐL,Ngân,Văn,Thuận,LS&ĐL,Lan
+,2,GDTC,Thủy,N.thuật,Thơ,CN,Hiếu,LS&ĐL,Ngân,KHTN,Lộc,Toán,Dung,Văn,Thuận,Toán,Sơn
+,3,Toán,Dung,LS&ĐL,Lan,Văn,Thuận,CN,Hiếu,LS&ĐL,Ngân,TA ,Hùng,GDTC,Thủy,N.thuật,Thơ
+,4,TA ,Hùng,Toán,Dung,Toán,Sơn,KHTN,Hiếu,LS&ĐL,Ngân,KHTN,Lộc,N.thuật,Thơ,GDTC,Thủy
+6,1,Văn,Phương,Toán,Dung,LS&ĐL,Ngân,Toán,Sơn,N.thuật,Thắng,CN ,Học,KHTN,Thúy,HĐTN,Trọng
+,2,Văn,Phương,Văn,Hương,Toán,Sơn,N.thuật,Thắng,KHTN,Hiếu,Toán,Dung,TA,Liệu,Văn,Trọng
+,3,KHTN,Thìn,LS&ĐL,Lan,KHTN,Hiếu,KHTN,Học,Toán,Dung,Văn,Trọng,Toán,Sơn,TA,Liệu
+,4,LS&ĐL,Lan,KHTN,Thìn,HĐTN,Lộc,KHTN,Hiếu,LS&ĐL,Ngân,N.thuật,Thắng,CN ,Học,TA,Liệu
+,5,SHL,Lan,SHL,Thúy,SHL,Học,SHL,Phương,SHL,Hương,SHL,Ngân,SHL,Thuận,SHL,Trọng
+,,,THỜI KHÓA BIỂU BUỔI CHIỀU,,,,,,,,,,,,,,
+3,1,GDCD,Phương,KHTN,Thúy,KHTN,Học,KHTN,Hiếu,Văn,Hương,GDĐP,Trọng,Toán,Sơn,TA,Liệu
+,2,GDĐP,Hương,HĐTN,Thúy,Tin học,Hiếu,HĐTN,Dung,CN,Học,GDCD,Phương,TA,Liệu,HĐTN,Trọng
+,3,Văn,Phương,GDCD,Trọng,KHTN,Hiếu,Toán,Sơn,HĐTN,Hương,Toán,Dung,TA,Liệu,CN,Học
+4,1,LS&ĐL,Lan,Văn,Hương,TA,Hùng,LS&ĐL,Ngân,Tin học,Hiếu,Văn,Trọng,Văn,Thuận,KHTN,Học
+,2,Tin học,Hiếu,GDĐP,Hương,GDĐP,Thuận,TA,Hùng,GDĐP,Trọng,LS&ĐL,Ngân,LS&ĐL,Lan,CN,Học
+,3,HĐTN,Lan,TA,Hùng,HĐTN,Học,Tin học,Hiếu,Văn,Hương,HĐTN,Ngân,HĐTN,Thuận,GDĐP,Trọng
+5,1,HĐTN,Lan,Tin học,Hiếu,Văn,Thuận,HĐTN,Dung,GDCD,Phương,TA,Hùng,N.Thuật,Thắng,Toán,Sơn
+,2,TA,Hùng,Toán,Dung,GDCD,Phương,GDĐP,Thuận,HĐTN,Thắng,Tin học,Hiếu,LS&ĐL,Lan,Tin,Sơn
+,3,Toán,Dung,HĐTN,Thắng,Toán,Sơn,Văn,Phương,TA,Hùng,HĐTN,Ngân,HĐTN,Thuận,LS&ĐL,Lan
+</file>
+
 <file path="prompts/planner.system.md">
 ---
 version: 3.0.0
@@ -2016,6 +1795,228 @@ Trước khi gọi `submit_constraint_specs`, tự verify:
 - [ ] Mọi tên người/lớp/môn có trong `context`.
 - [ ] Mọi `day` là id (`mon`, `tue`, ...).
 - [ ] Không có field thừa ngoài schema.
+</file>
+
+<file path="public/templates/solver_skeleton.py">
+import json
+from ortools.sat.python import cp_model
+
+with open("input.json", encoding="utf-8") as f:
+    data = json.load(f)
+
+classes = data["classes"]
+days = data["days"]
+periods = data["periods"]
+periods_by_day = data.get("periodsByDay") or {}
+assignments = data["assignments"]
+constraints = data["constraints"]
+
+model = cp_model.CpModel()
+
+
+def periods_for_day(day_id):
+    day_periods = periods_by_day.get(day_id)
+    if isinstance(day_periods, list) and day_periods:
+        return day_periods
+    return periods
+
+
+slots = {}
+for a in assignments:
+    for d in days:
+        for p in periods_for_day(d):
+            slots[(a["id"], d, p)] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
+
+# Mỗi assignment đúng weeklyPeriods
+for a in assignments:
+    model.Add(
+        sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
+        == a["weeklyPeriods"]
+    )
+
+# Mỗi class/day/period tối đa 1 assignment
+for c in classes:
+    for d in days:
+        for p in periods_for_day(d):
+            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["class"] == c) <= 1)
+
+# Mỗi teacher/day/period tối đa 1 assignment
+teachers = list({a["teacher"] for a in assignments})
+for t in teachers:
+    for d in days:
+        for p in periods_for_day(d):
+            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["teacher"] == t) <= 1)
+
+
+def build_custom_constraints(model, slots, data):
+    assignments = data["assignments"]
+    days = data["days"]
+    periods = data["periods"]
+    periods_by_day = data.get("periodsByDay") or {}
+    constraints = data["constraints"]
+
+    def _periods_for(d):
+        day_periods = periods_by_day.get(d)
+        if isinstance(day_periods, list) and day_periods:
+            return day_periods
+        return periods
+
+    for spec in constraints:
+        kind = spec.get("kind")
+        params = spec.get("params", {})
+        severity = spec.get("severity", "hard")
+
+        if severity != "hard":
+            continue
+
+        if kind == "weekly_periods_exact":
+            continue
+
+        elif kind == "teacher_block_day":
+            t = params.get("teacher")
+            d = params.get("day")
+            for a in assignments:
+                if a["teacher"] == t:
+                    for p in _periods_for(d):
+                        model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "teacher_block_period":
+            t = params.get("teacher")
+            p = int(params.get("period"))
+            for a in assignments:
+                if a["teacher"] == t:
+                    for d in days:
+                        if p in _periods_for(d):
+                            model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "teacher_block_slot":
+            t = params.get("teacher")
+            d = params.get("day")
+            p = int(params.get("period"))
+            if p in _periods_for(d):
+                for a in assignments:
+                    if a["teacher"] == t:
+                        model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "teacher_max_per_day":
+            t = params.get("teacher")
+            n = int(params.get("maxPerDay"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            for d in days:
+                model.Add(
+                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                )
+
+        elif kind == "teacher_max_consecutive":
+            t = params.get("teacher")
+            n = int(params.get("maxConsecutive"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(len(day_periods) - n):
+                    window = day_periods[i:i + n + 1]
+                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in window) <= n
+                    )
+
+        elif kind == "subject_pin_period":
+            subj = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            for a in assignments:
+                if a["subject"] == subj and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "class_no_double_subject_day":
+            cls = params.get("class")
+            subj = params.get("subject")
+            asgs = [
+                a for a in assignments
+                if a["class"] == cls and (subj is None or a["subject"] == subj)
+            ]
+            for d in days:
+                model.Add(
+                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= 1
+                )
+
+        elif kind == "pair_not_same_slot":
+            teachers = params.get("teachers", [])
+            if len(teachers) != 2:
+                raise NotImplementedError(f"Invalid pair_not_same_slot: {spec.get('id')}")
+            t1, t2 = teachers
+            scope_day = (params.get("scope") or {}).get("day")
+            days_to_check = [scope_day] if scope_day else days
+            asgs1 = [a for a in assignments if a["teacher"] == t1]
+            asgs2 = [a for a in assignments if a["teacher"] == t2]
+
+            for d in days_to_check:
+                for p in _periods_for(d):
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in asgs1) +
+                        sum(slots[(a["id"], d, p)] for a in asgs2)
+                        <= 1
+                    )
+
+        elif kind == "subject_consecutive":
+            raise NotImplementedError(
+                f"subject_consecutive registry chưa implement an toàn: {spec.get('id')}"
+            )
+
+        elif kind == "if_then":
+            raise NotImplementedError(
+                f"if_then registry chưa implement an toàn: {spec.get('id')}"
+            )
+
+        elif kind == "custom_dsl":
+            # <<< AI_FILL_HERE >>>
+            pass
+
+        else:
+            raise NotImplementedError(f"Unsupported constraint kind: {kind}")
+
+
+build_custom_constraints(model, slots, data)
+
+solver = cp_model.CpSolver()
+solver.parameters.max_time_in_seconds = 60.0
+status = solver.Solve(model)
+
+result = {
+    "classes": classes,
+    "days": days,
+    "periods": periods,
+    "assignments": assignments,
+    "status": solver.StatusName(status).lower(),
+    "schedule": [],
+}
+
+if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+    for a in assignments:
+        for d in days:
+            for p in periods_for_day(d):
+                if solver.Value(slots[(a["id"], d, p)]) == 1:
+                    result["schedule"].append(
+                        {
+                            "assignmentId": a["id"],
+                            "class": a["class"],
+                            "day": d,
+                            "period": p,
+                            "subject": a["subject"],
+                            "teacher": a["teacher"],
+                        }
+                    )
+    with open("result.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+    print("SOLUTION_FOUND")
+else:
+    with open("result.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+    print(f"NO_SOLUTION:{solver.StatusName(status)}")
 </file>
 
 <file path="python/code_executor/README.md">
@@ -7699,79 +7700,6 @@ Nhớ: mỗi task xong **manual smoke test** trước khi merge — CI test khô
 ```
 </file>
 
-<file path="public/prompts/coder.system.md">
----
-version: 3.2.0
-source: Upgrade_Plan.md §6.3
-updatedAt: 2026-05-28
----
-Bạn là **CP-SAT Constraint Coder**. Bạn CHỈ viết code Python điền vào hàm `build_custom_constraints` của skeleton có sẵn.
-
-## Vai trò hiện tại
-
-Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind built-in:
-
-- teacher_block_day
-- teacher_block_period
-- teacher_block_slot
-- teacher_max_per_day
-- teacher_max_consecutive
-- subject_pin_period
-- class_no_double_subject_day
-- pair_not_same_slot
-- weekly_periods_exact
-
-Bạn KHÔNG viết code cho các kind trên.
-
-Bạn CHỈ viết code cho:
-
-- custom_dsl
-
-## Vùng được điền
-
-Trong skeleton có vùng:
-
-```python
-elif kind == "custom_dsl":
-    # <<< AI_FILL_HERE >>>
-    pass
-```
-
-`constraint_code` bạn trả về chỉ là body nằm trong nhánh `custom_dsl`, không include `elif kind == "custom_dsl":`.
-
-## Luật bắt buộc
-
-1. Chỉ đọc `params["naturalLanguage"]` của custom_dsl.
-2. Dùng `slots[(a["id"], d, p)]`.
-3. Không import.
-4. Không print.
-5. Không đọc/ghi file.
-6. Không tạo lại model hoặc slots.
-7. Nếu không hiểu constraint, raise `NotImplementedError(spec["id"])`.
-8. `covered_constraint_ids` chỉ được chứa id của custom_dsl đã xử lý.
-
-## Output bắt buộc (function `submit_code`)
-
-```json
-{
-  "plan_summary": string,
-  "constraint_code": string,
-  "covered_constraint_ids": string[],
-  "assumptions": string[]
-}
-```
-
-## Self-check TRƯỚC khi submit
-
-1. [ ] Mọi `kind` trong `data["constraints"]` đều có nhánh xử lý.
-2. [ ] Mọi hard constraint id xuất hiện trong `covered_constraint_ids`.
-3. [ ] Không có `print`, không có `import`, không có file I/O.
-4. [ ] Không tạo `model` mới, không tạo `slots` mới.
-5. [ ] Tên biến giáo viên/lớp/môn so sánh dùng `==` với label string (đã match với Translator).
-
-Nếu bất kỳ check nào fail, sửa code và check lại trước khi submit.
-</file>
-
 <file path="python/templates/solver_skeleton.py">
 import json
 from ortools.sat.python import cp_model
@@ -8667,120 +8595,6 @@ export type DeterministicValidationReport = {
   softViolations: Violation[];
   uncheckedConstraintIds: string[];
 };
-</file>
-
-<file path="src/features/timetable/ai/cp-sat-roundtrip.ts">
-import type { ScheduleEntry } from './constraint-spec';
-
-export type RoundTripResult = {
-  ok: boolean;
-  message: string;
-};
-
-export function verifyCpSatRoundTrip(
-  schedule: ScheduleEntry[],
-  assignments: Array<{
-    id: string;
-    class: string;
-    subject: string;
-    teacher: string;
-    weeklyPeriods: number;
-  }>,
-  domain?: {
-    days?: string[];
-    periodsByDay?: Record<string, number[]>;
-    periods?: number[];
-  }
-): RoundTripResult {
-  const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
-  const validDays = new Set((domain?.days ?? []).map((day) => String(day)));
-  const validPeriods = new Set((domain?.periods ?? []).map((period) => Number(period)));
-  const periodsByDay = domain?.periodsByDay ?? {};
-
-  for (const entry of schedule) {
-    const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
-    const matchingAssignments = assignments.filter(
-      (assignment) =>
-        entry.class === assignment.class &&
-        entry.subject === assignment.subject &&
-        entry.teacher === assignment.teacher
-    );
-    const resolvedAssignmentId = assignmentId || (matchingAssignments.length === 1 ? matchingAssignments[0].id : '');
-
-    if (!resolvedAssignmentId) {
-      return {
-        ok: false,
-        message: `Round-trip missing assignmentId for ${entry.class}/${entry.subject}/${entry.teacher}`,
-      };
-    }
-
-    const assignment = assignmentById.get(resolvedAssignmentId);
-
-    if (!assignment) {
-      return {
-        ok: false,
-        message: `Round-trip unknown assignmentId: ${resolvedAssignmentId}`,
-      };
-    }
-
-    if (
-      entry.class !== assignment.class ||
-      entry.subject !== assignment.subject ||
-      entry.teacher !== assignment.teacher
-    ) {
-      return {
-        ok: false,
-        message: `Round-trip assignment tuple mismatch for ${resolvedAssignmentId}`,
-      };
-    }
-
-    if (validDays.size > 0 && !validDays.has(String(entry.day))) {
-      return {
-        ok: false,
-        message: `Round-trip invalid day: ${entry.day}`,
-      };
-    }
-
-    const period = Number(entry.period);
-    const dayPeriods = periodsByDay[String(entry.day)];
-    if (Array.isArray(dayPeriods) && dayPeriods.length > 0 && !dayPeriods.includes(period)) {
-      return {
-        ok: false,
-        message: `Round-trip invalid period ${entry.period} for day ${entry.day}`,
-      };
-    }
-    if (validPeriods.size > 0 && !validPeriods.has(period)) {
-      return {
-        ok: false,
-        message: `Round-trip invalid period: ${entry.period}`,
-      };
-    }
-  }
-
-  for (const assignment of assignments) {
-    const count = schedule.filter(
-      (entry) => {
-        const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
-        if (assignmentId) return assignmentId === assignment.id;
-
-        return (
-          entry.class === assignment.class &&
-          entry.subject === assignment.subject &&
-          entry.teacher === assignment.teacher
-        );
-      }
-    ).length;
-
-    if (count !== assignment.weeklyPeriods) {
-      return {
-        ok: false,
-        message: `Round-trip weekly mismatch for ${assignment.id}: expected ${assignment.weeklyPeriods}, got ${count}`,
-      };
-    }
-  }
-
-  return { ok: true, message: 'Round-trip verified.' };
-}
 </file>
 
 <file path="src/features/timetable/ai/deterministic-validator.ts">
@@ -10012,6 +9826,79 @@ Bạn là **Constraint Repair Agent**. Bạn KHÔNG viết lại code từ đầ
 - Nếu `oldStr` xuất hiện nhiều lần trong `currentCode`, BẮT BUỘC hoặc (a) mở rộng `oldStr` để unique, hoặc (b) set `replaceAll: true`.
 </file>
 
+<file path="public/prompts/coder.system.md">
+---
+version: 3.2.0
+source: Upgrade_Plan.md §6.3
+updatedAt: 2026-05-28
+---
+Bạn là **CP-SAT Constraint Coder**. Bạn CHỈ viết code Python điền vào hàm `build_custom_constraints` của skeleton có sẵn.
+
+## Vai trò hiện tại
+
+Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind built-in:
+
+- teacher_block_day
+- teacher_block_period
+- teacher_block_slot
+- teacher_max_per_day
+- teacher_max_consecutive
+- subject_pin_period
+- class_no_double_subject_day
+- pair_not_same_slot
+- weekly_periods_exact
+
+Bạn KHÔNG viết code cho các kind trên.
+
+Bạn CHỈ viết code cho:
+
+- custom_dsl
+
+## Vùng được điền
+
+Trong skeleton có vùng:
+
+```python
+elif kind == "custom_dsl":
+    # <<< AI_FILL_HERE >>>
+    pass
+```
+
+`constraint_code` bạn trả về chỉ là body nằm trong nhánh `custom_dsl`, không include `elif kind == "custom_dsl":`.
+
+## Luật bắt buộc
+
+1. Chỉ đọc `params["naturalLanguage"]` của custom_dsl.
+2. Dùng `slots[(a["id"], d, p)]`.
+3. Không import.
+4. Không print.
+5. Không đọc/ghi file.
+6. Không tạo lại model hoặc slots.
+7. Nếu không hiểu constraint, raise `NotImplementedError(spec["id"])`.
+8. `covered_constraint_ids` chỉ được chứa id của custom_dsl đã xử lý.
+
+## Output bắt buộc (function `submit_code`)
+
+```json
+{
+  "plan_summary": string,
+  "constraint_code": string,
+  "covered_constraint_ids": string[],
+  "assumptions": string[]
+}
+```
+
+## Self-check TRƯỚC khi submit
+
+1. [ ] Mọi `kind` trong `data["constraints"]` đều có nhánh xử lý.
+2. [ ] Mọi hard constraint id xuất hiện trong `covered_constraint_ids`.
+3. [ ] Không có `print`, không có `import`, không có file I/O.
+4. [ ] Không tạo `model` mới, không tạo `slots` mới.
+5. [ ] Tên biến giáo viên/lớp/môn so sánh dùng `==` với label string (đã match với Translator).
+
+Nếu bất kỳ check nào fail, sửa code và check lại trước khi submit.
+</file>
+
 <file path="public/prompts/repair.system.md">
 ---
 version: 3.0.0
@@ -10783,339 +10670,118 @@ export default function Home() {
 }
 </file>
 
-<file path="src/features/timetable/ai/local-agent.test.ts">
-import assert from 'node:assert/strict';
-import test from 'node:test';
+<file path="src/features/timetable/ai/cp-sat-roundtrip.ts">
+import type { ScheduleEntry } from './constraint-spec';
 
-import { __localAgentInternal, runLocalAgent } from './local-agent';
+export type RoundTripResult = {
+  ok: boolean;
+  message: string;
+};
 
-test('buildViolationSignature normalizes roundtrip dynamic assignment ids', () => {
-  const signatureA = __localAgentInternal.buildViolationSignature(
-    [],
-    false,
-    'Schedule entry không khớp assignment asg_12345'
-  );
-  const signatureB = __localAgentInternal.buildViolationSignature(
-    [],
-    false,
-    'Schedule entry không khớp assignment asg_67890'
-  );
-  assert.equal(signatureA, signatureB);
-  assert.match(signatureA, /rt:fail:/);
-});
-
-test('buildViolationSignature distinguishes pass/fail roundtrip states', () => {
-  const failSignature = __localAgentInternal.buildViolationSignature([], false, 'roundtrip failed');
-  const okSignature = __localAgentInternal.buildViolationSignature([], true, 'roundtrip failed');
-  assert.notEqual(failSignature, okSignature);
-  assert.match(okSignature, /rt:ok$/);
-});
-
-test('buildCoderExhaustedMessage includes the last actionable failure', () => {
-  assert.equal(
-    __localAgentInternal.buildCoderExhaustedMessage('RuntimeError: bad generated code'),
-    'Coder could not produce an executable schedule. Last failure: RuntimeError: bad generated code'
-  );
-});
-
-test('runLocalAgent repairs runtime failures before returning coder exhausted', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-  let coderCalls = 0;
-  let repairPayload: {
-    currentCode?: string;
-    constraintCode?: string;
-    compileOrRunError?: string;
-  } | null = null;
-
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-
-    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
-    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
-    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
-    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
-    if (url.endsWith('/templates/solver_skeleton.py')) {
-      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
-    }
-
-    if (url.endsWith('/api/ai/chat')) {
-      const body = JSON.parse(String(init?.body ?? '{}')) as {
-        messages?: Array<{ role: string; content: string }>;
-      };
-      const systemPrompt = body.messages?.[0]?.content;
-
-      if (systemPrompt === 'translator') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            constraintSpecs: [
-              { id: 'c1', original: 'custom runtime guard', severity: 'hard', kind: 'custom_dsl', params: {} },
-            ],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-
-      if (systemPrompt === 'planner') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            decisionVars: 'slots[(assignment_id, day, period)]',
-            domainSize: { classes: 1, days: 1, periods: 1 },
-            constraintOrder: [],
-            reifiedNeeded: [],
-            objective: 'none',
-            templatesUsed: [],
-            risks: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-
-      if (systemPrompt === 'coder') {
-        coderCalls += 1;
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            plan_summary: 'bad runtime code',
-            constraint_code: "# c1\nraise RuntimeError('bad')",
-            covered_constraint_ids: [],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-
-      if (systemPrompt === 'repair') {
-        repairPayload = JSON.parse(body.messages?.[1]?.content ?? '{}');
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            summary: 'remove runtime failure',
-            patches: [
-              {
-                oldStr: "raise RuntimeError('bad')",
-                newStr: 'pass',
-                reason: 'replace failing statement with no-op',
-              },
-            ],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-    }
-
-    if (url.endsWith('/api/ai/python-syntax-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
-
-    if (url.endsWith('/api/ai/python-ast-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
-
-    if (url.endsWith('/api/ai/python-execute')) {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { code?: string };
-      if (body.code?.includes("raise RuntimeError('bad')")) {
-        return Response.json({
-          ok: true,
-          result: {
-            phase: 'run',
-            ok: false,
-            status: 'crashed',
-            durationMs: 1,
-            errorDigest: 'RuntimeError: bad',
-          },
-        });
-      }
-
-      return Response.json({
-        ok: true,
-        result: {
-          phase: 'run',
-          ok: true,
-          status: 'optimal',
-          durationMs: 1,
-          resultData: {
-            classes: ['6A'],
-            days: ['mon'],
-            periods: [1],
-            schedule: [{ class: '6A', day: 'mon', period: 1, subject: 'Math', teacher: 'Lan' }],
-          },
-        },
-      });
-    }
-
-    return new Response('not found', { status: 404 });
-  }) as typeof fetch;
-
-  try {
-    const result = await runLocalAgent(
-      {
-        days: [{ id: 'mon', label: 'Thứ 2' }],
-        sessions: [{ id: 'morning', label: 'Sáng' }],
-        periodCounts: { mon: 1 },
-        deletedPeriods: {},
-        assignments: [
-          {
-            id: 'a1',
-            class: { id: 'c1', label: '6A' },
-            subject: { id: 'math', label: 'Math' },
-            teacher: { id: 't1', label: 'Lan' },
-            weeklyPeriods: 1,
-          },
-        ],
-        constraints: [],
-      },
-      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
-    );
-
-    assert.equal(result.success, true);
-    assert.equal(coderCalls, 3);
-    assert.equal(repairPayload?.currentCode, "# c1\nraise RuntimeError('bad')");
-    assert.equal(repairPayload?.constraintCode, "# c1\nraise RuntimeError('bad')");
-    assert.equal(repairPayload?.compileOrRunError, 'RuntimeError: bad');
-  } finally {
-    globalThis.fetch = originalFetch;
-    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+export function verifyCpSatRoundTrip(
+  schedule: ScheduleEntry[],
+  assignments: Array<{
+    id: string;
+    class: string;
+    subject: string;
+    teacher: string;
+    weeklyPeriods: number;
+  }>,
+  domain?: {
+    days?: string[];
+    periodsByDay?: Record<string, number[]>;
+    periods?: number[];
   }
-});
+): RoundTripResult {
+  const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+  const validDays = new Set((domain?.days ?? []).map((day) => String(day)));
+  const validPeriods = new Set((domain?.periods ?? []).map((period) => Number(period)));
+  const periodsByDay = domain?.periodsByDay ?? {};
 
-test('runLocalAgent returns a clear repeated-violation error instead of stopped early', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-  let repairCalls = 0;
-
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-
-    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
-    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
-    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
-    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
-    if (url.endsWith('/templates/solver_skeleton.py')) {
-      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
-    }
-
-    if (url.endsWith('/api/ai/chat')) {
-      const body = JSON.parse(String(init?.body ?? '{}')) as {
-        messages?: Array<{ role: string; content: string }>;
-      };
-      const systemPrompt = body.messages?.[0]?.content;
-
-      if (systemPrompt === 'translator') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({ constraintSpecs: [] }),
-          usage: { total_tokens: 1 },
-        });
-      }
-
-      if (systemPrompt === 'planner') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            decisionVars: 'slots[(assignment_id, day, period)]',
-            domainSize: { classes: 1, days: 1, periods: 1 },
-            constraintOrder: [],
-            reifiedNeeded: [],
-            objective: 'none',
-            templatesUsed: [],
-            risks: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-
-      if (systemPrompt === 'coder') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            plan_summary: 'valid code but invalid schedule',
-            constraint_code: 'pass',
-            covered_constraint_ids: [],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-
-      if (systemPrompt === 'repair') {
-        repairCalls += 1;
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            summary: 'no effective repair',
-            patches: [{ oldStr: 'pass', newStr: 'pass', reason: 'leave unchanged' }],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-    }
-
-    if (url.endsWith('/api/ai/python-syntax-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
-
-    if (url.endsWith('/api/ai/python-ast-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
-
-    if (url.endsWith('/api/ai/python-execute')) {
-      return Response.json({
-        ok: true,
-        result: {
-          phase: 'run',
-          ok: true,
-          status: 'optimal',
-          durationMs: 1,
-          resultData: {
-            classes: ['6A'],
-            days: ['mon'],
-            periods: [1],
-            schedule: [],
-          },
-        },
-      });
-    }
-
-    return new Response('not found', { status: 404 });
-  }) as typeof fetch;
-
-  try {
-    const result = await runLocalAgent(
-      {
-        days: [{ id: 'mon', label: 'Thứ 2' }],
-        sessions: [{ id: 'morning', label: 'Sáng' }],
-        periodCounts: { mon: 1 },
-        deletedPeriods: {},
-        assignments: [
-          {
-            id: 'a1',
-            class: { id: 'c1', label: '6A' },
-            subject: { id: 'math', label: 'Math' },
-            teacher: { id: 't1', label: 'Lan' },
-            weeklyPeriods: 1,
-          },
-        ],
-        constraints: [],
-      },
-      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
+  for (const entry of schedule) {
+    const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
+    const matchingAssignments = assignments.filter(
+      (assignment) =>
+        entry.class === assignment.class &&
+        entry.subject === assignment.subject &&
+        entry.teacher === assignment.teacher
     );
+    const resolvedAssignmentId = assignmentId || (matchingAssignments.length === 1 ? matchingAssignments[0].id : '');
 
-    assert.equal(result.success, false);
-    assert.equal(repairCalls, 1);
-    assert.match(result.error ?? '', /^Không tạo được thời khóa biểu/);
-    assert.doesNotMatch(result.error ?? '', /Stopped early/i);
-  } finally {
-    globalThis.fetch = originalFetch;
-    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+    if (!resolvedAssignmentId) {
+      return {
+        ok: false,
+        message: `Round-trip missing assignmentId for ${entry.class}/${entry.subject}/${entry.teacher}`,
+      };
+    }
+
+    const assignment = assignmentById.get(resolvedAssignmentId);
+
+    if (!assignment) {
+      return {
+        ok: false,
+        message: `Round-trip unknown assignmentId: ${resolvedAssignmentId}`,
+      };
+    }
+
+    if (
+      entry.class !== assignment.class ||
+      entry.subject !== assignment.subject ||
+      entry.teacher !== assignment.teacher
+    ) {
+      return {
+        ok: false,
+        message: `Round-trip assignment tuple mismatch for ${resolvedAssignmentId}`,
+      };
+    }
+
+    if (validDays.size > 0 && !validDays.has(String(entry.day))) {
+      return {
+        ok: false,
+        message: `Round-trip invalid day: ${entry.day}`,
+      };
+    }
+
+    const period = Number(entry.period);
+    const dayPeriods = periodsByDay[String(entry.day)];
+    if (Array.isArray(dayPeriods) && dayPeriods.length > 0 && !dayPeriods.includes(period)) {
+      return {
+        ok: false,
+        message: `Round-trip invalid period ${entry.period} for day ${entry.day}`,
+      };
+    }
+    if (validPeriods.size > 0 && !validPeriods.has(period)) {
+      return {
+        ok: false,
+        message: `Round-trip invalid period: ${entry.period}`,
+      };
+    }
   }
-});
+
+  for (const assignment of assignments) {
+    const count = schedule.filter(
+      (entry) => {
+        const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
+        if (assignmentId) return assignmentId === assignment.id;
+
+        return (
+          entry.class === assignment.class &&
+          entry.subject === assignment.subject &&
+          entry.teacher === assignment.teacher
+        );
+      }
+    ).length;
+
+    if (count !== assignment.weeklyPeriods) {
+      return {
+        ok: false,
+        message: `Round-trip weekly mismatch for ${assignment.id}: expected ${assignment.weeklyPeriods}, got ${count}`,
+      };
+    }
+  }
+
+  return { ok: true, message: 'Round-trip verified.' };
+}
 </file>
 
 <file path="src/features/timetable/ai/planner.ts">
@@ -12190,6 +11856,341 @@ export const __chatInternal = {
   providerHeaders,
   parseProviderResponse,
 };
+</file>
+
+<file path="src/features/timetable/ai/local-agent.test.ts">
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { __localAgentInternal, runLocalAgent } from './local-agent';
+
+test('buildViolationSignature normalizes roundtrip dynamic assignment ids', () => {
+  const signatureA = __localAgentInternal.buildViolationSignature(
+    [],
+    false,
+    'Schedule entry không khớp assignment asg_12345'
+  );
+  const signatureB = __localAgentInternal.buildViolationSignature(
+    [],
+    false,
+    'Schedule entry không khớp assignment asg_67890'
+  );
+  assert.equal(signatureA, signatureB);
+  assert.match(signatureA, /rt:fail:/);
+});
+
+test('buildViolationSignature distinguishes pass/fail roundtrip states', () => {
+  const failSignature = __localAgentInternal.buildViolationSignature([], false, 'roundtrip failed');
+  const okSignature = __localAgentInternal.buildViolationSignature([], true, 'roundtrip failed');
+  assert.notEqual(failSignature, okSignature);
+  assert.match(okSignature, /rt:ok$/);
+});
+
+test('buildCoderExhaustedMessage includes the last actionable failure', () => {
+  assert.equal(
+    __localAgentInternal.buildCoderExhaustedMessage('RuntimeError: bad generated code'),
+    'Coder could not produce an executable schedule. Last failure: RuntimeError: bad generated code'
+  );
+});
+
+test('runLocalAgent repairs runtime failures before returning coder exhausted', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let coderCalls = 0;
+  let repairPayload: {
+    currentCode?: string;
+    constraintCode?: string;
+    compileOrRunError?: string;
+  } | null = null;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+
+    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
+    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
+    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
+    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+
+    if (url.endsWith('/api/ai/chat')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      const systemPrompt = body.messages?.[0]?.content;
+
+      if (systemPrompt === 'translator') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            constraintSpecs: [
+              { id: 'c1', original: 'custom runtime guard', severity: 'hard', kind: 'custom_dsl', params: {} },
+            ],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'planner') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            decisionVars: 'slots[(assignment_id, day, period)]',
+            domainSize: { classes: 1, days: 1, periods: 1 },
+            constraintOrder: [],
+            reifiedNeeded: [],
+            objective: 'none',
+            templatesUsed: [],
+            risks: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'coder') {
+        coderCalls += 1;
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            plan_summary: 'bad runtime code',
+            constraint_code: "# c1\nraise RuntimeError('bad')",
+            covered_constraint_ids: [],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'repair') {
+        repairPayload = JSON.parse(body.messages?.[1]?.content ?? '{}');
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            summary: 'remove runtime failure',
+            patches: [
+              {
+                oldStr: "raise RuntimeError('bad')",
+                newStr: 'pass',
+                reason: 'replace failing statement with no-op',
+              },
+            ],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+    }
+
+    if (url.endsWith('/api/ai/python-syntax-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-ast-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-execute')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { code?: string };
+      if (body.code?.includes("raise RuntimeError('bad')")) {
+        return Response.json({
+          ok: true,
+          result: {
+            phase: 'run',
+            ok: false,
+            status: 'crashed',
+            durationMs: 1,
+            errorDigest: 'RuntimeError: bad',
+          },
+        });
+      }
+
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['mon'],
+            periods: [1],
+            schedule: [{ class: '6A', day: 'mon', period: 1, subject: 'Math', teacher: 'Lan' }],
+          },
+        },
+      });
+    }
+
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'mon', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { mon: 1 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'a1',
+            class: { id: 'c1', label: '6A' },
+            subject: { id: 'math', label: 'Math' },
+            teacher: { id: 't1', label: 'Lan' },
+            weeklyPeriods: 1,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(coderCalls, 3);
+    assert.equal(repairPayload?.currentCode, "# c1\nraise RuntimeError('bad')");
+    assert.equal(repairPayload?.constraintCode, "# c1\nraise RuntimeError('bad')");
+    assert.equal(repairPayload?.compileOrRunError, 'RuntimeError: bad');
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
+
+test('runLocalAgent returns a clear repeated-violation error instead of stopped early', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let repairCalls = 0;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+
+    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
+    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
+    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
+    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+
+    if (url.endsWith('/api/ai/chat')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      const systemPrompt = body.messages?.[0]?.content;
+
+      if (systemPrompt === 'translator') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({ constraintSpecs: [] }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'planner') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            decisionVars: 'slots[(assignment_id, day, period)]',
+            domainSize: { classes: 1, days: 1, periods: 1 },
+            constraintOrder: [],
+            reifiedNeeded: [],
+            objective: 'none',
+            templatesUsed: [],
+            risks: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'coder') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            plan_summary: 'valid code but invalid schedule',
+            constraint_code: 'pass',
+            covered_constraint_ids: [],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'repair') {
+        repairCalls += 1;
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            summary: 'no effective repair',
+            patches: [{ oldStr: 'pass', newStr: 'pass', reason: 'leave unchanged' }],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+    }
+
+    if (url.endsWith('/api/ai/python-syntax-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-ast-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-execute')) {
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['mon'],
+            periods: [1],
+            schedule: [],
+          },
+        },
+      });
+    }
+
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'mon', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { mon: 1 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'a1',
+            class: { id: 'c1', label: '6A' },
+            subject: { id: 'math', label: 'Math' },
+            teacher: { id: 't1', label: 'Lan' },
+            weeklyPeriods: 1,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(repairCalls, 1);
+    assert.match(result.error ?? '', /^Không tạo được thời khóa biểu/);
+    assert.doesNotMatch(result.error ?? '', /Stopped early/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
 </file>
 
 <file path="src/features/timetable/ai/repair.ts">
@@ -13434,6 +13435,513 @@ __pycache__/
 *.so
 .pytest_cache/
 .mypy_cache/
+</file>
+
+<file path="datasets.txt">
+DATASET 1
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Thủy
+Hiếu
+Lan
+Thắng
+Phương
+Subjects:
+Toán
+Văn
+Tiếng Anh
+GDTC
+KHTN
+LS&ĐL
+CN
+GDCD
+Classes:
+6A
+6B
+Assignments:
+Sơn-Toán-6A-4
+Sơn-Toán-6B-4
+Dung-Văn-6A-4
+Dung-Văn-6B-4
+Hương-Tiếng Anh-6A-3
+Hương-Tiếng Anh-6B-3
+Thủy-GDTC-6A-2
+Thủy-GDTC-6B-2
+Hiếu-KHTN-6A-3
+Hiếu-KHTN-6B-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Thắng-CN-6A-1
+Thắng-CN-6B-1
+Phương-GDCD-6A-1
+Phương-GDCD-6B-1
+Hard constraints:
+Sơn không dạy thứ 2
+Hương không dạy tiết 1
+Soft constraints:
+Toán nên xếp tiết 1-2
+Văn nên liên tiếp 2 tiết
+
+DATASET 2
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Phương
+Thủy
+Hiếu
+Lan
+Thắng
+Trọng
+Subjects:
+Toán
+Văn
+Tiếng Anh
+GDTC
+KHTN
+LS&ĐL
+CN
+GDCD
+Classes:
+6A
+6B
+7A
+7B
+Assignments:
+Sơn-Toán-7A-4
+Sơn-Toán-7B-4
+Dung-Toán-6A-4
+Dung-Toán-6B-4
+Hương-Văn-6A-4
+Hương-Văn-6B-4
+Thuận-Văn-7A-4
+Thuận-Văn-7B-4
+Phương-Tiếng Anh-6A-3
+Phương-Tiếng Anh-6B-3
+Phương-Tiếng Anh-7A-3
+Phương-Tiếng Anh-7B-3
+Thủy-GDTC-6A-2
+Thủy-GDTC-6B-2
+Thủy-GDTC-7A-2
+Thủy-GDTC-7B-2
+Hiếu-KHTN-6A-3
+Hiếu-KHTN-6B-3
+Hiếu-KHTN-7A-3
+Hiếu-KHTN-7B-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Lan-LS&ĐL-7A-2
+Lan-LS&ĐL-7B-2
+Thắng-CN-6A-1
+Thắng-CN-6B-1
+Thắng-CN-7A-1
+Thắng-CN-7B-1
+Trọng-GDCD-6A-1
+Trọng-GDCD-6B-1
+Trọng-GDCD-7A-1
+Trọng-GDCD-7B-1
+Hard constraints:
+Sơn không dạy thứ 5
+Thuận chỉ dạy thứ 3 4 5
+Soft constraints:
+Mỗi ngày mỗi lớp nên có Toán hoặc Văn
+KHTN nên xếp tiết 1
+
+DATASET 3
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Phương
+Trọng
+Hung
+Liễu
+Thúy
+Hiếu
+Lộc
+Học
+Ngân
+Lan
+Thủy
+Thắng
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Classes:
+6A
+6B
+7A
+7B
+8A
+8B
+9A
+9B
+Assignments:
+Sơn-Toán-7A-4
+Sơn-Toán-7B-4
+Sơn-Toán-8B-4
+Sơn-Toán-9B-4
+Dung-Toán-6A-4
+Dung-Toán-6B-4
+Dung-Toán-8A-4
+Dung-Toán-9A-4
+Hương-Văn-6A-4
+Hương-Văn-6B-4
+Hương-Văn-8A-4
+Thuận-Văn-7A-4
+Thuận-Văn-9A-4
+Phương-Văn-7B-4
+Trọng-Văn-8B-4
+Trọng-Văn-9B-4
+Hung-Tiếng Anh-6A-3
+Hung-Tiếng Anh-6B-3
+Hung-Tiếng Anh-7A-3
+Hung-Tiếng Anh-7B-3
+Hung-Tiếng Anh-8A-3
+Hung-Tiếng Anh-8B-3
+Liễu-Tiếng Anh-9A-3
+Liễu-Tiếng Anh-9B-3
+Thúy-KHTN-6A-3
+Thúy-KHTN-6B-3
+Hiếu-KHTN-7A-3
+Hiếu-KHTN-7B-3
+Lộc-KHTN-8A-3
+Lộc-KHTN-8B-3
+Học-KHTN-9A-3
+Học-KHTN-9B-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Lan-LS&ĐL-9A-2
+Lan-LS&ĐL-9B-2
+Ngân-LS&ĐL-7A-2
+Ngân-LS&ĐL-7B-2
+Ngân-LS&ĐL-8A-2
+Ngân-LS&ĐL-8B-2
+Thủy-GDTC-6A-2
+Thủy-GDTC-6B-2
+Thủy-GDTC-7A-2
+Thủy-GDTC-7B-2
+Thủy-GDTC-8A-2
+Thủy-GDTC-8B-2
+Thủy-GDTC-9A-2
+Thủy-GDTC-9B-2
+Thắng-CN-6A-1
+Thắng-CN-6B-1
+Thắng-CN-7A-1
+Thắng-CN-7B-1
+Thắng-CN-8A-1
+Thắng-CN-8B-1
+Thắng-CN-9A-1
+Thắng-CN-9B-1
+Phương-GDCD-6A-1
+Phương-GDCD-6B-1
+Phương-GDCD-7A-1
+Phương-GDCD-7B-1
+Phương-GDCD-8A-1
+Phương-GDCD-8B-1
+Phương-GDCD-9A-1
+Phương-GDCD-9B-1
+Hard constraints:
+Thúy không dạy thứ 2
+Sơn không dạy tiết 4 thứ 6
+Hung không dạy tiết 1 thứ 4
+Liễu chỉ dạy thứ 3 4 5
+GDTC không xếp tiết 1
+GDTC không xếp tiết 4
+Toán phải block 2 tiết
+Văn phải block 2 tiết
+Soft constraints:
+Không xếp Toán Văn tiết 4
+KHTN nên tiết 1-2
+Mỗi ngày mỗi lớp nên có Toán hoặc Văn
+CN GDCD không liên tiếp
+Mỗi giáo viên không dạy quá 4 tiết liên tiếp
+Toán Văn nên tiết 1-2 lớp 9
+
+DATASET 4
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+Sơn
+Dung
+Hương
+Hung
+Thúy
+Hiếu
+Lan
+Thủy
+Phương
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Classes:
+6A
+7A
+8A
+9A
+Assignments:
+Sơn-Toán-7A-4
+Sơn-Toán-8A-4
+Sơn-Toán-9A-4
+Dung-Toán-6A-4
+Hương-Văn-6A-4
+Hương-Văn-7A-4
+Hương-Văn-8A-4
+Hương-Văn-9A-4
+Hung-Tiếng Anh-6A-3
+Hung-Tiếng Anh-7A-3
+Hung-Tiếng Anh-8A-3
+Hung-Tiếng Anh-9A-3
+Thúy-KHTN-6A-3
+Thúy-KHTN-7A-3
+Thúy-KHTN-8A-3
+Thúy-KHTN-9A-3
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-7A-2
+Lan-LS&ĐL-8A-2
+Lan-LS&ĐL-9A-2
+Thủy-GDTC-6A-2
+Thủy-GDTC-7A-2
+Thủy-GDTC-8A-2
+Thủy-GDTC-9A-2
+Hiếu-CN-6A-1
+Hiếu-CN-7A-1
+Hiếu-CN-8A-1
+Hiếu-CN-9A-1
+Phương-GDCD-6A-1
+Phương-GDCD-7A-1
+Phương-GDCD-8A-1
+Phương-GDCD-9A-1
+Hard constraints:
+Hương không dạy thứ 2 thứ 3
+Thúy không dạy thứ 5
+KHTN bắt buộc tiết 1
+Văn bắt buộc tiết 2-3
+Soft constraints:
+Thủy nên dạy sáng sớm
+CN nên tiết 4
+Mỗi giáo viên 1 ngày nghỉ tối thiểu
+
+DATASET 5
+Days: Mon-Fri
+Time: Afternoon
+Max periods: 3
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Thủy
+Lan
+Phương
+Hiếu
+Subjects:
+Toán
+Văn
+Tiếng Anh
+GDTC
+LS&ĐL
+CN
+GDCD
+Classes:
+6A
+6B
+7A
+Assignments:
+Sơn-Toán-6A-3
+Sơn-Toán-6B-3
+Sơn-Toán-7A-3
+Dung-Văn-6A-3
+Dung-Văn-6B-3
+Dung-Văn-7A-3
+Hương-Tiếng Anh-6A-3
+Hương-Tiếng Anh-6B-3
+Hương-Tiếng Anh-7A-3
+Thuận-GDTC-6A-2
+Thuận-GDTC-6B-2
+Thuận-GDTC-7A-2
+Lan-LS&ĐL-6A-2
+Lan-LS&ĐL-6B-2
+Lan-LS&ĐL-7A-2
+Phương-CN-6A-1
+Phương-CN-6B-1
+Phương-CN-7A-1
+Hiếu-GDCD-6A-1
+Hiếu-GDCD-6B-1
+Hiếu-GDCD-7A-1
+Hard constraints:
+Sơn không dạy chiều thứ 5
+Dung chỉ dạy chiều
+Soft constraints:
+Toán Văn nên tiết đầu
+Mỗi lớp nên có Toán hoặc Văn mỗi ngày
+
+DATASET 6
+Days: Mon-Fri
+Time: Morning-Afternoon
+Max periods: 7
+Teachers:
+Sơn
+Dung
+Hương
+Thuận
+Phương
+Trọng
+Hung
+Liễu
+Thúy
+Hiếu
+Lộc
+Học
+Ngân
+Lan
+Thủy
+Thắng
+Tin
+Tùng
+Liên
+Hoa
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Tin
+HĐTN
+Classes:
+6A
+6B
+7A
+7B
+8A
+8B
+9A
+9B
+Assignments:
+Sơn-Toán-7A-5
+Sơn-Toán-7B-5
+Sơn-Toán-8B-5
+Sơn-Toán-9B-5
+Dung-Toán-6A-5
+Dung-Toán-6B-5
+Dung-Toán-8A-5
+Dung-Toán-9A-5
+Hương-Văn-6A-5
+Hương-Văn-6B-5
+Hương-Văn-8A-5
+Thuận-Văn-7A-5
+Thuận-Văn-9A-5
+Phương-Văn-7B-5
+Trọng-Văn-8B-5
+Trọng-Văn-9B-5
+Hung-Tiếng Anh-6A-4
+Hung-Tiếng Anh-6B-4
+Hung-Tiếng Anh-7A-4
+Hung-Tiếng Anh-7B-4
+Hung-Tiếng Anh-8A-4
+Hung-Tiếng Anh-8B-4
+Liễu-Tiếng Anh-9A-4
+Liễu-Tiếng Anh-9B-4
+Thúy-KHTN-6A-4
+Thúy-KHTN-6B-4
+Hiếu-KHTN-7A-4
+Hiếu-KHTN-7B-4
+Lộc-KHTN-8A-4
+Lộc-KHTN-8B-4
+Học-KHTN-9A-4
+Học-KHTN-9B-4
+Lan-LS&ĐL-6A-3
+Lan-LS&ĐL-6B-3
+Lan-LS&ĐL-9A-3
+Lan-LS&ĐL-9B-3
+Ngân-LS&ĐL-7A-3
+Ngân-LS&ĐL-7B-3
+Ngân-LS&ĐL-8A-3
+Ngân-LS&ĐL-8B-3
+Thủy-GDTC-6A-3
+Thủy-GDTC-6B-3
+Thủy-GDTC-7A-3
+Thủy-GDTC-7B-3
+Thủy-GDTC-8A-3
+Thủy-GDTC-8B-3
+Thủy-GDTC-9A-3
+Thủy-GDTC-9B-3
+Thắng-CN-6A-2
+Thắng-CN-6B-2
+Thắng-CN-7A-2
+Thắng-CN-7B-2
+Thắng-CN-8A-2
+Thắng-CN-8B-2
+Thắng-CN-9A-2
+Thắng-CN-9B-2
+Phương-GDCD-6A-2
+Phương-GDCD-6B-2
+Phương-GDCD-7A-2
+Phương-GDCD-7B-2
+Phương-GDCD-8A-2
+Phương-GDCD-8B-2
+Phương-GDCD-9A-2
+Phương-GDCD-9B-2
+Tùng-HĐTN-6A-4
+Tùng-HĐTN-6B-4
+Tùng-HĐTN-7A-4
+Tùng-HĐTN-7B-4
+Tùng-HĐTN-8A-4
+Tùng-HĐTN-8B-4
+Tùng-HĐTN-9A-4
+Liên-Tin-7B-3
+Liên-Tin-8B-2
+Liên-Tin-9B-3
+Hoa-HĐTN-7A-3
+Hoa-HĐTN-8A-3
+Hoa-HĐTN-9A-3
+Hoa-HĐTN-9B-4
+Hoa-HĐTN-6A-2
+Hoa-HĐTN-6B-2
+Hoa-HĐTN-8B-1
+Tin-Tin-6A-1
+Tin-Tin-6B-1
+Hard constraints:
+Thúy không dạy thứ 2
+Sơn không dạy tiết 7 thứ 6
+Toán buổi sáng
+KHTN buổi sáng
+Văn buổi sáng
+Soft constraints:
+Không xếp Toán tiết 7
+Không xếp Văn tiết 7
+HĐTN nên buổi chiều
+Mỗi giáo viên không dạy quá 6 tiết liên tiếp
 </file>
 
 <file path="electron/main.mjs">
