@@ -67,6 +67,7 @@ ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
       resolve({
+        ok: false,
         success: false,
         has_solution: false,
         stdout,
@@ -86,7 +87,15 @@ ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360
         // The Python executor always prints one JSON line
         const lastLine = stdout.trim().split('\n').pop()
         const parsed = JSON.parse(lastLine || '{}')
-        resolve(parsed)
+        let resultData = undefined
+        if (parsed.resultPath && fs.existsSync(parsed.resultPath)) {
+          try {
+            resultData = JSON.parse(fs.readFileSync(parsed.resultPath, 'utf8'))
+          } catch {
+            resultData = undefined
+          }
+        }
+        resolve({ ...parsed, ...(resultData ? { resultData } : {}) })
       } catch (e) {
         resolve({
           success: false,

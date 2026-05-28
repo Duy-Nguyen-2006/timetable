@@ -1,65 +1,50 @@
+```
+# Dependencies
 node_modules/
-.next/
-out/
+.python-version
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
 dist/
 build/
-release/
-python-dist/
-# !.env.example # Removed by Orchids to allow .env files
-CLAUDE.md
-tmp_*.json
-python/timetable_solver/generated/
+target/
+
+# Logs
 *.log
-.DS_Store
-.venv/
-__pycache__/
-*.py[cod]
-.claude/
-db/*.db
-prisma/*.db
-*.tsbuildinfo
-node_modules
-.venv
 
-# Secrets - NEVER commit
+# Environment
 .env
-.env.*
-!.env.example
+.env.local
+*.env.*
 
-# Large generated analysis dumps (repomix, aider, etc.)
-repomix*.xml
-repomix*.txt
-repomix*.md
-*.repomix.*
-aider-*.log
-aider-*.md
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
-# Python / build artifacts
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
+*.so
 .pytest_cache/
-*.egg-info/
-.eggs/
-
-# AI runtime artifacts
-runner.py
-runner_generated.py
-results.txt
-Result.csv
-input.json
-.ai_results/
-*.backup.*
-public/templates/
+.mypy_cache/
+```

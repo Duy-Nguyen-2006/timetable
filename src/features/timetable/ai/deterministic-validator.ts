@@ -65,7 +65,50 @@ function checkBaseConstraints(
   const teacherSlotMap = new Map<string, ScheduleEntry[]>();
   const classSlotMap = new Map<string, ScheduleEntry[]>();
 
+  const assignmentById = new Map((ctx.assignments ?? []).map((assignment) => [assignment.id, assignment]));
+
   for (const entry of schedule) {
+    if (ctx.assignments?.length) {
+      const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
+
+      if (!assignmentId) {
+        pushViolation(
+          violations,
+          'base_missing_assignment_id',
+          'base_constraint',
+          `Schedule entry thiếu assignmentId: ${entry.class}/${entry.subject}/${entry.teacher}`,
+          [entry]
+        );
+        continue;
+      }
+
+      const assignment = assignmentById.get(assignmentId);
+      if (!assignment) {
+        pushViolation(
+          violations,
+          'base_unknown_assignment_id',
+          'base_constraint',
+          `Schedule entry có assignmentId không tồn tại: ${assignmentId}`,
+          [entry]
+        );
+        continue;
+      }
+
+      if (
+        entry.class !== assignment.class ||
+        entry.subject !== assignment.subject ||
+        entry.teacher !== assignment.teacher
+      ) {
+        pushViolation(
+          violations,
+          'base_assignment_tuple_mismatch',
+          'base_constraint',
+          `assignmentId ${assignmentId} không khớp class/subject/teacher.`,
+          [entry]
+        );
+      }
+    }
+
     const teacherKey = `${entry.teacher}::${slotKey(entry)}`;
     const classKey = `${entry.class}::${slotKey(entry)}`;
 
@@ -100,10 +143,7 @@ function checkBaseConstraints(
   if (ctx.assignments?.length) {
     for (const assignment of ctx.assignments) {
       const count = schedule.filter(
-        (entry) =>
-          entry.class === assignment.class &&
-          entry.subject === assignment.subject &&
-          entry.teacher === assignment.teacher
+        (entry) => String(entry.assignmentId ?? '') === assignment.id
       ).length;
 
       if (count !== assignment.weeklyPeriods) {
@@ -113,10 +153,7 @@ function checkBaseConstraints(
           'base_constraint',
           `Weekly periods mismatch for ${assignment.id}: expected ${assignment.weeklyPeriods}, got ${count}.`,
           schedule.filter(
-            (entry) =>
-              entry.class === assignment.class &&
-              entry.subject === assignment.subject &&
-              entry.teacher === assignment.teacher
+            (entry) => String(entry.assignmentId ?? '') === assignment.id
           )
         );
       }

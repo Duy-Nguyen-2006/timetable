@@ -28,37 +28,30 @@ function loadCoderSystemPrompt(): Promise<string> {
 }
 
 function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): CoderTurnResult {
-  const hardIds = specs
-    .filter((spec) => spec.severity === 'hard')
-    .filter((spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base')))
+  const customIds = specs
+    .filter((spec) => spec.kind === 'custom_dsl')
     .map((spec) => spec.id);
 
-  const covered = new Set(result.covered_constraint_ids);
-  const missing = hardIds.filter((id) => !covered.has(id));
+  const hardCustomIds = specs
+    .filter((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl')
+    .map((spec) => spec.id);
 
-  if (missing.length === 0) return result;
+  const customIdSet = new Set(customIds);
+  const covered = new Set(
+    result.covered_constraint_ids.filter((id) => customIdSet.has(id))
+  );
 
-  // Heuristic: nếu code có ít nhất 1 `model.Add` cho mỗi missing id (theo comment hoặc tên),
-  // auto-add vào covered. Nếu KHÔNG có dấu hiệu, mới throw.
-  const evidenceMissing = missing.filter((id) => {
-    // Search code cho dấu hiệu xử lý spec này (comment, hoặc reference id)
-    const codeMentionsId = result.constraint_code.includes(id) ||
-      result.constraint_code.includes(`spec["id"] == "${id}"`) ||
-      result.constraint_code.includes(`spec['id'] == '${id}'`);
-    return !codeMentionsId;
-  });
+  const missing = hardCustomIds.filter((id) => !covered.has(id));
 
-  if (evidenceMissing.length > 0) {
+  if (missing.length > 0) {
     throw new Error(
-      `Coder failed to cover hard constraints (no code reference): ${evidenceMissing.join(', ')}`
+      `Coder failed to cover hard custom_dsl constraints: ${missing.join(', ')}`
     );
   }
 
-  // Auto-patch coverage list — code có vẻ đã xử lý nhưng LLM quên list.
   return {
     ...result,
-    covered_constraint_ids: [...new Set([...result.covered_constraint_ids, ...missing])],
-    assumptions: [...result.assumptions, `auto_added_coverage:${missing.join(',')}`],
+    covered_constraint_ids: [...covered],
   };
 }
 
@@ -92,6 +85,19 @@ export async function runCoderTurn(
   },
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<CoderTurnResult> {
+  const customSpecs = payload.dataset.constraints.filter(
+    (spec) => spec.kind === 'custom_dsl'
+  );
+
+  if (customSpecs.length === 0) {
+    return {
+      plan_summary: 'No custom_dsl constraints. Built-in registry handles all constraints.',
+      constraint_code: 'pass',
+      covered_constraint_ids: [],
+      assumptions: ['built_in_registry_handles_non_custom_constraints'],
+    };
+  }
+
   const systemPrompt = await loadCoderSystemPrompt();
   const chatPayload = {
     baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
@@ -105,7 +111,7 @@ export async function runCoderTurn(
           {
             datasetDigest: payload.dataset.datasetDigest,
             assignments: payload.dataset.assignments,
-            constraints: payload.dataset.constraints,
+            constraints: customSpecs,
             plan: payload.plan,
             previousAttemptSummary: payload.previousAttemptSummary ?? '',
           }
@@ -142,6 +148,6 @@ export async function runCoderTurn(
       rawResponse: response.content,
       usageTokens: response.usage?.total_tokens,
     },
-    payload.dataset.constraints
+    customSpecs
   );
 }
