@@ -332,17 +332,11 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
       .filter((period): period is number => period !== null)
       .sort((a, b) => a - b);
     const totalPeriodsForSubject = periods.length;
-    if (totalPeriodsForSubject % length !== 0) {
-      violations.push({
-        constraintId: spec.id,
-        kind: spec.kind,
-        message: `Môn ${subject} cần các block liên tiếp độ dài ${length}.`,
-        offendingEntries: entries,
-      });
-      continue;
-    }
+    // Lưu ý: KHÔNG kiểm tra (total % length) vì một ngày có thể có 1 block
+    // đúng độ dài + lẻ 1 tiết ở ngày khác, không vi phạm subject_consecutive.
+    // (fix bug #13 — trước đây false-positive khi total=3, length=2.)
 
-    const requiredRuns = totalPeriodsForSubject / length;
+    // Đếm số streak liên tiếp đủ dài length
     let runsOfCorrectLength = 0;
     let streak = 1;
 
@@ -356,7 +350,9 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
     }
     if (streak >= length) runsOfCorrectLength += Math.floor(streak / length);
 
-    if (runsOfCorrectLength < requiredRuns) {
+    // Cần ít nhất floor(total / length) block đủ độ dài.
+    const requiredRuns = Math.floor(totalPeriodsForSubject / length);
+    if (requiredRuns > 0 && runsOfCorrectLength < requiredRuns) {
       violations.push({
         constraintId: spec.id,
         kind: spec.kind,

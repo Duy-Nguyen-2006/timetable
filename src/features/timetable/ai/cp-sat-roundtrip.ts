@@ -65,7 +65,7 @@ export function verifyCpSatRoundTrip(
     if (validDays.size > 0 && !validDays.has(String(entry.day))) {
       return {
         ok: false,
-        message: `Round-trip invalid day: ${entry.day}`,
+        message: `Round-trip invalid day '${entry.day}' (không thuộc domain.days=${[...validDays].slice(0, 5).join(',')}...)`,
       };
     }
 
@@ -74,13 +74,16 @@ export function verifyCpSatRoundTrip(
     if (Array.isArray(dayPeriods) && dayPeriods.length > 0 && !dayPeriods.includes(period)) {
       return {
         ok: false,
-        message: `Round-trip invalid period ${entry.period} for day ${entry.day}`,
+        message: `Round-trip invalid period ${entry.period} for day ${entry.day} (allowed=${dayPeriods.slice(0, 6).join(',')})`,
       };
     }
-    if (validPeriods.size > 0 && !validPeriods.has(period)) {
+    // Chỉ check validPeriods khi KHÔNG có periodsByDay-specific bộ lọc;
+    // nếu periodsByDay trống hoàn toàn thì mới fall back về validPeriods.
+    // (fix bug #12 — trước đây mặc định check cả 2, ra lỗi khó hiểu.)
+    if ((!Array.isArray(dayPeriods) || dayPeriods.length === 0) && validPeriods.size > 0 && !validPeriods.has(period)) {
       return {
         ok: false,
-        message: `Round-trip invalid period: ${entry.period}`,
+        message: `Round-trip invalid period ${entry.period} (allowed=${[...validPeriods].slice(0, 6).join(',')})`,
       };
     }
   }

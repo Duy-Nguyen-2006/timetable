@@ -14,7 +14,32 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-TIMEOUT_SECONDS = 360
+# TIMEOUT_SECONDS mặc định; có thể override qua đối số dòng lệnh argv[1]
+# hoặc env EXECUTOR_TIMEOUT_SECONDS để đồng bộ với timeoutMs phía Node
+# (fix bug #6).
+import os as _os_mod
+
+
+def _default_timeout() -> int:
+    env_value = _os_mod.environ.get("EXECUTOR_TIMEOUT_SECONDS")
+    if env_value:
+        try:
+            v = int(float(env_value))
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    if len(sys.argv) >= 2:
+        try:
+            v = int(float(sys.argv[1]))
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return 360
+
+
+TIMEOUT_SECONDS = _default_timeout()
 MAX_STDOUT_LINES = 100
 
 

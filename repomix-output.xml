@@ -1910,9 +1910,18 @@ def build_custom_constraints(model, slots, data):
         elif kind == "teacher_max_consecutive":
             t = params.get("teacher")
             n = int(params.get("maxConsecutive"))
+            if n <= 0:
+                # n=0 hoặc âm => teacher không được dạy 2 tiết liên tiếp nào;
+                # với n=0 đặc biệt, không có window length nào hợp lệ,
+                # bỏ qua để tránh tạo ràng buộc vô nghĩa. (fix bug #16)
+                continue
             teacher_asgs = [a for a in assignments if a["teacher"] == t]
             for d in days:
                 day_periods = _periods_for(d)
+                # window length = n + 1, slide trên day_periods. Cần
+                # range(len - n) >= 0; bảo vệ khi day_periods quá ngắn.
+                if len(day_periods) <= n:
+                    continue
                 for i in range(len(day_periods) - n):
                     window = day_periods[i:i + n + 1]
                     if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
@@ -1963,27 +1972,45 @@ def build_custom_constraints(model, slots, data):
                     )
 
         elif kind == "subject_consecutive":
-            raise NotImplementedError(
-                f"subject_consecutive registry chưa implement an toàn: {spec.get('id')}"
-            )
+            # Để deterministic-validator + repair LLM xử lý ở post-solve.
+            # Hằng số ràng buộc liên tiếp không đưa vào CP-SAT để tránh
+            # NotImplementedError crash trước cả khi có solution. (fix bug #17)
+            continue
 
         elif kind == "if_then":
-            raise NotImplementedError(
-                f"if_then registry chưa implement an toàn: {spec.get('id')}"
-            )
+            # Tương tự subject_consecutive: condition phụ thuộc vào nghiệm,
+            # check ở post-solve thay vì gài cứng vào model. (fix bug #17)
+            continue
 
         elif kind == "custom_dsl":
-            # <<< AI_FILL_HERE >>>
-            pass
+            # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
+            # custom_dsl specs (không lặp lại per-spec). (fix bug #5)
+            continue
 
         else:
-            raise NotImplementedError(f"Unsupported constraint kind: {kind}")
+            # Skip thay vì raise để repair LLM có thể vẫn chạy. Validator sẽ
+            # ghi nhận violation và force repair.
+            continue
+
+    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
+    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
+    # nên để generated code tự quyết định no-op khi không có custom hard specs.
+    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
+    # <<< AI_FILL_HERE >>>
+    pass
 
 
 build_custom_constraints(model, slots, data)
 
 solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 60.0
+# Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
+# timeoutMs phía Node (fix bug #29).
+import os as _os
+try:
+    _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
+except Exception:
+    _max_seconds = 60.0
+solver.parameters.max_time_in_seconds = _max_seconds
 status = solver.Solve(model)
 
 result = {
@@ -2667,10 +2694,26 @@ def run_sandboxed(file_path: str, timeout: int = 120, workspace_dir: str | None 
             )
         import subprocess
         cwd = Path(workspace_dir) if workspace_dir else Path(file_path).resolve().parent
-        result = subprocess.run(
-            [sys.executable, str(Path(file_path).resolve())],
-            cwd=cwd, capture_output=True, text=True, timeout=timeout
-        )
+        # fix bug #23 — catch TimeoutExpired để trả về status "timeout" thay
+        # vì ném exception ngược lên caller.
+        try:
+            result = subprocess.run(
+                [sys.executable, str(Path(file_path).resolve())],
+                cwd=cwd, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout_str = (exc.stdout.decode(errors="ignore") if isinstance(exc.stdout, (bytes, bytearray)) else (exc.stdout or ""))
+            stderr_str = (exc.stderr.decode(errors="ignore") if isinstance(exc.stderr, (bytes, bytearray)) else (exc.stderr or ""))
+            output = (stdout_str + stderr_str) or f"TIMEOUT after {timeout}s"
+            return {
+                "success": False,
+                "status": "timeout",
+                "return_code": -1,
+                "stdout": stdout_str,
+                "stderr": stderr_str or f"Timeout after {timeout}s",
+                "combined_output": output[:6000],
+                "sandbox": "none",
+            }
         output = (result.stdout or "") + (result.stderr or "")
         return {
             "success": result.returncode == 0 and "SOLUTION_FOUND" in output.upper(),
@@ -4017,15 +4060,21 @@ export type CompressedPayload = {
 
 function inferActivePeriods(input: AgentInputPayload): Record<string, number[]> {
   const byDay: Record<string, number[]> = {};
-  const hasDayLevelPeriodCounts = input.days.some((day) =>
-    Number.isFinite(Number(input.periodCounts[day.id]))
-  );
+  // Không bật day-level cho tất cả days chỉ vì MỘT day có entry trong
+  // periodCounts. Cần KIỂM TRA per-day: nếu day này không có entry hợp lệ
+  // thì dùng session breakdown. (fix bug #11)
+  const allDaysHaveDayLevelCount = input.days.every((day) => {
+    const value = Number(input.periodCounts[day.id]);
+    return Number.isFinite(value) && value > 0;
+  });
 
   for (const day of input.days) {
     const activePeriods: number[] = [];
+    const dayLevelValue = Number(input.periodCounts[day.id]);
+    const dayHasOwnCount = Number.isFinite(dayLevelValue) && dayLevelValue > 0;
 
-    if (hasDayLevelPeriodCounts) {
-      const dayMax = Number(input.periodCounts[day.id] ?? 0);
+    if (allDaysHaveDayLevelCount || dayHasOwnCount) {
+      const dayMax = dayHasOwnCount ? dayLevelValue : 0;
       const deletedPeriods = new Set<number>();
       for (const [key, isDeleted] of Object.entries(input.deletedPeriods)) {
         if (!isDeleted) continue;
@@ -4111,7 +4160,11 @@ export function digestError(raw: string, maxLength = 800): string {
   const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
   const focused = lines.slice(-12).join('\n');
   if (focused.length <= maxLength) return focused;
-  return `${focused.slice(0, maxLength - 3)}...`;
+  // fix bug #28 — cắt ở ranh giới dòng gần nhất trước maxLength để
+  // tránh rách tracebacks giữa dòng/ký tự.
+  const cutAt = focused.lastIndexOf('\n', maxLength - 4);
+  const safeCut = cutAt > 0 ? cutAt : maxLength - 3;
+  return `${focused.slice(0, safeCut)}\n...`;
 }
 </file>
 
@@ -4145,6 +4198,14 @@ test('applyRepairPatches - accepts replaceAll for repeated oldStr', () => {
   assert.equal(result, 'FOO FOO bar');
 });
 
+test('applyRepairPatches - replaceAll uses non-overlapping oldStr occurrences', () => {
+  const src = 'aaaaa';
+  const result = applyRepairPatches(src, [
+    { oldStr: 'aa', newStr: 'b', reason: 'overlap guard', replaceAll: true },
+  ]);
+  assert.equal(result, 'bba');
+});
+
 test('applyRepairPatches - is atomic: rejects all if one patch invalid', () => {
   const src = 'foo bar baz';
   assert.throws(
@@ -4171,7 +4232,7 @@ test('applyRepairPatches - applies correctly when newStr contains another patch 
     { oldStr: 'X', newStr: 'Y', reason: '...' },
     { oldStr: 'Y', newStr: 'W', reason: '...' },
   ]);
-  assert.equal(result, 'W Y Z');
+  assert.equal(result, 'Y W Z');
 });
 </file>
 
@@ -7813,9 +7874,18 @@ def build_custom_constraints(model, slots, data):
         elif kind == "teacher_max_consecutive":
             t = params.get("teacher")
             n = int(params.get("maxConsecutive"))
+            if n <= 0:
+                # n=0 hoặc âm => teacher không được dạy 2 tiết liên tiếp nào;
+                # với n=0 đặc biệt, không có window length nào hợp lệ,
+                # bỏ qua để tránh tạo ràng buộc vô nghĩa. (fix bug #16)
+                continue
             teacher_asgs = [a for a in assignments if a["teacher"] == t]
             for d in days:
                 day_periods = _periods_for(d)
+                # window length = n + 1, slide trên day_periods. Cần
+                # range(len - n) >= 0; bảo vệ khi day_periods quá ngắn.
+                if len(day_periods) <= n:
+                    continue
                 for i in range(len(day_periods) - n):
                     window = day_periods[i:i + n + 1]
                     if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
@@ -7866,27 +7936,45 @@ def build_custom_constraints(model, slots, data):
                     )
 
         elif kind == "subject_consecutive":
-            raise NotImplementedError(
-                f"subject_consecutive registry chưa implement an toàn: {spec.get('id')}"
-            )
+            # Để deterministic-validator + repair LLM xử lý ở post-solve.
+            # Hằng số ràng buộc liên tiếp không đưa vào CP-SAT để tránh
+            # NotImplementedError crash trước cả khi có solution. (fix bug #17)
+            continue
 
         elif kind == "if_then":
-            raise NotImplementedError(
-                f"if_then registry chưa implement an toàn: {spec.get('id')}"
-            )
+            # Tương tự subject_consecutive: condition phụ thuộc vào nghiệm,
+            # check ở post-solve thay vì gài cứng vào model. (fix bug #17)
+            continue
 
         elif kind == "custom_dsl":
-            # <<< AI_FILL_HERE >>>
-            pass
+            # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
+            # custom_dsl specs (không lặp lại per-spec). (fix bug #5)
+            continue
 
         else:
-            raise NotImplementedError(f"Unsupported constraint kind: {kind}")
+            # Skip thay vì raise để repair LLM có thể vẫn chạy. Validator sẽ
+            # ghi nhận violation và force repair.
+            continue
+
+    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
+    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
+    # nên để generated code tự quyết định no-op khi không có custom hard specs.
+    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
+    # <<< AI_FILL_HERE >>>
+    pass
 
 
 build_custom_constraints(model, slots, data)
 
 solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 60.0
+# Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
+# timeoutMs phía Node (fix bug #29).
+import os as _os
+try:
+    _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
+except Exception:
+    _max_seconds = 60.0
+solver.parameters.max_time_in_seconds = _max_seconds
 status = solver.Solve(model)
 
 result = {
@@ -8932,17 +9020,11 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
       .filter((period): period is number => period !== null)
       .sort((a, b) => a - b);
     const totalPeriodsForSubject = periods.length;
-    if (totalPeriodsForSubject % length !== 0) {
-      violations.push({
-        constraintId: spec.id,
-        kind: spec.kind,
-        message: `Môn ${subject} cần các block liên tiếp độ dài ${length}.`,
-        offendingEntries: entries,
-      });
-      continue;
-    }
+    // Lưu ý: KHÔNG kiểm tra (total % length) vì một ngày có thể có 1 block
+    // đúng độ dài + lẻ 1 tiết ở ngày khác, không vi phạm subject_consecutive.
+    // (fix bug #13 — trước đây false-positive khi total=3, length=2.)
 
-    const requiredRuns = totalPeriodsForSubject / length;
+    // Đếm số streak liên tiếp đủ dài length
     let runsOfCorrectLength = 0;
     let streak = 1;
 
@@ -8956,7 +9038,9 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
     }
     if (streak >= length) runsOfCorrectLength += Math.floor(streak / length);
 
-    if (runsOfCorrectLength < requiredRuns) {
+    // Cần ít nhất floor(total / length) block đủ độ dài.
+    const requiredRuns = Math.floor(totalPeriodsForSubject / length);
+    if (requiredRuns > 0 && runsOfCorrectLength < requiredRuns) {
       violations.push({
         constraintId: spec.id,
         kind: spec.kind,
@@ -9368,13 +9452,28 @@ export function injectConstraintCode(
 
   const baseIndent = markerMatch[0].match(/^[ \t]*/)?.[0] ?? '';
   const normalized = constraintCode.replace(/\r\n/g, '\n').replace(/\t/g, '    ');
-  const indented = normalized
-    .split('\n')
-    .map((line) => (line.trim().length ? `${baseIndent}${line.trimEnd()}` : ''))
+  // Detect minimum non-empty leading indent of source to strip it uniformly,
+  // preserving ALL relative nested indentation (fix bug #4).
+  const sourceLines = normalized.split('\n');
+  let minLeading = Infinity;
+  for (const line of sourceLines) {
+    if (!line.trim().length) continue;
+    const leading = (line.match(/^[ \t]*/)?.[0] ?? '').length;
+    if (leading < minLeading) minLeading = leading;
+  }
+  if (!Number.isFinite(minLeading)) minLeading = 0;
+  const indented = sourceLines
+    .map((line) => {
+      if (!line.trim().length) return '';
+      const stripped = line.slice(minLeading);
+      return `${baseIndent}${stripped.replace(/\s+$/, '')}`;
+    })
     .join('\n');
 
+  // Use function form of replace to avoid '$1', '$', '$$' etc being treated
+  // as special replacement patterns in the generated code (fix bug #3).
   return {
-    solverCode: skeleton.replace(MARKER_LINE, indented),
+    solverCode: skeleton.replace(MARKER_LINE, () => indented),
     injected: true,
   };
 }
@@ -9989,6 +10088,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -10120,8 +10220,10 @@ def run_in_sandbox(
             "sandbox": True
         }
 
-    # Create a unique container name for easier cleanup
-    container_name = f"sandbox-run-{int(time.time() * 1000)}"
+    # Create a unique container name for easier cleanup.
+    # Thêm suffix uuid để tránh va chạm khi nhiều job chạy song song trong
+    # cùng ms (fix bug #24).
+    container_name = f"sandbox-run-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
 
     # Build docker run command with strong isolation
     cmd = [
@@ -10456,27 +10558,58 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
     );
     const executorPath = path.join(repoRoot, 'python', 'code_executor.py');
     fs.mkdirSync(jobDir, { recursive: true });
-    fs.writeFileSync(path.join(jobDir, 'input.json'), JSON.stringify(input ?? {}, null, 2), 'utf8');
+    // Stringify không pretty-print để tiết kiệm băng thông disk I/O.
+    fs.writeFileSync(path.join(jobDir, 'input.json'), JSON.stringify(input ?? {}), 'utf8');
+    let cleanedUp = false;
     const cleanupJobDir = () => {
-      fs.rmSync(jobDir, { recursive: true, force: true });
+      if (cleanedUp) return; // fix bug #25 — idempotent cleanup
+      cleanedUp = true;
+      try {
+        fs.rmSync(jobDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     };
 
-    const child = spawn('python3', [executorPath], {
+    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+    const child = spawn('python3', [executorPath, String(timeoutSeconds)], {
       cwd: jobDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
         PYTHONUNBUFFERED: '1',
+        // fix bug #6 — chuyển timeout xuống Python qua env nữa cho chắc.
+        EXECUTOR_TIMEOUT_SECONDS: String(timeoutSeconds),
+        // fix bug #29 — đồng bộ max time của CP-SAT solver với timeoutMs.
+        SOLVER_MAX_SECONDS: String(Math.max(5, timeoutSeconds - 5)),
       },
+      detached: true, // để có process group riêng để kết thúc cả cây con (fix bug #7)
     });
 
     let stdout = '';
     let stderr = '';
     let timedOut = false;
 
+    const killTree = () => {
+      // Tìm cách kill cả process group (bỏ qua nếu không hỗ trợ, ví dụ Windows).
+      try {
+        if (typeof child.pid === 'number') {
+          process.kill(-child.pid, 'SIGKILL');
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* ignore */
+      }
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killTree();
     }, Math.max(1_000, timeoutMs));
 
     child.stdout.on('data', (chunk) => {
@@ -10512,6 +10645,7 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
         reject(new Error(`Executor returned empty output. Stderr: ${stderr.slice(0, 400)}`));
         return;
       }
+      // fix bug #28 — dùng line-boundary slice an toàn hơn cho stderr.
 
       try {
         const parsed = JSON.parse(lastLine) as Record<string, unknown>;
@@ -10526,25 +10660,56 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
           }
         }
 
+        // Validate resultPath: phải nằm trong os.tmpdir() hoặc jobDir,
+        // tránh path traversal khi Python emit đường dẫn độc hại. (fix bug #26)
+        const resolvedResultPath =
+          resultPath && path.isAbsolute(resultPath) ? path.resolve(resultPath) : '';
+        const tmpRoot = path.resolve(os.tmpdir());
+        const cwdRoot = path.resolve(process.cwd());
+        const safeResultPath =
+          resolvedResultPath &&
+          (resolvedResultPath.startsWith(tmpRoot + path.sep) ||
+            resolvedResultPath.startsWith(cwdRoot + path.sep))
+            ? resolvedResultPath
+            : '';
+        if (resolvedResultPath && !safeResultPath) {
+          // Reject mặc không load file ngoài whitelist.
+          resultData = undefined;
+        } else if (safeResultPath && fs.existsSync(safeResultPath)) {
+          try {
+            resultData = JSON.parse(fs.readFileSync(safeResultPath, 'utf8'));
+          } catch {
+            resultData = undefined;
+          }
+        }
+
         resolve({
           ...parsed,
           ...(resultData ? { resultData } : {}),
-          stdout: typeof parsed.stdout === 'string' ? truncateOutput(parsed.stdout) : '',
-          stderr: typeof parsed.stderr === 'string' ? truncateOutput(parsed.stderr) : '',
+          // fix bug #27 — KHÔNG gửi stdout/stderr gốc (đã có errorDigest).
+          // Chỉ giữ stdout/stderr của Python wrapper dưới dạng truncated
+          // để debug khi ok=false.
+          stdout:
+            typeof parsed.stdout === 'string'
+              ? truncateOutput(parsed.stdout, 40)
+              : '',
+          stderr:
+            typeof parsed.stderr === 'string'
+              ? truncateOutput(parsed.stderr, 40)
+              : '',
           errorDigest:
             typeof parsed.errorDigest === 'string'
               ? digestError(parsed.errorDigest)
               : digestError(stderr || stdout),
         });
       } catch {
-        cleanupJobDir();
         reject(
           new Error(
             `Executor output is not valid JSON. Last line: ${lastLine.slice(0, 300)}. Stderr: ${stderr.slice(0, 300)}`
           )
         );
       } finally {
-        cleanupJobDir();
+        cleanupJobDir(); // idempotent
       }
     });
 
@@ -10738,7 +10903,7 @@ export function verifyCpSatRoundTrip(
     if (validDays.size > 0 && !validDays.has(String(entry.day))) {
       return {
         ok: false,
-        message: `Round-trip invalid day: ${entry.day}`,
+        message: `Round-trip invalid day '${entry.day}' (không thuộc domain.days=${[...validDays].slice(0, 5).join(',')}...)`,
       };
     }
 
@@ -10747,13 +10912,16 @@ export function verifyCpSatRoundTrip(
     if (Array.isArray(dayPeriods) && dayPeriods.length > 0 && !dayPeriods.includes(period)) {
       return {
         ok: false,
-        message: `Round-trip invalid period ${entry.period} for day ${entry.day}`,
+        message: `Round-trip invalid period ${entry.period} for day ${entry.day} (allowed=${dayPeriods.slice(0, 6).join(',')})`,
       };
     }
-    if (validPeriods.size > 0 && !validPeriods.has(period)) {
+    // Chỉ check validPeriods khi KHÔNG có periodsByDay-specific bộ lọc;
+    // nếu periodsByDay trống hoàn toàn thì mới fall back về validPeriods.
+    // (fix bug #12 — trước đây mặc định check cả 2, ra lỗi khó hiểu.)
+    if ((!Array.isArray(dayPeriods) || dayPeriods.length === 0) && validPeriods.size > 0 && !validPeriods.has(period)) {
       return {
         ok: false,
-        message: `Round-trip invalid period: ${entry.period}`,
+        message: `Round-trip invalid period ${entry.period} (allowed=${[...validPeriods].slice(0, 6).join(',')})`,
       };
     }
   }
@@ -10987,6 +11155,18 @@ function extractFirstNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+// Trích số đứng ngay sau từ "tiết" / "tiet" / "period" — dùng cho
+// parsing câu như "thứ 6 tiết 5" để tránh nhầm số "6" (thứ 6) thành
+// period. (fix bug #14)
+function extractPeriodNumber(text: string): number | null {
+  const matched = text.match(/(?:tiết|tiet|period)\s*(\d+)/iu);
+  if (matched) {
+    const value = Number(matched[1]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
 function extractDayId(text: string, days: Array<{ id: string; label: string }>): string | null {
   for (const day of days) {
     if (includesLabel(text, day.id) || includesLabel(text, day.label)) return day.id;
@@ -11056,10 +11236,10 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
             ...(thenDay ? { scope: { day: thenDay } } : {}),
           },
         });
-      } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay && thenPeriod !== null) {
+      } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay && (extractPeriodNumber(thenClauseRaw) ?? thenPeriod) !== null) {
         thenSpecs.push({
           kind: 'teacher_block_slot',
-          params: { teacher: thenTeachers[0], day: thenDay, period: thenPeriod },
+          params: { teacher: thenTeachers[0], day: thenDay, period: extractPeriodNumber(thenClauseRaw) ?? thenPeriod },
         });
       } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay) {
         thenSpecs.push({
@@ -12310,34 +12490,64 @@ export function applyRepairPatches(
   source: string,
   patches: RepairTurnResult['patches']
 ): string {
-  // 1) Validate TẤT CẢ patches trên source GỐC trước khi apply bất kỳ patch nào (atomic).
-  const plan: Array<{ index: number; patch: typeof patches[0] }> = [];
+  // Atomic apply thật sự (fix bug #8):
+  //   1) Validate TẤT CẢ patches trên source GỐC: tìm vị trí và kiểm duplicate.
+  //   2) Sort theo vị trí tăng dần, kiểm tra KHÔNG overlap.
+  //   3) Stitch ra string mới bằng slice + concat — mỗi patch gắn 1 lần
+  //      đúng tại vị trí nó đã được validate, tránh trường hợp patch trước
+  //      làm oldStr của patch sau xuất hiện nhiều hơn.
+  const plan: Array<{ start: number; end: number; patch: typeof patches[0]; allOccurrences?: number[] }> = [];
   for (const patch of patches) {
     if (!patch.oldStr) continue;
-    const occurrences = source.split(patch.oldStr).length - 1;
-    if (occurrences === 0) {
+    const occurrences: number[] = [];
+    let from = 0;
+    while (from <= source.length) {
+      const idx = source.indexOf(patch.oldStr, from);
+      if (idx === -1) break;
+      occurrences.push(idx);
+      from = idx + Math.max(1, patch.oldStr.length);
+    }
+    if (occurrences.length === 0) {
       throw new Error(
         `Repair patch oldStr not found in source. Preview: ${patch.oldStr.slice(0, 120)}`
       );
     }
-    if (occurrences > 1 && !patch.replaceAll) {
+    if (occurrences.length > 1 && !patch.replaceAll) {
       throw new Error(
-        `Repair patch ambiguous: oldStr xuất hiện ${occurrences} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
+        `Repair patch ambiguous: oldStr xuất hiện ${occurrences.length} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
       );
     }
-    plan.push({ index: source.indexOf(patch.oldStr), patch });
+    if (patch.replaceAll) {
+      for (const idx of occurrences) {
+        plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
+      }
+    } else {
+      const idx = occurrences[0];
+      plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
+    }
   }
 
-  // 2) Apply theo thứ tự xuất hiện trong source (tránh overlap).
-  plan.sort((a, b) => a.index - b.index);
+  plan.sort((a, b) => a.start - b.start);
 
-  let updated = source;
-  for (const { patch } of plan) {
-    updated = patch.replaceAll
-      ? updated.split(patch.oldStr).join(patch.newStr)
-      : updated.replace(patch.oldStr, patch.newStr);
+  // Detect overlap.
+  for (let i = 1; i < plan.length; i += 1) {
+    if (plan[i].start < plan[i - 1].end) {
+      throw new Error(
+        `Repair patches overlap at offset ${plan[i].start}. Tránh đề các patch chồng nhau.`
+      );
+    }
   }
-  return updated;
+
+  // Stitch.
+  let cursor = 0;
+  const out: string[] = [];
+  for (const segment of plan) {
+    out.push(source.slice(cursor, segment.start));
+    out.push(segment.patch.newStr);
+    cursor = segment.end;
+  }
+  out.push(source.slice(cursor));
+  return out.join('');
 }
 </file>
 
@@ -12368,7 +12578,32 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-TIMEOUT_SECONDS = 360
+# TIMEOUT_SECONDS mặc định; có thể override qua đối số dòng lệnh argv[1]
+# hoặc env EXECUTOR_TIMEOUT_SECONDS để đồng bộ với timeoutMs phía Node
+# (fix bug #6).
+import os as _os_mod
+
+
+def _default_timeout() -> int:
+    env_value = _os_mod.environ.get("EXECUTOR_TIMEOUT_SECONDS")
+    if env_value:
+        try:
+            v = int(float(env_value))
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    if len(sys.argv) >= 2:
+        try:
+            v = int(float(sys.argv[1]))
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return 360
+
+
+TIMEOUT_SECONDS = _default_timeout()
 MAX_STDOUT_LINES = 100
 
 
@@ -12814,7 +13049,11 @@ function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): Coder
   for (const id of hardCustomIds) {
     if (covered.has(id)) continue;
 
-    if (!result.constraint_code.includes(id)) {
+    // Dùng word-boundary regex thay vì includes() để tránh false-positive
+    // khi id 'c1' trùng với 'c10', 'c12'... (fix bug #15).
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const referenceRegex = new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, 'm');
+    if (!referenceRegex.test(result.constraint_code)) {
       throw new Error(
         `Coder failed to cover hard custom_dsl constraint ${id}: no code reference`
       );
@@ -12830,8 +13069,6 @@ function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): Coder
     assumptions,
   };
 }
-
-
 
 export async function runCoderTurn(
   config: AIProviderConfig,
@@ -12950,7 +13187,8 @@ export interface RunLocalAgentResult {
 }
 
 const MAX_CODER_RETRIES = 3;
-const MAX_REPAIR_ROUNDS = 2;
+const MAX_RUNTIME_REPAIR_ROUNDS = 1;
+const MAX_VIOLATION_REPAIR_ROUNDS = 2;
 const MAX_TOTAL_TOOL_CALLS = 15;
 const TOKEN_CAP_PER_RUN = 80_000;
 
@@ -13044,7 +13282,7 @@ function shouldRepairExecutableFailure(
   return Boolean(
     latestConstraintCode.trim() &&
     lastFailureSummary.trim() &&
-    repairRound < MAX_REPAIR_ROUNDS
+    repairRound < MAX_RUNTIME_REPAIR_ROUNDS
   );
 }
 
@@ -13100,12 +13338,15 @@ export async function runLocalAgent(
     const skeleton = await loadSolverSkeleton();
     let previousAttemptSummary = '';
 
-    let repairRound = 0;
+    // Tách rõ 2 vòng repair: runtime/compile error tối đa 1 round,
+    // violations tối đa 2 round để tránh tổng token repair phình lên 2+2.
+    let runtimeRepairRound = 0;
+    let violationRepairRound = 0;
     let previousViolationSignature = '';
     let repeatedViolationCount = 0;
     let latestConstraintCode = '';
     let latestCoveredConstraintIds = new Set<string>();
-    let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string }> | null = null;
+    let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }> | null = null;
 
     while (true) {
       let coderRetry = 0;
@@ -13126,6 +13367,20 @@ export async function runLocalAgent(
         if (pendingRepairPatches?.length && latestConstraintCode) {
           try {
             latestConstraintCode = applyRepairPatches(latestConstraintCode, pendingRepairPatches);
+            // Sau repair, có thể có constraint IDs mới được cover. Cập nhật
+            // covered set dựa trên các comment id còn lại trong code.
+            // (fix bug #1 — trước đây giữ nguyên covered cũ, dễ false-positive.)
+            const refreshed = new Set<string>(latestCoveredConstraintIds);
+            for (const spec of translator.constraintSpecs) {
+              if (spec.kind !== 'custom_dsl') continue;
+              const re = new RegExp(`(^|[^A-Za-z0-9_])${spec.id}([^A-Za-z0-9_]|$)`, 'm');
+              if (re.test(latestConstraintCode)) refreshed.add(spec.id);
+            }
+            latestCoveredConstraintIds = refreshed;
+            board.addAttempt(
+              'repair_patch_applied',
+              `round=${Math.max(runtimeRepairRound, violationRepairRound)} patches=${pendingRepairPatches.length}`
+            );
             pendingRepairPatches = null;
             emit(config, {
               type: 'stage_completed',
@@ -13312,17 +13567,17 @@ export async function runLocalAgent(
       }
 
       if (!lastReport || !lastRoundTrip) {
-        if (shouldRepairExecutableFailure(latestConstraintCode, previousAttemptSummary, repairRound)) {
+        if (shouldRepairExecutableFailure(latestConstraintCode, previousAttemptSummary, runtimeRepairRound)) {
           if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
             throw new Error(`Stopped by MAX_TOTAL_TOOL_CALLS=${MAX_TOTAL_TOOL_CALLS}.`);
           }
 
-          repairRound += 1;
+          runtimeRepairRound += 1;
           emit(config, {
             type: 'phase',
             phase: 'fixing',
-            message: `Đang repair lỗi chạy code ${repairRound}/${MAX_REPAIR_ROUNDS}`,
-            iteration: repairRound,
+            message: `Đang repair lỗi chạy code ${runtimeRepairRound}/${MAX_RUNTIME_REPAIR_ROUNDS}`,
+            iteration: runtimeRepairRound,
           });
 
           const repair = await runRepairTurn(pickStageConfig(config, 'repair'), {
@@ -13397,8 +13652,8 @@ export async function runLocalAgent(
       previousAttemptSummary = digestError(sampleMessages.join('\n'));
       board.setViolations(lastReport.hardViolations);
 
-      repairRound += 1;
-      if (repairRound > MAX_REPAIR_ROUNDS) {
+      violationRepairRound += 1;
+      if (violationRepairRound > MAX_VIOLATION_REPAIR_ROUNDS) {
         return {
           success: false,
           error: `Repair exhausted: ${lastReport.hardViolations.length} hard violations remain.`,
@@ -13408,13 +13663,26 @@ export async function runLocalAgent(
       emit(config, {
         type: 'phase',
         phase: 'fixing',
-        message: `Đang repair round ${repairRound}/${MAX_REPAIR_ROUNDS}`,
-        iteration: repairRound,
+        message: `Đang repair round ${violationRepairRound}/${MAX_VIOLATION_REPAIR_ROUNDS}`,
+        iteration: violationRepairRound,
       });
+      // Khi vẫn còn uncovered hard constraints, build pseudo-violations để
+      // repair LLM biết rõ thiếu coverage thay vì nhận empty violations.
+      // (fix bug #1 / #10)
+      const repairViolations = [...lastReport.hardViolations];
+      for (const id of uncoveredHardUncheckedIds) {
+        const spec = translator.constraintSpecs.find((item) => item.id === id);
+        repairViolations.push({
+          constraintId: id,
+          kind: 'base_constraint',
+          message: `Hard constraint ${id} (${spec?.kind ?? 'custom_dsl'}) chưa có code coverage. Vui lòng bổ sung block code cho ${id}: ${spec?.original ?? ''}`,
+          offendingEntries: [],
+        });
+      }
       const repair = await runRepairTurn(pickStageConfig(config, 'repair'), {
         plan: planner.plan,
         constraintCode: latestConstraintCode,
-        violations: lastReport.hardViolations,
+        violations: repairViolations,
         compileOrRunError: '',
       });
       totalToolCalls += 1;

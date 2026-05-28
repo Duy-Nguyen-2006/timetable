@@ -42,10 +42,26 @@ def run_sandboxed(file_path: str, timeout: int = 120, workspace_dir: str | None 
             )
         import subprocess
         cwd = Path(workspace_dir) if workspace_dir else Path(file_path).resolve().parent
-        result = subprocess.run(
-            [sys.executable, str(Path(file_path).resolve())],
-            cwd=cwd, capture_output=True, text=True, timeout=timeout
-        )
+        # fix bug #23 — catch TimeoutExpired để trả về status "timeout" thay
+        # vì ném exception ngược lên caller.
+        try:
+            result = subprocess.run(
+                [sys.executable, str(Path(file_path).resolve())],
+                cwd=cwd, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout_str = (exc.stdout.decode(errors="ignore") if isinstance(exc.stdout, (bytes, bytearray)) else (exc.stdout or ""))
+            stderr_str = (exc.stderr.decode(errors="ignore") if isinstance(exc.stderr, (bytes, bytearray)) else (exc.stderr or ""))
+            output = (stdout_str + stderr_str) or f"TIMEOUT after {timeout}s"
+            return {
+                "success": False,
+                "status": "timeout",
+                "return_code": -1,
+                "stdout": stdout_str,
+                "stderr": stderr_str or f"Timeout after {timeout}s",
+                "combined_output": output[:6000],
+                "sandbox": "none",
+            }
         output = (result.stdout or "") + (result.stderr or "")
         return {
             "success": result.returncode == 0 and "SOLUTION_FOUND" in output.upper(),

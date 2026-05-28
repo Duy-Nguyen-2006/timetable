@@ -27,15 +27,21 @@ export type CompressedPayload = {
 
 function inferActivePeriods(input: AgentInputPayload): Record<string, number[]> {
   const byDay: Record<string, number[]> = {};
-  const hasDayLevelPeriodCounts = input.days.some((day) =>
-    Number.isFinite(Number(input.periodCounts[day.id]))
-  );
+  // Không bật day-level cho tất cả days chỉ vì MỘT day có entry trong
+  // periodCounts. Cần KIỂM TRA per-day: nếu day này không có entry hợp lệ
+  // thì dùng session breakdown. (fix bug #11)
+  const allDaysHaveDayLevelCount = input.days.every((day) => {
+    const value = Number(input.periodCounts[day.id]);
+    return Number.isFinite(value) && value > 0;
+  });
 
   for (const day of input.days) {
     const activePeriods: number[] = [];
+    const dayLevelValue = Number(input.periodCounts[day.id]);
+    const dayHasOwnCount = Number.isFinite(dayLevelValue) && dayLevelValue > 0;
 
-    if (hasDayLevelPeriodCounts) {
-      const dayMax = Number(input.periodCounts[day.id] ?? 0);
+    if (allDaysHaveDayLevelCount || dayHasOwnCount) {
+      const dayMax = dayHasOwnCount ? dayLevelValue : 0;
       const deletedPeriods = new Set<number>();
       for (const [key, isDeleted] of Object.entries(input.deletedPeriods)) {
         if (!isDeleted) continue;
@@ -121,5 +127,9 @@ export function digestError(raw: string, maxLength = 800): string {
   const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
   const focused = lines.slice(-12).join('\n');
   if (focused.length <= maxLength) return focused;
-  return `${focused.slice(0, maxLength - 3)}...`;
+  // fix bug #28 — cắt ở ranh giới dòng gần nhất trước maxLength để
+  // tránh rách tracebacks giữa dòng/ký tự.
+  const cutAt = focused.lastIndexOf('\n', maxLength - 4);
+  const safeCut = cutAt > 0 ? cutAt : maxLength - 3;
+  return `${focused.slice(0, safeCut)}\n...`;
 }

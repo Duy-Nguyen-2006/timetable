@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -155,8 +156,10 @@ def run_in_sandbox(
             "sandbox": True
         }
 
-    # Create a unique container name for easier cleanup
-    container_name = f"sandbox-run-{int(time.time() * 1000)}"
+    # Create a unique container name for easier cleanup.
+    # Thêm suffix uuid để tránh va chạm khi nhiều job chạy song song trong
+    # cùng ms (fix bug #24).
+    container_name = f"sandbox-run-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
 
     # Build docker run command with strong isolation
     cmd = [

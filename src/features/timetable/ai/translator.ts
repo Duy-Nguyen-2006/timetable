@@ -49,6 +49,18 @@ function extractFirstNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+// Trích số đứng ngay sau từ "tiết" / "tiet" / "period" — dùng cho
+// parsing câu như "thứ 6 tiết 5" để tránh nhầm số "6" (thứ 6) thành
+// period. (fix bug #14)
+function extractPeriodNumber(text: string): number | null {
+  const matched = text.match(/(?:tiết|tiet|period)\s*(\d+)/iu);
+  if (matched) {
+    const value = Number(matched[1]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
 function extractDayId(text: string, days: Array<{ id: string; label: string }>): string | null {
   for (const day of days) {
     if (includesLabel(text, day.id) || includesLabel(text, day.label)) return day.id;
@@ -118,10 +130,10 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
             ...(thenDay ? { scope: { day: thenDay } } : {}),
           },
         });
-      } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay && thenPeriod !== null) {
+      } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay && (extractPeriodNumber(thenClauseRaw) ?? thenPeriod) !== null) {
         thenSpecs.push({
           kind: 'teacher_block_slot',
-          params: { teacher: thenTeachers[0], day: thenDay, period: thenPeriod },
+          params: { teacher: thenTeachers[0], day: thenDay, period: extractPeriodNumber(thenClauseRaw) ?? thenPeriod },
         });
       } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay) {
         thenSpecs.push({

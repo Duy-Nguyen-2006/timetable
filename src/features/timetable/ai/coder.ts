@@ -45,7 +45,11 @@ function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): Coder
   for (const id of hardCustomIds) {
     if (covered.has(id)) continue;
 
-    if (!result.constraint_code.includes(id)) {
+    // Dùng word-boundary regex thay vì includes() để tránh false-positive
+    // khi id 'c1' trùng với 'c10', 'c12'... (fix bug #15).
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const referenceRegex = new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, 'm');
+    if (!referenceRegex.test(result.constraint_code)) {
       throw new Error(
         `Coder failed to cover hard custom_dsl constraint ${id}: no code reference`
       );
@@ -61,8 +65,6 @@ function ensureCoverage(result: CoderTurnResult, specs: ConstraintSpec[]): Coder
     assumptions,
   };
 }
-
-
 
 export async function runCoderTurn(
   config: AIProviderConfig,

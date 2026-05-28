@@ -27,6 +27,14 @@ test('applyRepairPatches - accepts replaceAll for repeated oldStr', () => {
   assert.equal(result, 'FOO FOO bar');
 });
 
+test('applyRepairPatches - replaceAll uses non-overlapping oldStr occurrences', () => {
+  const src = 'aaaaa';
+  const result = applyRepairPatches(src, [
+    { oldStr: 'aa', newStr: 'b', reason: 'overlap guard', replaceAll: true },
+  ]);
+  assert.equal(result, 'bba');
+});
+
 test('applyRepairPatches - is atomic: rejects all if one patch invalid', () => {
   const src = 'foo bar baz';
   assert.throws(
@@ -53,5 +61,5 @@ test('applyRepairPatches - applies correctly when newStr contains another patch 
     { oldStr: 'X', newStr: 'Y', reason: '...' },
     { oldStr: 'Y', newStr: 'W', reason: '...' },
   ]);
-  assert.equal(result, 'W Y Z');
+  assert.equal(result, 'Y W Z');
 });

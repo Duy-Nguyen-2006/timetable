@@ -18,7 +18,8 @@ export interface RunLocalAgentResult {
 }
 
 const MAX_CODER_RETRIES = 3;
-const MAX_REPAIR_ROUNDS = 2;
+const MAX_RUNTIME_REPAIR_ROUNDS = 1;
+const MAX_VIOLATION_REPAIR_ROUNDS = 2;
 const MAX_TOTAL_TOOL_CALLS = 15;
 const TOKEN_CAP_PER_RUN = 80_000;
 
@@ -112,7 +113,7 @@ function shouldRepairExecutableFailure(
   return Boolean(
     latestConstraintCode.trim() &&
     lastFailureSummary.trim() &&
-    repairRound < MAX_REPAIR_ROUNDS
+    repairRound < MAX_RUNTIME_REPAIR_ROUNDS
   );
 }
 
@@ -168,12 +169,15 @@ export async function runLocalAgent(
     const skeleton = await loadSolverSkeleton();
     let previousAttemptSummary = '';
 
-    let repairRound = 0;
+    // Tách rõ 2 vòng repair: runtime/compile error tối đa 1 round,
+    // violations tối đa 2 round để tránh tổng token repair phình lên 2+2.
+    let runtimeRepairRound = 0;
+    let violationRepairRound = 0;
     let previousViolationSignature = '';
     let repeatedViolationCount = 0;
     let latestConstraintCode = '';
     let latestCoveredConstraintIds = new Set<string>();
-    let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string }> | null = null;
+    let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }> | null = null;
 
     while (true) {
       let coderRetry = 0;
@@ -194,6 +198,20 @@ export async function runLocalAgent(
         if (pendingRepairPatches?.length && latestConstraintCode) {
           try {
             latestConstraintCode = applyRepairPatches(latestConstraintCode, pendingRepairPatches);
+            // Sau repair, có thể có constraint IDs mới được cover. Cập nhật
+            // covered set dựa trên các comment id còn lại trong code.
+            // (fix bug #1 — trước đây giữ nguyên covered cũ, dễ false-positive.)
+            const refreshed = new Set<string>(latestCoveredConstraintIds);
+            for (const spec of translator.constraintSpecs) {
+              if (spec.kind !== 'custom_dsl') continue;
+              const re = new RegExp(`(^|[^A-Za-z0-9_])${spec.id}([^A-Za-z0-9_]|$)`, 'm');
+              if (re.test(latestConstraintCode)) refreshed.add(spec.id);
+            }
+            latestCoveredConstraintIds = refreshed;
+            board.addAttempt(
+              'repair_patch_applied',
+              `round=${Math.max(runtimeRepairRound, violationRepairRound)} patches=${pendingRepairPatches.length}`
+            );
             pendingRepairPatches = null;
             emit(config, {
               type: 'stage_completed',
@@ -380,17 +398,17 @@ export async function runLocalAgent(
       }
 
       if (!lastReport || !lastRoundTrip) {
-        if (shouldRepairExecutableFailure(latestConstraintCode, previousAttemptSummary, repairRound)) {
+        if (shouldRepairExecutableFailure(latestConstraintCode, previousAttemptSummary, runtimeRepairRound)) {
           if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
             throw new Error(`Stopped by MAX_TOTAL_TOOL_CALLS=${MAX_TOTAL_TOOL_CALLS}.`);
           }
 
-          repairRound += 1;
+          runtimeRepairRound += 1;
           emit(config, {
             type: 'phase',
             phase: 'fixing',
-            message: `Đang repair lỗi chạy code ${repairRound}/${MAX_REPAIR_ROUNDS}`,
-            iteration: repairRound,
+            message: `Đang repair lỗi chạy code ${runtimeRepairRound}/${MAX_RUNTIME_REPAIR_ROUNDS}`,
+            iteration: runtimeRepairRound,
           });
 
           const repair = await runRepairTurn(pickStageConfig(config, 'repair'), {
@@ -465,8 +483,8 @@ export async function runLocalAgent(
       previousAttemptSummary = digestError(sampleMessages.join('\n'));
       board.setViolations(lastReport.hardViolations);
 
-      repairRound += 1;
-      if (repairRound > MAX_REPAIR_ROUNDS) {
+      violationRepairRound += 1;
+      if (violationRepairRound > MAX_VIOLATION_REPAIR_ROUNDS) {
         return {
           success: false,
           error: `Repair exhausted: ${lastReport.hardViolations.length} hard violations remain.`,
@@ -476,13 +494,26 @@ export async function runLocalAgent(
       emit(config, {
         type: 'phase',
         phase: 'fixing',
-        message: `Đang repair round ${repairRound}/${MAX_REPAIR_ROUNDS}`,
-        iteration: repairRound,
+        message: `Đang repair round ${violationRepairRound}/${MAX_VIOLATION_REPAIR_ROUNDS}`,
+        iteration: violationRepairRound,
       });
+      // Khi vẫn còn uncovered hard constraints, build pseudo-violations để
+      // repair LLM biết rõ thiếu coverage thay vì nhận empty violations.
+      // (fix bug #1 / #10)
+      const repairViolations = [...lastReport.hardViolations];
+      for (const id of uncoveredHardUncheckedIds) {
+        const spec = translator.constraintSpecs.find((item) => item.id === id);
+        repairViolations.push({
+          constraintId: id,
+          kind: 'base_constraint',
+          message: `Hard constraint ${id} (${spec?.kind ?? 'custom_dsl'}) chưa có code coverage. Vui lòng bổ sung block code cho ${id}: ${spec?.original ?? ''}`,
+          offendingEntries: [],
+        });
+      }
       const repair = await runRepairTurn(pickStageConfig(config, 'repair'), {
         plan: planner.plan,
         constraintCode: latestConstraintCode,
-        violations: lastReport.hardViolations,
+        violations: repairViolations,
         compileOrRunError: '',
       });
       totalToolCalls += 1;

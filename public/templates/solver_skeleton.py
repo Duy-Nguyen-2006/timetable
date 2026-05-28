@@ -110,9 +110,18 @@ def build_custom_constraints(model, slots, data):
         elif kind == "teacher_max_consecutive":
             t = params.get("teacher")
             n = int(params.get("maxConsecutive"))
+            if n <= 0:
+                # n=0 hoặc âm => teacher không được dạy 2 tiết liên tiếp nào;
+                # với n=0 đặc biệt, không có window length nào hợp lệ,
+                # bỏ qua để tránh tạo ràng buộc vô nghĩa. (fix bug #16)
+                continue
             teacher_asgs = [a for a in assignments if a["teacher"] == t]
             for d in days:
                 day_periods = _periods_for(d)
+                # window length = n + 1, slide trên day_periods. Cần
+                # range(len - n) >= 0; bảo vệ khi day_periods quá ngắn.
+                if len(day_periods) <= n:
+                    continue
                 for i in range(len(day_periods) - n):
                     window = day_periods[i:i + n + 1]
                     if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
@@ -163,27 +172,45 @@ def build_custom_constraints(model, slots, data):
                     )
 
         elif kind == "subject_consecutive":
-            raise NotImplementedError(
-                f"subject_consecutive registry chưa implement an toàn: {spec.get('id')}"
-            )
+            # Để deterministic-validator + repair LLM xử lý ở post-solve.
+            # Hằng số ràng buộc liên tiếp không đưa vào CP-SAT để tránh
+            # NotImplementedError crash trước cả khi có solution. (fix bug #17)
+            continue
 
         elif kind == "if_then":
-            raise NotImplementedError(
-                f"if_then registry chưa implement an toàn: {spec.get('id')}"
-            )
+            # Tương tự subject_consecutive: condition phụ thuộc vào nghiệm,
+            # check ở post-solve thay vì gài cứng vào model. (fix bug #17)
+            continue
 
         elif kind == "custom_dsl":
-            # <<< AI_FILL_HERE >>>
-            pass
+            # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
+            # custom_dsl specs (không lặp lại per-spec). (fix bug #5)
+            continue
 
         else:
-            raise NotImplementedError(f"Unsupported constraint kind: {kind}")
+            # Skip thay vì raise để repair LLM có thể vẫn chạy. Validator sẽ
+            # ghi nhận violation và force repair.
+            continue
+
+    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
+    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
+    # nên để generated code tự quyết định no-op khi không có custom hard specs.
+    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
+    # <<< AI_FILL_HERE >>>
+    pass
 
 
 build_custom_constraints(model, slots, data)
 
 solver = cp_model.CpSolver()
-solver.parameters.max_time_in_seconds = 60.0
+# Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
+# timeoutMs phía Node (fix bug #29).
+import os as _os
+try:
+    _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
+except Exception:
+    _max_seconds = 60.0
+solver.parameters.max_time_in_seconds = _max_seconds
 status = solver.Solve(model)
 
 result = {

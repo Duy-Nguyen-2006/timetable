@@ -22,13 +22,28 @@ export function injectConstraintCode(
 
   const baseIndent = markerMatch[0].match(/^[ \t]*/)?.[0] ?? '';
   const normalized = constraintCode.replace(/\r\n/g, '\n').replace(/\t/g, '    ');
-  const indented = normalized
-    .split('\n')
-    .map((line) => (line.trim().length ? `${baseIndent}${line.trimEnd()}` : ''))
+  // Detect minimum non-empty leading indent of source to strip it uniformly,
+  // preserving ALL relative nested indentation (fix bug #4).
+  const sourceLines = normalized.split('\n');
+  let minLeading = Infinity;
+  for (const line of sourceLines) {
+    if (!line.trim().length) continue;
+    const leading = (line.match(/^[ \t]*/)?.[0] ?? '').length;
+    if (leading < minLeading) minLeading = leading;
+  }
+  if (!Number.isFinite(minLeading)) minLeading = 0;
+  const indented = sourceLines
+    .map((line) => {
+      if (!line.trim().length) return '';
+      const stripped = line.slice(minLeading);
+      return `${baseIndent}${stripped.replace(/\s+$/, '')}`;
+    })
     .join('\n');
 
+  // Use function form of replace to avoid '$1', '$', '$$' etc being treated
+  // as special replacement patterns in the generated code (fix bug #3).
   return {
-    solverCode: skeleton.replace(MARKER_LINE, indented),
+    solverCode: skeleton.replace(MARKER_LINE, () => indented),
     injected: true,
   };
 }

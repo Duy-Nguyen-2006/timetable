@@ -114,32 +114,62 @@ export function applyRepairPatches(
   source: string,
   patches: RepairTurnResult['patches']
 ): string {
-  // 1) Validate TẤT CẢ patches trên source GỐC trước khi apply bất kỳ patch nào (atomic).
-  const plan: Array<{ index: number; patch: typeof patches[0] }> = [];
+  // Atomic apply thật sự (fix bug #8):
+  //   1) Validate TẤT CẢ patches trên source GỐC: tìm vị trí và kiểm duplicate.
+  //   2) Sort theo vị trí tăng dần, kiểm tra KHÔNG overlap.
+  //   3) Stitch ra string mới bằng slice + concat — mỗi patch gắn 1 lần
+  //      đúng tại vị trí nó đã được validate, tránh trường hợp patch trước
+  //      làm oldStr của patch sau xuất hiện nhiều hơn.
+  const plan: Array<{ start: number; end: number; patch: typeof patches[0]; allOccurrences?: number[] }> = [];
   for (const patch of patches) {
     if (!patch.oldStr) continue;
-    const occurrences = source.split(patch.oldStr).length - 1;
-    if (occurrences === 0) {
+    const occurrences: number[] = [];
+    let from = 0;
+    while (from <= source.length) {
+      const idx = source.indexOf(patch.oldStr, from);
+      if (idx === -1) break;
+      occurrences.push(idx);
+      from = idx + Math.max(1, patch.oldStr.length);
+    }
+    if (occurrences.length === 0) {
       throw new Error(
         `Repair patch oldStr not found in source. Preview: ${patch.oldStr.slice(0, 120)}`
       );
     }
-    if (occurrences > 1 && !patch.replaceAll) {
+    if (occurrences.length > 1 && !patch.replaceAll) {
       throw new Error(
-        `Repair patch ambiguous: oldStr xuất hiện ${occurrences} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
+        `Repair patch ambiguous: oldStr xuất hiện ${occurrences.length} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
       );
     }
-    plan.push({ index: source.indexOf(patch.oldStr), patch });
+    if (patch.replaceAll) {
+      for (const idx of occurrences) {
+        plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
+      }
+    } else {
+      const idx = occurrences[0];
+      plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
+    }
   }
 
-  // 2) Apply theo thứ tự xuất hiện trong source (tránh overlap).
-  plan.sort((a, b) => a.index - b.index);
+  plan.sort((a, b) => a.start - b.start);
 
-  let updated = source;
-  for (const { patch } of plan) {
-    updated = patch.replaceAll
-      ? updated.split(patch.oldStr).join(patch.newStr)
-      : updated.replace(patch.oldStr, patch.newStr);
+  // Detect overlap.
+  for (let i = 1; i < plan.length; i += 1) {
+    if (plan[i].start < plan[i - 1].end) {
+      throw new Error(
+        `Repair patches overlap at offset ${plan[i].start}. Tránh đề các patch chồng nhau.`
+      );
+    }
   }
-  return updated;
+
+  // Stitch.
+  let cursor = 0;
+  const out: string[] = [];
+  for (const segment of plan) {
+    out.push(source.slice(cursor, segment.start));
+    out.push(segment.patch.newStr);
+    cursor = segment.end;
+  }
+  out.push(source.slice(cursor));
+  return out.join('');
 }
