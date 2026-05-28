@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 360
 MAX_STDOUT_LINES = 100
 
 

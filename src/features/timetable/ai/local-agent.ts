@@ -120,7 +120,7 @@ export async function runLocalAgent(
   input: AgentInputPayload,
   config: LocalAgentConfig
 ): Promise<RunLocalAgentResult> {
-  const timeoutMs = config.timeoutMs ?? 180_000;
+  const timeoutMs = config.timeoutMs ?? 360_000;
   const startedAt = Date.now();
   const deadlineAt = startedAt + timeoutMs;
   const budget = new TokenBudgetGuard(TOKEN_CAP_PER_RUN);

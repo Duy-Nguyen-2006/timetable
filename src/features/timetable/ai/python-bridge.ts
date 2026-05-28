@@ -22,7 +22,7 @@ export async function executeGeneratedCode(
   input: unknown,
   options: PythonBridgeOptions = {}
 ): Promise<ExecutionResult> {
-  const timeout = options.timeoutMs ?? 180_000;
+  const timeout = options.timeoutMs ?? 360_000;
 
   // In production this will be an IPC call to the main process
   // which actually spawns the bundled binary.

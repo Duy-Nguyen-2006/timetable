@@ -134,7 +134,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ExecutePayload;
     const code = String(body.code ?? '');
-    const timeoutMs = Number(body.timeoutMs ?? 180_000);
+    const timeoutMs = Number(body.timeoutMs ?? 360_000);
 
     if (!code.trim()) {
       return NextResponse.json({ ok: false, error: 'Missing python code.' }, { status: 400 });
