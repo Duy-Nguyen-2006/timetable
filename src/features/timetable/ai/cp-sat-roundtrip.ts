@@ -20,19 +20,38 @@ export function verifyCpSatRoundTrip(
     periods?: number[];
   }
 ): RoundTripResult {
-  const assignmentKeys = new Set(
-    assignments.map((assignment) => `${assignment.class}::${assignment.subject}::${assignment.teacher}`)
-  );
+  const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
   const validDays = new Set((domain?.days ?? []).map((day) => String(day)));
   const validPeriods = new Set((domain?.periods ?? []).map((period) => Number(period)));
   const periodsByDay = domain?.periodsByDay ?? {};
 
   for (const entry of schedule) {
-    const assignmentKey = `${entry.class}::${entry.subject}::${entry.teacher}`;
-    if (!assignmentKeys.has(assignmentKey)) {
+    const assignmentId = entry.assignmentId ? String(entry.assignmentId) : '';
+
+    if (!assignmentId) {
       return {
         ok: false,
-        message: `Round-trip unknown assignment tuple: ${assignmentKey}`,
+        message: `Round-trip missing assignmentId for ${entry.class}/${entry.subject}/${entry.teacher}`,
+      };
+    }
+
+    const assignment = assignmentById.get(assignmentId);
+
+    if (!assignment) {
+      return {
+        ok: false,
+        message: `Round-trip unknown assignmentId: ${assignmentId}`,
+      };
+    }
+
+    if (
+      entry.class !== assignment.class ||
+      entry.subject !== assignment.subject ||
+      entry.teacher !== assignment.teacher
+    ) {
+      return {
+        ok: false,
+        message: `Round-trip assignment tuple mismatch for ${assignmentId}`,
       };
     }
 
@@ -55,6 +74,19 @@ export function verifyCpSatRoundTrip(
       return {
         ok: false,
         message: `Round-trip invalid period: ${entry.period}`,
+      };
+    }
+  }
+
+  for (const assignment of assignments) {
+    const count = schedule.filter(
+      (entry) => String(entry.assignmentId ?? '') === assignment.id
+    ).length;
+
+    if (count !== assignment.weeklyPeriods) {
+      return {
+        ok: false,
+        message: `Round-trip weekly mismatch for ${assignment.id}: expected ${assignment.weeklyPeriods}, got ${count}`,
       };
     }
   }

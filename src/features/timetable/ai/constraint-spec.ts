@@ -51,6 +51,7 @@ export type Plan = {
 };
 
 export type ScheduleEntry = {
+  assignmentId?: string;
   class: string;
   day: string;
   period: number | string;

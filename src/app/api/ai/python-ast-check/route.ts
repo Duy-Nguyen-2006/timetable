@@ -9,12 +9,13 @@ type CheckPayload = {
 };
 
 const CHECKER_SCRIPT = `
-import ast, json, sys
-FORBIDDEN_NAMES = {"open", "exec", "eval", "__import__", "compile", "input", "breakpoint", "globals", "locals", "vars"}
+import ast, json, sys, textwrap
+FORBIDDEN_NAMES = {"open", "exec", "eval", "__import__", "compile", "input", "breakpoint", "globals", "locals", "vars", "print"}
 FORBIDDEN_ATTRS = {"__import__", "__builtins__", "__class__", "__bases__", "__subclasses__", "__mro__"}
 
 try:
-    tree = ast.parse(sys.stdin.read())
+    source = textwrap.dedent(sys.stdin.read())
+    tree = ast.parse(source)
 except SyntaxError as exc:
     print(json.dumps({"ok": False, "error": f"SyntaxError: {exc}"}))
     sys.exit(0)

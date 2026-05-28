@@ -171,6 +171,7 @@ export async function runLocalAgent(
     let previousViolationSignature = '';
     let repeatedViolationCount = 0;
     let latestConstraintCode = '';
+    let latestCoveredConstraintIds = new Set<string>();
     let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string }> | null = null;
 
     while (true) {
@@ -242,6 +243,7 @@ export async function runLocalAgent(
             coder.rawResponse ?? ''
           );
           latestConstraintCode = coder.constraint_code;
+          latestCoveredConstraintIds = new Set(coder.covered_constraint_ids);
           emit(config, { type: 'stage_completed', stage: 'coder', attempt, message: 'Coder output received' });
         }
 
@@ -260,7 +262,9 @@ export async function runLocalAgent(
           continue;
         }
 
-        const astCheck = await astCheckPython(injected.solverCode);
+        const astCheck = latestConstraintCode.trim()
+          ? await astCheckPython(latestConstraintCode)
+          : { ok: true };
         if (!astCheck.ok) {
           previousAttemptSummary = digestError(astCheck.error || 'AST check rejected the generated code.');
           board.setErrorDigest(previousAttemptSummary);
@@ -326,7 +330,16 @@ export async function runLocalAgent(
           periods: compressed.periods,
         });
 
-        if (report.hardConstraintPass && report.baseConstraintPass && roundTrip.ok) {
+        const hardUncheckedIds = report.uncheckedConstraintIds.filter((id) => {
+          const spec = translator.constraintSpecs.find((item) => item.id === id);
+          return spec?.severity === 'hard';
+        });
+
+        const uncoveredHardUncheckedIds = hardUncheckedIds.filter(
+          (id) => !latestCoveredConstraintIds.has(id)
+        );
+
+        if (report.hardConstraintPass && report.baseConstraintPass && roundTrip.ok && uncoveredHardUncheckedIds.length === 0) {
           const finalResult = {
             ...execResult.resultData,
             status: 'solved' as const,
@@ -393,6 +406,17 @@ export async function runLocalAgent(
       const sampleMessages = lastReport.hardViolations.slice(0, 3).map((violation) => violation.message);
       if (!lastRoundTrip.ok) {
         sampleMessages.unshift(lastRoundTrip.message);
+      }
+
+      const uncoveredHardUncheckedIds = lastReport.uncheckedConstraintIds.filter((id) => {
+        const spec = translator.constraintSpecs.find((item) => item.id === id);
+        return spec?.severity === 'hard' && !latestCoveredConstraintIds.has(id);
+      });
+
+      if (uncoveredHardUncheckedIds.length > 0) {
+        sampleMessages.unshift(
+          `Hard constraints chưa được AI custom code cover: ${uncoveredHardUncheckedIds.join(', ')}`
+        );
       }
 
       const violationSignature = buildViolationSignature(
