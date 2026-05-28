@@ -45,9 +45,9 @@ patches: Array<{
 
 target_constraint_id: string,    // id ConstraintSpec bị sửa, hoặc "global" cho helper
 
-old_string: string,              // đoạn code hiện tại CẦN thay (phải UNIQUE trong currentCode)
+oldStr: string,                  // đoạn code hiện tại CẦN thay (phải UNIQUE trong currentCode)
 
-new_string: string,              // đoạn code thay thế
+newStr: string,                  // đoạn code thay thế
 
 reason: string                   // 1 câu giải thích sửa gì
 
@@ -60,7 +60,7 @@ unchanged_constraint_ids: string[] // các id KHÔNG cần sửa
 ```
 
 ## Quy tắc
-1. `old_string` phải xuất hiện đúng 1 lần trong `currentCode`. Nếu không, mở rộng context để unique.
+1. `oldStr` phải xuất hiện đúng 1 lần trong `currentCode`. Nếu không, mở rộng context để unique.
 2. Tối thiểu hóa diff — chỉ sửa đúng phần liên quan đến violation.
 3. Nếu lỗi nằm ở helper `_bind_condition` / `_add_implied`, dùng `target_constraint_id: "global"`.
 4. KHÔNG xuất full code. KHÔNG đề xuất rewrite hàm.

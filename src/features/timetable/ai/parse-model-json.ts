@@ -43,11 +43,78 @@ function extractFirstJsonObject(raw: string): string | null {
   return null;
 }
 
+function escapeControlCharsInStrings(raw: string): string {
+  let inString = false;
+  let escaped = false;
+  let changed = false;
+  let repaired = '';
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+
+    if (inString) {
+      if (escaped) {
+        repaired += char;
+        escaped = false;
+        continue;
+      }
+
+      if (char === '\\') {
+        repaired += char;
+        escaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        repaired += char;
+        inString = false;
+        continue;
+      }
+
+      if (char === '\n') {
+        repaired += '\\n';
+        changed = true;
+        continue;
+      }
+
+      if (char === '\r') {
+        repaired += '\\r';
+        changed = true;
+        continue;
+      }
+
+      if (char === '\t') {
+        repaired += '\\t';
+        changed = true;
+        continue;
+      }
+
+      if (char.charCodeAt(0) < 0x20) {
+        repaired += `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
+        changed = true;
+        continue;
+      }
+
+      repaired += char;
+      continue;
+    }
+
+    if (char === '"') inString = true;
+    repaired += char;
+  }
+
+  return changed ? repaired : raw;
+}
+
 export function parseModelJson(content: string | undefined): unknown {
   const raw = stripCodeFence(content ?? '{}');
   const candidates = [raw];
   const extracted = extractFirstJsonObject(raw);
   if (extracted && extracted !== raw) candidates.push(extracted);
+  const repaired = candidates
+    .map((candidate) => escapeControlCharsInStrings(candidate))
+    .filter((candidate, index, list) => candidate !== candidates[index] && list.indexOf(candidate) === index);
+  candidates.push(...repaired);
 
   for (const candidate of candidates) {
     try {

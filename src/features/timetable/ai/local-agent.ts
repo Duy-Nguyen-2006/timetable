@@ -90,6 +90,32 @@ function normalizeRoundTripMessage(message: string): string {
     .trim();
 }
 
+function buildCoderExhaustedMessage(lastFailureSummary: string): string {
+  const detail = lastFailureSummary.trim();
+  if (!detail) return 'Coder could not produce an executable schedule.';
+  return `Coder could not produce an executable schedule. Last failure: ${detail}`;
+}
+
+function buildRepeatedViolationMessage(sampleMessages: string[]): string {
+  const detail = sampleMessages.filter(Boolean).slice(0, 3).join(' | ');
+  if (!detail) {
+    return 'Không tạo được thời khóa biểu sau khi agent sửa lặp lại cùng một lỗi.';
+  }
+  return `Không tạo được thời khóa biểu sau khi agent sửa lặp lại cùng một lỗi: ${detail}`;
+}
+
+function shouldRepairExecutableFailure(
+  latestConstraintCode: string,
+  lastFailureSummary: string,
+  repairRound: number
+): boolean {
+  return Boolean(
+    latestConstraintCode.trim() &&
+    lastFailureSummary.trim() &&
+    repairRound < MAX_REPAIR_ROUNDS
+  );
+}
+
 export async function runLocalAgent(
   input: AgentInputPayload,
   config: LocalAgentConfig
@@ -174,11 +200,26 @@ export async function runLocalAgent(
           });
         } else {
           emit(config, { type: 'stage_started', stage: 'coder', attempt, message: 'Coder started' });
-          const coder = await runCoderTurn(pickStageConfig(config, 'coder'), {
-            dataset: compressed,
-            plan: planner.plan,
-            previousAttemptSummary,
-          });
+          let coder: Awaited<ReturnType<typeof runCoderTurn>>;
+          try {
+            coder = await runCoderTurn(pickStageConfig(config, 'coder'), {
+              dataset: compressed,
+              plan: planner.plan,
+              previousAttemptSummary,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Coder returned an invalid model response.';
+            previousAttemptSummary = digestError(message);
+            board.setErrorDigest(previousAttemptSummary);
+            totalToolCalls += 1;
+            coderRetry += 1;
+            emit(config, {
+              type: 'error',
+              message: `Coder attempt ${attempt} failed: ${previousAttemptSummary}`,
+              fatal: false,
+            });
+            continue;
+          }
           totalToolCalls += 1;
           consumeBudget(
             budget,
@@ -217,7 +258,22 @@ export async function runLocalAgent(
           constraints: solverConstraintSpecs,
         };
 
-        const execResult = await executeGeneratedCode(injected.solverCode, executePayload, { timeoutMs });
+        let execResult: Awaited<ReturnType<typeof executeGeneratedCode>>;
+        try {
+          execResult = await executeGeneratedCode(injected.solverCode, executePayload, { timeoutMs });
+        } catch (error) {
+          previousAttemptSummary = digestError(
+            error instanceof Error ? error.message : 'Solver execution failed.'
+          );
+          board.setErrorDigest(previousAttemptSummary);
+          coderRetry += 1;
+          emit(config, {
+            type: 'error',
+            message: `Solver execution attempt ${attempt} failed: ${previousAttemptSummary}`,
+            fatal: false,
+          });
+          continue;
+        }
         totalToolCalls += 1;
         emit(config, { type: 'execution_result', attempt, result: execResult });
 
@@ -268,10 +324,48 @@ export async function runLocalAgent(
       }
 
       if (!lastReport || !lastRoundTrip) {
+        if (shouldRepairExecutableFailure(latestConstraintCode, previousAttemptSummary, repairRound)) {
+          if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+            throw new Error(`Stopped by MAX_TOTAL_TOOL_CALLS=${MAX_TOTAL_TOOL_CALLS}.`);
+          }
+
+          repairRound += 1;
+          emit(config, {
+            type: 'phase',
+            phase: 'fixing',
+            message: `Đang repair lỗi chạy code ${repairRound}/${MAX_REPAIR_ROUNDS}`,
+            iteration: repairRound,
+          });
+
+          const repair = await runRepairTurn(pickStageConfig(config, 'repair'), {
+            plan: planner.plan,
+            constraintCode: latestConstraintCode,
+            violations: [],
+            compileOrRunError: previousAttemptSummary,
+          });
+          totalToolCalls += 1;
+          consumeBudget(budget, repair.usageTokens, previousAttemptSummary, repair.rawResponse ?? '');
+
+          if (!repair.patches.length) {
+            return {
+              success: false,
+              error: buildCoderExhaustedMessage(previousAttemptSummary),
+            };
+          }
+
+          pendingRepairPatches = repair.patches;
+          continue;
+        }
+
         return {
           success: false,
-          error: 'Coder gave up before producing an executable schedule.',
+          error: buildCoderExhaustedMessage(previousAttemptSummary),
         };
+      }
+
+      const sampleMessages = lastReport.hardViolations.slice(0, 3).map((violation) => violation.message);
+      if (!lastRoundTrip.ok) {
+        sampleMessages.unshift(lastRoundTrip.message);
       }
 
       const violationSignature = buildViolationSignature(
@@ -289,13 +383,12 @@ export async function runLocalAgent(
         repeatedViolationCount = 1;
       }
       if (repeatedViolationCount >= 2) {
-        throw new Error('Stopped early: stuck detection triggered (same hard violations repeated).');
+        return {
+          success: false,
+          error: buildRepeatedViolationMessage(sampleMessages),
+        };
       }
 
-      const sampleMessages = lastReport.hardViolations.slice(0, 3).map((violation) => violation.message);
-      if (!lastRoundTrip.ok) {
-        sampleMessages.unshift(lastRoundTrip.message);
-      }
       emit(config, {
         type: 'violations_found',
         count: lastReport.hardViolations.length,
@@ -338,5 +431,8 @@ export async function runLocalAgent(
 
 export const __localAgentInternal = {
   buildViolationSignature,
+  buildCoderExhaustedMessage,
+  buildRepeatedViolationMessage,
   normalizeRoundTripMessage,
+  shouldRepairExecutableFailure,
 };

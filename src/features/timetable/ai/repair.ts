@@ -64,6 +64,7 @@ export async function runRepairTurn(
         role: 'user',
         content: JSON.stringify({
           plan: payload.plan,
+          currentCode: payload.constraintCode,
           constraintCode: payload.constraintCode,
           violations: payload.violations.map((violation) => ({
             constraintId: violation.constraintId,

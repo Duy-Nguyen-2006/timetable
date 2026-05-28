@@ -22,6 +22,22 @@ test('parseModelJson throws on truncated unterminated JSON', () => {
   assert.throws(() => parseModelJson('{"status":"broken","message":"unterminated'), /Invalid JSON/);
 });
 
+test('parseModelJson repairs raw newlines inside JSON string values', () => {
+  const value = parseModelJson(
+    '{"plan_summary":"I map constraints by slots[(assignment_id, day,\n  period)]","constraint_code":"pass","covered_constraint_ids":["c1"],"assumptions":[]}'
+  ) as {
+    plan_summary: string;
+    constraint_code: string;
+    covered_constraint_ids: string[];
+    assumptions: string[];
+  };
+
+  assert.equal(value.plan_summary, 'I map constraints by slots[(assignment_id, day,\n  period)]');
+  assert.equal(value.constraint_code, 'pass');
+  assert.deepEqual(value.covered_constraint_ids, ['c1']);
+  assert.deepEqual(value.assumptions, []);
+});
+
 test('extractFirstJsonObject handles braces inside string values', () => {
   const raw = 'prefix {"message":"hello {world}","ok":true} suffix';
   const extracted = __parseModelJsonInternal.extractFirstJsonObject(raw);

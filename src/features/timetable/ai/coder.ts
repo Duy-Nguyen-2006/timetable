@@ -114,7 +114,7 @@ export async function runCoderTurn(
       },
     ],
     temperature: 0.1,
-    max_tokens: 3500,
+    max_tokens: 30000,
     cache_control: { enable: true },
     response_format: {
       type: 'json_schema',

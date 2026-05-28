@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import { __chatInternal } from './route';
 
@@ -13,9 +13,9 @@ test('anthropic models receive cache headers and message cache_control', () => {
     { role: 'assistant' as const, content: 'a' },
   ];
   const mapped = __chatInternal.applyProviderSpecificCaching('anthropic/claude-3.5-sonnet', messages, true);
-  assert.equal((mapped[0] as any).cache_control?.type, 'ephemeral');
-  assert.equal((mapped[1] as any).cache_control?.type, 'ephemeral');
-  assert.equal((mapped[2] as any).cache_control, undefined);
+  assert.equal((mapped[0] as { cache_control?: { type: string } }).cache_control?.type, 'ephemeral');
+  assert.equal((mapped[1] as { cache_control?: { type: string } }).cache_control?.type, 'ephemeral');
+  assert.equal((mapped[2] as { cache_control?: { type: string } }).cache_control, undefined);
 });
 
 test('openai models do not receive anthropic cache metadata', () => {
@@ -24,7 +24,7 @@ test('openai models do not receive anthropic cache metadata', () => {
 
   const messages = [{ role: 'user' as const, content: 'u' }];
   const mapped = __chatInternal.applyProviderSpecificCaching('openai/gpt-4.1', messages, true);
-  assert.equal((mapped[0] as any).cache_control, undefined);
+  assert.equal((mapped[0] as { cache_control?: { type: string } }).cache_control, undefined);
 });
 
 test('deepseek models do not receive anthropic cache metadata', () => {
@@ -33,5 +33,52 @@ test('deepseek models do not receive anthropic cache metadata', () => {
 
   const messages = [{ role: 'user' as const, content: 'u' }];
   const mapped = __chatInternal.applyProviderSpecificCaching('deepseek/deepseek-chat', messages, true);
-  assert.equal((mapped[0] as any).cache_control, undefined);
+  assert.equal((mapped[0] as { cache_control?: { type: string } }).cache_control, undefined);
+});
+
+test('parseProviderResponse parses normal JSON chat completion', () => {
+  const parsed = __chatInternal.parseProviderResponse(
+    JSON.stringify({
+      id: 'cmpl_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: '{"ok":true}' },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+    })
+  );
+
+  assert.equal(parsed.content, '{"ok":true}');
+  assert.deepEqual(parsed.usage, { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 });
+});
+
+test('parseProviderResponse parses SSE data payload', () => {
+  const parsed = __chatInternal.parseProviderResponse(
+    [
+      'data: {"id":"cmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"{\\"a\\":"}}]}',
+      'data: {"id":"cmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"1}"}}]}',
+      'data: {"id":"cmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"total_tokens":12}}',
+      'data: [DONE]',
+    ].join('\n')
+  );
+
+  assert.equal(parsed.content, '{"a":1}');
+  assert.deepEqual(parsed.usage, { total_tokens: 12 });
+});
+
+test('parseProviderResponse throws provider error from SSE event', () => {
+  assert.throws(
+    () =>
+      __chatInternal.parseProviderResponse(
+        [
+          'data: {"id":"cmpl_1","object":"chat.completion.chunk","error":{"message":"Provider disconnected"}}',
+          'data: [DONE]',
+        ].join('\n')
+      ),
+    /Provider disconnected/
+  );
 });
