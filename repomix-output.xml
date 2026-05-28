@@ -12706,6 +12706,66 @@ AI-assisted timetable generator built with Next.js + React + TypeScript, with lo
 - Keep provider/API keys out of source files and docs.
 </file>
 
+<file path=".gitignore">
+# Dependencies
+node_modules/
+.python-version
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+.next/
+dist/
+build/
+target/
+release/
+*.tsbuildinfo
+
+# Runtime artifacts
+.ai_results/
+
+# Next.js generated files
+next-env.d.ts
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+.mypy_cache/
+</file>
+
 <file path="src/features/timetable/ai/coder.ts">
 import { z } from 'zod';
 
@@ -13375,66 +13435,6 @@ export const __localAgentInternal = {
   normalizeRoundTripMessage,
   shouldRepairExecutableFailure,
 };
-</file>
-
-<file path=".gitignore">
-# Dependencies
-node_modules/
-.python-version
-.venv/
-venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Build artifacts
-.next/
-dist/
-build/
-target/
-release/
-*.tsbuildinfo
-
-# Runtime artifacts
-.ai_results/
-
-# Next.js generated files
-next-env.d.ts
-
-# Logs
-*.log
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.pytest_cache/
-.mypy_cache/
 </file>
 
 <file path="datasets.txt">
