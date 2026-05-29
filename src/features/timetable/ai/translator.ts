@@ -5,9 +5,9 @@ import { parseConstraint } from '@/lib/constraint-parser';
 import type { ConstraintSpec } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
-import { invokeChat } from './chat-client';
+import { invokeChat, type ChatPayload } from './chat-client';
 
-type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
+type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
 
 const constraintSpecSchema = z.object({
   id: z.string(),
@@ -36,7 +36,7 @@ const translatorResponseSchema = z.object({
   constraintSpecs: z.array(constraintSpecSchema),
 });
 
-const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
+const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
 
 function includesLabel(text: string, label: string): boolean {
   return text.toLocaleLowerCase('vi').includes(label.toLocaleLowerCase('vi'));
@@ -136,6 +136,17 @@ function buildTranslatorPeriodsByDay(input: AgentInputPayload): Record<string, n
   return periodsByDay;
 }
 
+function periodsForSession(input: AgentInputPayload, sessionId: string): number[] {
+  let offset = 0;
+  for (const session of input.sessions) {
+    const count = Number(input.periodCounts[session.id] ?? 0);
+    const periods = Array.from({ length: Math.max(0, count) }, (_, index) => offset + index + 1);
+    if (session.id === sessionId) return periods;
+    offset += count;
+  }
+  return [];
+}
+
 function splitFallbackConstraintText(text: string): string[] {
   if (/(nếu|neu)[\s\S]*(thì|thi)/iu.test(text)) {
     return [text.trim()].filter(Boolean);
@@ -184,7 +195,7 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   let nextId = 1;
   return input.constraints.flatMap((rawConstraint) => {
     const clauses = splitFallbackConstraintText(rawConstraint.text);
-    return clauses.map((clause) => {
+    return clauses.flatMap<ConstraintSpec>((clause) => {
       const constraint = { ...rawConstraint, text: clause };
       const id = `c${nextId++}`;
       const parsed = parseConstraint(constraint.text, {
@@ -292,6 +303,56 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       } satisfies ConstraintSpec;
     }
 
+    if (parsed.kind === 'teacher_block_session_day' && parsed.teacherLabels[0] && parsed.sessionIds[0]) {
+      const day = parsed.dayIds[0];
+      return periodsForSession(input, parsed.sessionIds[0]).map((period) => ({
+        id,
+        original: constraint.text,
+        severity,
+        kind: day ? 'teacher_block_slot' : 'teacher_block_period',
+        params: day
+          ? { teacher: parsed.teacherLabels[0], day, period }
+          : { teacher: parsed.teacherLabels[0], period },
+      }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'teacher_block_sessions' && parsed.teacherLabels[0] && parsed.sessionIds[0]) {
+      return periodsForSession(input, parsed.sessionIds[0]).map((period) => ({
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_block_period',
+        params: { teacher: parsed.teacherLabels[0], period },
+      }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'teacher_allow_only_days' && parsed.teacherLabels[0] && parsed.dayIds.length > 0) {
+      const allowedDays = new Set(parsed.dayIds);
+      return input.days
+        .map((day) => day.id)
+        .filter((day) => !allowedDays.has(day))
+        .map((day) => ({
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_block_day',
+          params: { teacher: parsed.teacherLabels[0], day },
+        }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'teacher_allow_only_sessions' && parsed.teacherLabels[0] && parsed.sessionIds.length > 0) {
+      const allowedPeriods = new Set(parsed.sessionIds.flatMap((sessionId) => periodsForSession(input, sessionId)));
+      return buildTranslatorPeriods(input)
+        .filter((period) => !allowedPeriods.has(period))
+        .map((period) => ({
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_block_period',
+          params: { teacher: parsed.teacherLabels[0], period },
+        }) satisfies ConstraintSpec);
+    }
+
     if (parsed.kind === 'teacher_max_consecutive') {
       const teacher = parsed.teacherLabels === '*' ? '' : parsed.teacherLabels[0];
       if (teacher) {
@@ -318,6 +379,43 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           ...(classes.length ? { classes } : {}),
         },
       } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'subject_block_periods' && parsed.subjectLabels[0] && parsed.periods.length > 0) {
+      const blockedPeriods = new Set(parsed.periods);
+      const allowedPeriods = buildTranslatorPeriods(input).filter((period) => !blockedPeriods.has(period));
+      if (allowedPeriods.length > 0) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'subject_pin_period',
+          params: {
+            subject: parsed.subjectLabels[0],
+            periods: allowedPeriods,
+            ...(classes.length ? { classes } : {}),
+          },
+        } satisfies ConstraintSpec;
+      }
+    }
+
+    if (parsed.kind === 'subject_only_sessions' && parsed.subjectLabels[0] && parsed.sessionIds.length > 0) {
+      const allowedPeriods = parsed.sessionIds.flatMap((sessionId) => periodsForSession(input, sessionId));
+      if (allowedPeriods.length > 0) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'subject_pin_period',
+          params: {
+            subject: parsed.subjectLabels[0],
+            periods: allowedPeriods,
+            ...(classes.length ? { classes } : {}),
+          },
+        } satisfies ConstraintSpec;
+      }
     }
 
     if (parsed.kind === 'subject_prefer_periods' && parsed.subjectLabels[0] && parsed.periods.length > 0) {
@@ -452,7 +550,7 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
   const validSubjects = new Set(input.assignments.map((assignment) => assignment.subject.label));
   const validDays = new Set(input.days.map((day) => day.id));
 
-  return specs.map((spec, index) => {
+  return specs.flatMap((spec, index) => {
     const base: ConstraintSpec = {
       ...spec,
       id: `c${index + 1}`,
@@ -468,6 +566,79 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
     const subject = typeof base.params.subject === 'string' ? base.params.subject : null;
     const day = typeof base.params.day === 'string' ? base.params.day : null;
     const weeklyPeriods = Number(base.params.weeklyPeriods ?? NaN);
+    const period = Number(base.params.period ?? NaN);
+
+    if (base.kind === 'custom_dsl' && base.original.trim()) {
+      const fallback = fallbackFromRuleParser({
+        ...input,
+        constraints: [
+          {
+            type: base.severity === 'hard' ? 'required' : 'preferred',
+            text: base.original,
+          },
+        ],
+      });
+      const reparsed = fallback.filter((item) => item.kind !== 'custom_dsl');
+
+      if (reparsed.length > 0) {
+        return reparsed.map((item, itemIndex) => ({
+          ...item,
+          id: reparsed.length === 1 ? base.id : `${base.id}_${itemIndex + 1}`,
+          original: base.original,
+          severity: base.severity,
+          tags: base.tags,
+        }));
+      }
+
+      if (fallback.length === 0) return [];
+    }
+
+    if (base.kind === 'teacher_block_day' && /(?:buổi|buoi|sáng|sang|chiều|chieu|tối|toi)/iu.test(base.original)) {
+      const reparsed = fallbackFromRuleParser({
+        ...input,
+        constraints: [
+          {
+            type: base.severity === 'hard' ? 'required' : 'preferred',
+            text: base.original,
+          },
+        ],
+      }).filter((item) => item.kind !== 'custom_dsl');
+
+      if (reparsed.length > 0) {
+        return reparsed.map((item, itemIndex) => ({
+          ...item,
+          id: reparsed.length === 1 ? base.id : `${base.id}_${itemIndex + 1}`,
+          original: base.original,
+          severity: base.severity,
+          tags: base.tags,
+        }));
+      }
+    }
+
+    if (
+      (base.kind === 'teacher_block_period' || base.kind === 'teacher_block_slot') &&
+      (!Number.isFinite(period) || period <= 0)
+    ) {
+      const reparsed = fallbackFromRuleParser({
+        ...input,
+        constraints: [
+          {
+            type: base.severity === 'hard' ? 'required' : 'preferred',
+            text: base.original,
+          },
+        ],
+      }).filter((item) => item.kind !== 'custom_dsl');
+
+      if (reparsed.length > 0) {
+        return reparsed.map((item, itemIndex) => ({
+          ...item,
+          id: reparsed.length === 1 ? base.id : `${base.id}_${itemIndex + 1}`,
+          original: base.original,
+          severity: base.severity,
+          tags: base.tags,
+        }));
+      }
+    }
 
     if (teacher && !validTeachers.has(teacher)) {
       return {

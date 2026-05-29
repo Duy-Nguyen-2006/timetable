@@ -76,11 +76,18 @@ notes?: string                // ghi chú edge case nếu có
 | `teacher_max_per_day` | "GV X tối đa N tiết/ngày" | `{ teacher: string, maxPerDay: number }` |
 | `teacher_max_consecutive` | "GV X tối đa N tiết liên tiếp" | `{ teacher: string, maxConsecutive: number }` |
 | `subject_pin_period` | "Môn X chỉ xếp tiết Y" | `{ subject: string, periods: number[], classes?: string[] }` |
-| `subject_consecutive` | "Môn X phải liên tiếp N tiết" | `{ subject: string, length: number, classes?: string[] }` |
+| `subject_consecutive` | "Môn X cần có block liên tiếp N tiết" | `{ subject: string, length: number, classes?: string[] }` |
 | `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" | `{ class: string, subject?: string }` |
 | `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
 | `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |
 | `custom_dsl` | Không khớp loại nào ở trên | `{ pythonPredicate: string, naturalLanguage: string }` |
+
+## Semantics bắt buộc cho `subject_consecutive` (Rule A)
+- `subject_consecutive` nghĩa là môn cần có các block liên tiếp độ dài `length`.
+- Với mỗi assignment/lớp match `subject` và `classes`, hệ thống yêu cầu `requiredRuns = floor(weeklyPeriods / length)` block liên tiếp.
+- Nếu `weeklyPeriods % length != 0`, phần dư ĐƯỢC phép xếp lẻ; không được tự thêm yêu cầu mọi tiết đều nằm trong block.
+- Ví dụ: Toán 3 tiết/tuần, `length=2` => 1 cặp liên tiếp + 1 tiết lẻ là hợp lệ; Văn 5 tiết/tuần, `length=2` => 2 cặp liên tiếp + 1 tiết lẻ là hợp lệ.
+- Không yêu cầu `weeklyPeriods` chia hết cho `length` và không báo lỗi chỉ vì có tiết lẻ.
 
 ## Cấu trúc `ConditionExpr` (cho `if_then`)
 ```

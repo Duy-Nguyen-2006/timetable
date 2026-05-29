@@ -197,6 +197,243 @@ test('fallback parser covers remaining constraint kinds', () => {
   assert.equal(specs[6].kind, 'if_then');
 });
 
+test('fallback parser expands teacher allow-only days into blocked days', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'monday', label: 'Thứ 2' },
+      { id: 'tuesday', label: 'Thứ 3' },
+      { id: 'wednesday', label: 'Thứ 4' },
+      { id: 'thursday', label: 'Thứ 5' },
+      { id: 'friday', label: 'Thứ 6' },
+    ],
+    constraints: [{ type: 'required', text: 'Sơn chỉ dạy thứ 3 4 5' }],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.deepEqual(
+    specs.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'teacher_block_day', params: { teacher: 'Sơn', day: 'monday' } },
+      { kind: 'teacher_block_day', params: { teacher: 'Sơn', day: 'friday' } },
+    ]
+  );
+});
+
+test('sanitize reparses model custom_dsl into built-ins when fallback parser understands it', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'monday', label: 'Thứ 2' },
+      { id: 'tuesday', label: 'Thứ 3' },
+      { id: 'wednesday', label: 'Thứ 4' },
+      { id: 'thursday', label: 'Thứ 5' },
+      { id: 'friday', label: 'Thứ 6' },
+    ],
+    constraints: [{ type: 'required', text: 'Sơn chỉ dạy thứ 3 4 5' }],
+  };
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'model_custom',
+      original: 'Sơn chỉ dạy thứ 3 4 5',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: { naturalLanguage: 'Sơn chỉ dạy thứ 3 4 5' },
+    },
+  ];
+
+  const result = __translatorInternal.sanitizeSpecs(input, specs);
+
+  assert.deepEqual(
+    result.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'teacher_block_day', params: { teacher: 'Sơn', day: 'monday' } },
+      { kind: 'teacher_block_day', params: { teacher: 'Sơn', day: 'friday' } },
+    ]
+  );
+});
+
+test('fallback parser handles teacher session constraints without custom_dsl', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'monday', label: 'Thứ 2' },
+      { id: 'tuesday', label: 'Thứ 3' },
+      { id: 'wednesday', label: 'Thứ 4' },
+      { id: 'thursday', label: 'Thứ 5' },
+      { id: 'friday', label: 'Thứ 6' },
+    ],
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 4, afternoon: 3 },
+    constraints: [
+      { type: 'required', text: 'Sơn không dạy chiều thứ 5' },
+      { type: 'required', text: 'Sơn chỉ dạy chiều' },
+    ],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.deepEqual(
+    specs.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'teacher_block_slot', params: { teacher: 'Sơn', day: 'thursday', period: 5 } },
+      { kind: 'teacher_block_slot', params: { teacher: 'Sơn', day: 'thursday', period: 6 } },
+      { kind: 'teacher_block_slot', params: { teacher: 'Sơn', day: 'thursday', period: 7 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 1 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 2 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 3 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 4 } },
+    ]
+  );
+});
+
+test('sanitize reparses invalid period specs from model output', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 4, afternoon: 3 },
+    constraints: [{ type: 'required', text: 'Sơn chỉ dạy chiều' }],
+  };
+  const result = __translatorInternal.sanitizeSpecs(input, [
+    {
+      id: 'c1',
+      original: 'Sơn chỉ dạy chiều',
+      severity: 'hard',
+      kind: 'teacher_block_period',
+      params: { teacher: 'Sơn', period: -1 },
+    },
+  ]);
+
+  assert.deepEqual(
+    result.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 1 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 2 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 3 } },
+      { kind: 'teacher_block_period', params: { teacher: 'Sơn', period: 4 } },
+    ]
+  );
+});
+
+test('sanitize reparses model day block when original targets a session day', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'monday', label: 'Thứ 2' },
+      { id: 'thursday', label: 'Thứ 5' },
+    ],
+    sessions: [{ id: 'afternoon', label: 'Chiều' }],
+    periodCounts: { afternoon: 3 },
+    constraints: [{ type: 'required', text: 'Sơn không dạy chiều thứ 5' }],
+  };
+
+  const result = __translatorInternal.sanitizeSpecs(input, [
+    {
+      id: 'c1',
+      original: 'Sơn không dạy chiều thứ 5',
+      severity: 'hard',
+      kind: 'teacher_block_day',
+      params: { teacher: 'Sơn', day: 'thursday' },
+    },
+  ]);
+
+  assert.deepEqual(
+    result.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'teacher_block_slot', params: { teacher: 'Sơn', day: 'thursday', period: 1 } },
+      { kind: 'teacher_block_slot', params: { teacher: 'Sơn', day: 'thursday', period: 2 } },
+      { kind: 'teacher_block_slot', params: { teacher: 'Sơn', day: 'thursday', period: 3 } },
+    ]
+  );
+});
+
+test('sanitize drops hard custom_dsl when allow-only session is already the whole dataset', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    sessions: [{ id: 'afternoon', label: 'Chiều' }],
+    periodCounts: { afternoon: 3 },
+    assignments: [
+      ...sampleInput.assignments,
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Dung' },
+        subject: { id: 's2', label: 'Văn' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 3,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Dung chỉ dạy chiều' }],
+  };
+
+  const result = __translatorInternal.sanitizeSpecs(input, [
+    {
+      id: 'c1',
+      original: 'Dung chỉ dạy chiều',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: { naturalLanguage: 'Dung chỉ dạy chiều' },
+    },
+  ]);
+
+  assert.deepEqual(result, []);
+});
+
+test('fallback parser handles subject session constraints without custom_dsl', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 4, afternoon: 3 },
+    constraints: [{ type: 'required', text: 'Toán buổi sáng' }],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.deepEqual(
+    specs.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'subject_pin_period', params: { subject: 'Toán', periods: [1, 2, 3, 4] } },
+    ]
+  );
+});
+
+test('fallback parser converts subject blocked periods into allowed periods', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    sessions: [{ id: 'morning', label: 'Sáng' }],
+    periodCounts: { morning: 4 },
+    constraints: [{ type: 'required', text: 'GDTC không xếp tiết 1' }],
+    assignments: [
+      ...sampleInput.assignments,
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Thủy' },
+        subject: { id: 's2', label: 'GDTC' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 2,
+      },
+    ],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.deepEqual(
+    specs.map((spec) => ({ kind: spec.kind, params: spec.params })),
+    [
+      { kind: 'subject_pin_period', params: { subject: 'GDTC', periods: [2, 3, 4] } },
+    ]
+  );
+});
+
 test('sanitize marks weekly_periods_exact as auto_base when assignmentId matches weeklyPeriods', () => {
   const specs: ConstraintSpec[] = [
     {
