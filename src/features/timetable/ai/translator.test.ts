@@ -479,3 +479,88 @@ test('sanitize infers assignmentId and marks auto_base when weekly spec is uniqu
   assert.equal(result[0].severity, 'info');
   assert.equal(result[0].tags?.includes('auto_base'), true);
 });
+
+
+test('fallback parser downgrades Dataset 7 base model constraints instead of custom_dsl', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'monday', label: 'Thứ 2' },
+      { id: 'tuesday', label: 'Thứ 3' },
+      { id: 'wednesday', label: 'Thứ 4' },
+      { id: 'thursday', label: 'Thứ 5' },
+      { id: 'friday', label: 'Thứ 6' },
+    ],
+    sessions: [{ id: 'morning', label: 'Sáng' }],
+    periodCounts: { morning: 4 },
+    assignments: [
+      sampleInput.assignments[0],
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Hương' },
+        subject: { id: 's2', label: 'Văn' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [
+      { type: 'required', text: 'Mỗi lớp có đúng 1 môn trong mỗi slot' },
+      { type: 'required', text: 'Mỗi giáo viên không được dạy quá 1 lớp trong cùng 1 slot' },
+      { type: 'required', text: 'Mỗi assignment phải xếp đúng số tiết/tuần' },
+      { type: 'required', text: 'Mỗi lớp không được học cùng 1 môn quá 1 tiết trong cùng 1 ngày' },
+    ],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.deepEqual(specs.map((spec) => spec.kind), [
+    'custom_dsl',
+    'custom_dsl',
+    'custom_dsl',
+    'class_no_double_subject_day',
+    'class_no_double_subject_day',
+  ]);
+  assert.deepEqual(specs.map((spec) => spec.severity), ['info', 'info', 'info', 'hard', 'hard']);
+  assert.equal(specs.some((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl'), false);
+  assert.equal(specs.slice(0, 3).every((spec) => spec.tags?.includes('auto_base')), true);
+  assert.deepEqual(
+    specs.slice(3).map((spec) => spec.params),
+    [
+      { class: '6A', subject: 'Toán' },
+      { class: '6A', subject: 'Văn' },
+    ]
+  );
+});
+
+test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', () => {
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'm1',
+      original: 'Mỗi lớp có đúng 1 môn trong mỗi slot',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: { naturalLanguage: 'Mỗi lớp có đúng 1 môn trong mỗi slot' },
+    },
+    {
+      id: 'm2',
+      original: 'Mỗi giáo viên không được dạy quá 1 lớp trong cùng 1 slot',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: { naturalLanguage: 'Mỗi giáo viên không được dạy quá 1 lớp trong cùng 1 slot' },
+    },
+    {
+      id: 'm3',
+      original: 'Mỗi assignment phải xếp đúng số tiết/tuần',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: { naturalLanguage: 'Mỗi assignment phải xếp đúng số tiết/tuần' },
+    },
+  ];
+
+  const result = __translatorInternal.sanitizeSpecs(sampleInput, specs);
+
+  assert.deepEqual(result.map((spec) => spec.severity), ['info', 'info', 'info']);
+  assert.equal(result.some((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl'), false);
+  assert.equal(result.every((spec) => spec.tags?.includes('auto_base')), true);
+});
+

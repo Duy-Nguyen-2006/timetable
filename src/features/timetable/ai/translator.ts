@@ -147,6 +147,68 @@ function periodsForSession(input: AgentInputPayload, sessionId: string): number[
   return [];
 }
 
+function normalizeConstraintText(text: string): string {
+  return text
+    .toLocaleLowerCase('vi')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isAutoBaseConstraintText(text: string): boolean {
+  const normalized = normalizeConstraintText(text);
+  const mentionsEvery = /\b(moi|tat ca|all|each)\b/u.test(normalized);
+  const mentionsSlot = /\b(slot|tiet|period)\b/u.test(normalized);
+
+  if (mentionsEvery && /\blop\b/u.test(normalized) && /\b(mon|mon hoc)\b/u.test(normalized) && mentionsSlot) {
+    return true;
+  }
+
+  if (
+    mentionsEvery &&
+    /\bgiao vien\b/u.test(normalized) &&
+    /\b(day|lop)\b/u.test(normalized) &&
+    /(qua 1|hon 1|toi da 1|1 lop)/u.test(normalized) &&
+    mentionsSlot
+  ) {
+    return true;
+  }
+
+  if (
+    mentionsEvery &&
+    /\bassignment\b/u.test(normalized) &&
+    /(dung|du|chinh xac|phai xep)/u.test(normalized) &&
+    /(so tiet|tiet\/tuan|tiet moi tuan)/u.test(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isGlobalClassNoDoubleSubjectDayText(text: string): boolean {
+  const normalized = normalizeConstraintText(text);
+  return (
+    /\b(moi|tat ca|all|each)\b/u.test(normalized) &&
+    /\blop\b/u.test(normalized) &&
+    /\bcung 1 mon\b/u.test(normalized) &&
+    /(qua 1|hon 1|toi da 1)/u.test(normalized) &&
+    /\bngay\b/u.test(normalized)
+  );
+}
+
+function markAutoBaseSpec(spec: ConstraintSpec): ConstraintSpec {
+  const tags = new Set(spec.tags ?? []);
+  tags.add('auto_base');
+  return {
+    ...spec,
+    severity: 'info',
+    tags: [...tags],
+  };
+}
+
 function splitFallbackConstraintText(text: string): string[] {
   if (/(nếu|neu)[\s\S]*(thì|thi)/iu.test(text)) {
     return [text.trim()].filter(Boolean);
@@ -468,6 +530,25 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
+    if (isGlobalClassNoDoubleSubjectDayText(constraint.text)) {
+      const classSubjectPairs = [
+        ...new Map(
+          input.assignments.map((assignment) => [
+            `${assignment.class.label}::${assignment.subject.label}`,
+            { class: assignment.class.label, subject: assignment.subject.label },
+          ])
+        ).values(),
+      ];
+
+      return classSubjectPairs.map((pair, pairIndex) => ({
+        id: classSubjectPairs.length === 1 ? id : `${id}_${pairIndex + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'class_no_double_subject_day',
+        params: pair,
+      }) satisfies ConstraintSpec);
+    }
+
     if (/(tối\s*đa|max).*(tiết|tiet).*(ngày|ngay)/u.test(constraint.text)) {
       const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
       const maxPerDay = extractFirstNumber(constraint.text);
@@ -530,7 +611,7 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
-    return {
+    const fallbackSpec = {
       id,
       original: constraint.text,
       severity,
@@ -540,6 +621,8 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       },
       notes: 'fallback_parser',
     } satisfies ConstraintSpec;
+
+    return isAutoBaseConstraintText(constraint.text) ? markAutoBaseSpec(fallbackSpec) : fallbackSpec;
     });
   });
 }
@@ -567,6 +650,10 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
     const day = typeof base.params.day === 'string' ? base.params.day : null;
     const weeklyPeriods = Number(base.params.weeklyPeriods ?? NaN);
     const period = Number(base.params.period ?? NaN);
+
+    if (base.kind === 'custom_dsl' && base.original.trim() && isAutoBaseConstraintText(base.original)) {
+      return markAutoBaseSpec(base);
+    }
 
     if (base.kind === 'custom_dsl' && base.original.trim()) {
       const fallback = fallbackFromRuleParser({
