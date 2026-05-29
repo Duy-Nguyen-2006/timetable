@@ -2,9 +2,24 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { runCoderTurn } from './coder';
+import type { ConstraintSpec, Plan } from './constraint-spec';
 
 // Helper: mock invokeChat
 const fakeChat = (content: string) => async () => ({ content, usage: { total_tokens: 100 } });
+
+const emptyPlan: Plan = {
+  decisionVars: '',
+  domainSize: { classes: 0, days: 0, periods: 0 },
+  constraintOrder: [],
+  reifiedNeeded: [],
+  objective: 'none',
+  templatesUsed: [],
+  risks: [],
+};
+
+function constraint(kind: ConstraintSpec['kind'], severity: ConstraintSpec['severity']): ConstraintSpec {
+  return { id: 'c1', original: '', severity, kind, params: {} };
+}
 
 test('runCoderTurn skips model when all constraints are built-in', async () => {
   let called = false;
@@ -14,12 +29,34 @@ test('runCoderTurn skips model when all constraints are built-in', async () => {
       dataset: {
         classes: [], days: [], periods: [], assignments: [],
         constraints: [
-          { id: 'c1', original: '', severity: 'hard', kind: 'subject_consecutive', params: {} } as any,
-          { id: 'c2', original: '', severity: 'hard', kind: 'if_then', params: {} } as any,
+          constraint('subject_consecutive', 'hard'),
+          { ...constraint('if_then', 'hard'), id: 'c2' },
         ],
         datasetDigest: { classCount: 0, teacherCount: 0, dayCount: 0, periodCount: 0, totalAssignments: 0 },
       },
-      plan: {} as any,
+      plan: emptyPlan,
+    },
+    async () => {
+      called = true;
+      return { content: '{}', usage: { total_tokens: 0 } };
+    }
+  );
+
+  assert.equal(called, false);
+  assert.equal(result.constraint_code, 'pass');
+});
+
+test('runCoderTurn skips model when custom_dsl constraints are not hard', async () => {
+  let called = false;
+  const result = await runCoderTurn(
+    { baseURL: '', apiKey: 'x', model: 'm' },
+    {
+      dataset: {
+        classes: [], days: [], periods: [], assignments: [],
+        constraints: [constraint('custom_dsl', 'soft')],
+        datasetDigest: { classCount: 0, teacherCount: 0, dayCount: 0, periodCount: 0, totalAssignments: 0 },
+      },
+      plan: emptyPlan,
     },
     async () => {
       called = true;
@@ -43,10 +80,10 @@ test('ensureCoverage - auto-patches when code mentions id but list is empty', as
     {
       dataset: {
         classes: [], days: [], periods: [], assignments: [],
-        constraints: [{ id: 'c1', original: '', severity: 'hard', kind: 'custom_dsl', params: {} } as any],
+        constraints: [constraint('custom_dsl', 'hard')],
         datasetDigest: { classCount: 0, teacherCount: 0, dayCount: 0, periodCount: 0, totalAssignments: 0 },
       },
-      plan: {} as any,
+      plan: emptyPlan,
     },
     fakeChat(response)
   );
@@ -67,10 +104,10 @@ test('ensureCoverage - throws when code has no evidence of handling id', async (
       {
         dataset: {
           classes: [], days: [], periods: [], assignments: [],
-          constraints: [{ id: 'c1', original: '', severity: 'hard', kind: 'custom_dsl', params: {} } as any],
+          constraints: [constraint('custom_dsl', 'hard')],
           datasetDigest: { classCount: 0, teacherCount: 0, dayCount: 0, periodCount: 0, totalAssignments: 0 },
         },
-        plan: {} as any,
+        plan: emptyPlan,
       },
       fakeChat(response)
     ),

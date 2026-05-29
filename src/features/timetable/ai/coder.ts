@@ -3,9 +3,9 @@ import { z } from 'zod';
 import type { ConstraintSpec, Plan } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, CoderTurnResult } from './types';
-import { invokeChat } from './chat-client';
+import { invokeChat, type ChatPayload } from './chat-client';
 
-type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
+type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
 
 const coderResponseSchema = z.object({
   plan_summary: z.string(),
@@ -14,10 +14,10 @@ const coderResponseSchema = z.object({
   assumptions: z.array(z.string()),
 });
 
-const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
+const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
 
 function isAiCodedSpec(spec: ConstraintSpec): boolean {
-  return spec.kind === 'custom_dsl';
+  return spec.kind === 'custom_dsl' && spec.severity === 'hard';
 }
 
 function loadCoderSystemPrompt(): Promise<string> {
