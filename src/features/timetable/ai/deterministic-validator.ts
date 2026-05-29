@@ -497,6 +497,89 @@ const checkIfThen: CheckFn = (spec, schedule, ctx) => {
   return violations;
 };
 
+const checkResourceCapacity: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const capacity = Number(spec.params.capacity ?? 1);
+  const violations: Violation[] = [];
+  const bySlot = new Map<string, ScheduleEntry[]>();
+
+  for (const entry of schedule) {
+    if (entry.subject !== subject) continue;
+    const key = `${entry.day}::${entry.period}`;
+    bySlot.set(key, [...(bySlot.get(key) ?? []), entry]);
+  }
+
+  for (const [key, entries] of bySlot.entries()) {
+    if (entries.length <= capacity) continue;
+    const [day, period] = key.split('::');
+    violations.push({
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Phòng ${subject} vượt quá dung lượng: ${entries.length} lớp trong ngày ${day} tiết ${period} (tối đa ${capacity}).`,
+      offendingEntries: entries,
+    });
+  }
+  return violations;
+};
+
+const checkSessionLimit: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const maxPeriods = Number(spec.params.maxPeriods ?? 1);
+  const violations: Violation[] = [];
+
+  if (!teacher) return [];
+
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const entry of schedule) {
+    if (entry.teacher !== teacher) continue;
+    byDay.set(entry.day, [...(byDay.get(entry.day) ?? []), entry]);
+  }
+
+  for (const [day, entries] of byDay.entries()) {
+    if (entries.length <= maxPeriods) continue;
+    violations.push({
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Giáo viên ${teacher} dạy ${entries.length} tiết trong ngày ${day} (tối đa ${maxPeriods}).`,
+      offendingEntries: entries,
+    });
+  }
+  return violations;
+};
+
+const checkSubjectGroupDailyLimit: CheckFn = (spec, schedule) => {
+  const groupName = String(spec.params.groupName ?? '');
+  const maxPerDay = Number(spec.params.maxPerDay ?? 1);
+  const targetClass = spec.params.class ? String(spec.params.class) : null;
+  const violations: Violation[] = [];
+
+  const filtered = schedule.filter((entry) => {
+    if (targetClass && entry.class !== targetClass) return false;
+    return true;
+  });
+
+  const byDaySubject = new Map<string, Set<string>>();
+  const byDayEntries = new Map<string, ScheduleEntry[]>();
+  for (const entry of filtered) {
+    const dayKey = entry.day;
+    if (!byDaySubject.has(dayKey)) byDaySubject.set(dayKey, new Set());
+    byDaySubject.get(dayKey)!.add(entry.subject);
+    byDayEntries.set(dayKey, [...(byDayEntries.get(dayKey) ?? []), entry]);
+  }
+
+  for (const [day, subjects] of byDaySubject.entries()) {
+    if (subjects.size <= maxPerDay) continue;
+    const entries = byDayEntries.get(day) ?? [];
+    violations.push({
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Nhóm môn ${groupName} vượt quá giới hạn: ${subjects.size} môn khác nhau trong ngày ${day} (tối đa ${maxPerDay}).`,
+      offendingEntries: entries,
+    });
+  }
+  return violations;
+};
+
 const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_block_day: checkTeacherBlockDay,
   teacher_block_period: checkTeacherBlockPeriod,
@@ -509,6 +592,9 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   weekly_periods_exact: checkWeeklyPeriodsExact,
   pair_not_same_slot: checkPairNotSameSlot,
   if_then: checkIfThen,
+  resource_capacity: checkResourceCapacity,
+  session_limit: checkSessionLimit,
+  subject_group_daily_limit: checkSubjectGroupDailyLimit,
 };
 
 export function validateSchedule(

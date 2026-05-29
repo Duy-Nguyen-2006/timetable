@@ -357,6 +357,72 @@ def build_custom_constraints(model, slots, data):
         elif kind == "subject_consecutive":
             _add_subject_consecutive(spec)
 
+        elif kind == "resource_capacity":
+            subj = params.get("subject")
+            capacity = int(params.get("capacity", 1))
+            for d in days:
+                for p in _periods_for(d):
+                    slot_vars = [
+                        slots[(a["id"], d, p)]
+                        for a in assignments
+                        if a["subject"] == subj
+                    ]
+                    if slot_vars:
+                        model.Add(sum(slot_vars) <= capacity)
+
+        elif kind == "session_limit":
+            teacher = params.get("teacher")
+            max_periods = int(params.get("maxPeriods", 1))
+            session_name = params.get("session")
+            session_days = params.get("days") or days
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in session_days:
+                session_periods = _periods_for(d)
+                if session_name:
+                    day_sessions = data.get("sessions", [])
+                    session_obj = next((s for s in day_sessions if s.get("id") == session_name or s.get("label") == session_name), None)
+                    if session_obj:
+                        session_periods = [
+                            p for p in session_periods
+                            if any(
+                                p >= offset + 1 and p <= offset + int(data.get("periodCounts", {}).get(session_obj["id"], 0))
+                                for offset in [sum(int(data.get("periodCounts", {}).get(s2["id"], 0)) for s2 in day_sessions[:i])]
+                                for i, s2 in enumerate(day_sessions)
+                                if s2["id"] == session_obj["id"]
+                            )
+                        ]
+                slot_vars = [
+                    slots[(a["id"], d, p)]
+                    for a in teacher_asgs
+                    for p in session_periods
+                ]
+                if slot_vars:
+                    model.Add(sum(slot_vars) <= max_periods)
+
+        elif kind == "subject_group":
+            pass  # Definition only, resolved by subject_group_daily_limit
+
+        elif kind == "subject_group_daily_limit":
+            group_name = params.get("groupName")
+            max_per_day = int(params.get("maxPerDay", 1))
+            target_class = params.get("class")
+            group_specs = [s for s in constraints if s.get("kind") == "subject_group" and s.get("name") == group_name]
+            group_subjects = set()
+            for gs in group_specs:
+                for s in gs.get("subjects", []):
+                    group_subjects.add(s)
+            target_classes = [target_class] if target_class else classes
+            for cls in target_classes:
+                cls_asgs = [a for a in assignments if a["class"] == cls and a["subject"] in group_subjects]
+                for d in days:
+                    slot_vars = [
+                        slots[(a["id"], d, p)]
+                        for a in cls_asgs
+                        for p in _periods_for(d)
+                    ]
+                    if slot_vars:
+                        model.Add(sum(slot_vars) <= max_per_day)
+
         elif kind == "if_then":
             condition = params.get("if")
             then_specs = params.get("then", [])

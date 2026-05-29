@@ -25,6 +25,10 @@ const constraintSpecSchema = z.object({
     'weekly_periods_exact',
     'if_then',
     'pair_not_same_slot',
+    'resource_capacity',
+    'session_limit',
+    'subject_group',
+    'subject_group_daily_limit',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -207,6 +211,56 @@ function markAutoBaseSpec(spec: ConstraintSpec): ConstraintSpec {
     severity: 'info',
     tags: [...tags],
   };
+}
+
+function isResourceCapacityText(text: string): { subject: string; capacity: number } | null {
+  const normalized = normalizeConstraintText(text);
+  const match = normalized.match(
+    /(.+?)\s+toi\s+da\s+(\d+)\s+lop\s+cung\s+slot/iu
+  );
+  if (match) {
+    const subject = match[1].trim();
+    const capacity = Number(match[2]);
+    if (subject && Number.isFinite(capacity) && capacity > 0) return { subject, capacity };
+  }
+  return null;
+}
+
+function isSessionLimitText(text: string): { teacher: string; maxPeriods: number; session: string } | null {
+  const normalized = normalizeConstraintText(text);
+  const match = normalized.match(
+    /(?:moi|tat ca|all|each)\s+giao vien\s+khong\s+day\s+qua\s+(\d+)\s+tiet\s+trong\s+cung\s+1\s+buoi\s+(sang|chieu)/iu
+  );
+  if (match) {
+    const maxPeriods = Number(match[1]);
+    const session = match[2].toLowerCase().includes('sang') ? 'morning' : 'afternoon';
+    if (Number.isFinite(maxPeriods) && maxPeriods > 0) return { teacher: '', maxPeriods, session };
+  }
+  return null;
+}
+
+function isSubjectGroupText(text: string): { name: string; subjects: string[] } | null {
+  const normalized = normalizeConstraintText(text);
+  const match = normalized.match(/mon\s+(.+?)\s+gom\s*:\s*(.+)/iu);
+  if (match) {
+    const name = match[1].trim();
+    const subjects = match[2].split(/[,;]/u).map((s) => s.trim()).filter(Boolean);
+    if (name && subjects.length > 0) return { name, subjects };
+  }
+  return null;
+}
+
+function isSubjectGroupDailyLimitText(text: string): { groupName: string; maxPerDay: number } | null {
+  const normalized = normalizeConstraintText(text);
+  const match = normalized.match(
+    /(?:moi|tat ca|all|each)\s+lop\s+khong\s+duoc\s+co\s+qua\s+(\d+)\s+mon\s+(.+?)\s+trong\s+cung\s+1\s+ngay/iu
+  );
+  if (match) {
+    const maxPerDay = Number(match[1]);
+    const groupName = match[2].trim();
+    if (groupName && Number.isFinite(maxPerDay) && maxPerDay > 0) return { groupName, maxPerDay };
+  }
+  return null;
 }
 
 function splitFallbackConstraintText(text: string): string[] {
@@ -611,6 +665,50 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
+    const resourceCapacity = isResourceCapacityText(constraint.text);
+    if (resourceCapacity) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'resource_capacity',
+        params: resourceCapacity,
+      } satisfies ConstraintSpec;
+    }
+
+    const sessionLimit = isSessionLimitText(constraint.text);
+    if (sessionLimit) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'session_limit',
+        params: sessionLimit,
+      } satisfies ConstraintSpec;
+    }
+
+    const subjectGroup = isSubjectGroupText(constraint.text);
+    if (subjectGroup) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_group',
+        params: subjectGroup,
+      } satisfies ConstraintSpec;
+    }
+
+    const subjectGroupLimit = isSubjectGroupDailyLimitText(constraint.text);
+    if (subjectGroupLimit) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_group_daily_limit',
+        params: subjectGroupLimit,
+      } satisfies ConstraintSpec;
+    }
+
     const fallbackSpec = {
       id,
       original: constraint.text,
@@ -910,6 +1008,10 @@ export async function runTranslatorTurn(
                       'weekly_periods_exact',
                       'if_then',
                       'pair_not_same_slot',
+                      'resource_capacity',
+                      'session_limit',
+                      'subject_group',
+                      'subject_group_daily_limit',
                       'custom_dsl',
                     ],
                   },
