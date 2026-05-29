@@ -142,7 +142,9 @@ export async function runLocalAgent(
     const solverConstraintSpecs = translator.constraintSpecs.filter(
       (spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base'))
     );
-    const hasCustomConstraintSpecs = solverConstraintSpecs.some((spec) => spec.kind === 'custom_dsl');
+    const hasCustomConstraintSpecs = solverConstraintSpecs.some(
+      (spec) => spec.kind === 'custom_dsl' && spec.severity === 'hard'
+    );
     board.setConstraintSpecs(translator.constraintSpecs);
     board.setDataset(compressed);
 
