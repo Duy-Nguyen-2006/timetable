@@ -17,15 +17,20 @@ Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind bui
 - subject_pin_period
 - subject_consecutive
 - class_no_double_subject_day
+- class_subjects_not_same_day
+- teacher_max_working_days
+- subject_max_consecutive
 - weekly_periods_exact
 - if_then
 - pair_not_same_slot
 
 Bạn KHÔNG viết code cho các kind trên.
 
+Ngoài ra, MỌI constraint có `severity != "hard"` đều do built-in registry tự xử lý dưới dạng penalty + objective. Bạn KHÔNG viết code cho bất kỳ soft constraint nào, kể cả `custom_dsl` soft.
+
 Bạn CHỈ viết code cho:
 
-- custom_dsl
+- custom_dsl có `severity == "hard"`
 
 ## Vùng được điền
 

@@ -188,638 +188,6 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path=".claude/skills/gitnexus/gitnexus-cli/SKILL.md">
----
-name: gitnexus-cli
-description: "Use when the user needs to run GitNexus CLI commands like analyze/index a repo, check status, clean the index, generate a wiki, or list indexed repos. Examples: \"Index this repo\", \"Reanalyze the codebase\", \"Generate a wiki\""
----
-
-# GitNexus CLI Commands
-
-All commands work via `npx` — no global install required.
-
-## Commands
-
-### analyze — Build or refresh the index
-
-```bash
-npx gitnexus analyze
-```
-
-Run from the project root. This parses all source files, builds the knowledge graph, writes it to `.gitnexus/`, and generates CLAUDE.md / AGENTS.md context files.
-
-| Flag           | Effect                                                           |
-| -------------- | ---------------------------------------------------------------- |
-| `--force`      | Force full re-index even if up to date                           |
-| `--embeddings` | Enable embedding generation for semantic search (off by default) |
-| `--drop-embeddings` | Drop existing embeddings on rebuild. By default, an `analyze` without `--embeddings` preserves them. |
-
-**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook detects staleness after `git commit` and `git merge` and notifies the agent to run `analyze` — the hook does not run analyze itself, to avoid blocking the agent for up to 120s and risking KuzuDB corruption on timeout.
-
-### status — Check index freshness
-
-```bash
-npx gitnexus status
-```
-
-Shows whether the current repo has a GitNexus index, when it was last updated, and symbol/relationship counts. Use this to check if re-indexing is needed.
-
-### clean — Delete the index
-
-```bash
-npx gitnexus clean
-```
-
-Deletes the `.gitnexus/` directory and unregisters the repo from the global registry. Use before re-indexing if the index is corrupt or after removing GitNexus from a project.
-
-| Flag      | Effect                                            |
-| --------- | ------------------------------------------------- |
-| `--force` | Skip confirmation prompt                          |
-| `--all`   | Clean all indexed repos, not just the current one |
-
-### wiki — Generate documentation from the graph
-
-```bash
-npx gitnexus wiki
-```
-
-Generates repository documentation from the knowledge graph using an LLM. Requires an API key (saved to `~/.gitnexus/config.json` on first use).
-
-| Flag                | Effect                                    |
-| ------------------- | ----------------------------------------- |
-| `--force`           | Force full regeneration                   |
-| `--model <model>`   | LLM model (default: minimax/minimax-m2.5) |
-| `--base-url <url>`  | LLM API base URL                          |
-| `--api-key <key>`   | LLM API key                               |
-| `--concurrency <n>` | Parallel LLM calls (default: 3)           |
-| `--gist`            | Publish wiki as a public GitHub Gist      |
-
-### list — Show all indexed repos
-
-```bash
-npx gitnexus list
-```
-
-Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_repos` tool provides the same information.
-
-## After Indexing
-
-1. **Read `gitnexus://repo/{name}/context`** to verify the index loaded
-2. Use the other GitNexus skills (`exploring`, `debugging`, `impact-analysis`, `refactoring`) for your task
-
-## Troubleshooting
-
-- **"Not inside a git repository"**: Run from a directory inside a git repo
-- **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
-- **Embeddings slow**: Omit `--embeddings` (it's off by default) or set `OPENAI_API_KEY` for faster API-based embedding
-</file>
-
-<file path=".claude/skills/gitnexus/gitnexus-debugging/SKILL.md">
----
-name: gitnexus-debugging
-description: "Use when the user is debugging a bug, tracing an error, or asking why something fails. Examples: \"Why is X failing?\", \"Where does this error come from?\", \"Trace this bug\""
----
-
-# Debugging with GitNexus
-
-## When to Use
-
-- "Why is this function failing?"
-- "Trace where this error comes from"
-- "Who calls this method?"
-- "This endpoint returns 500"
-- Investigating bugs, errors, or unexpected behavior
-
-## Workflow
-
-```
-1. gitnexus_query({query: "<error or symptom>"})            → Find related execution flows
-2. gitnexus_context({name: "<suspect>"})                    → See callers/callees/processes
-3. READ gitnexus://repo/{name}/process/{name}                → Trace execution flow
-4. gitnexus_cypher({query: "MATCH path..."})                 → Custom traces if needed
-```
-
-> If "Index is stale" → run `npx gitnexus analyze` in terminal.
-
-## Checklist
-
-```
-- [ ] Understand the symptom (error message, unexpected behavior)
-- [ ] gitnexus_query for error text or related code
-- [ ] Identify the suspect function from returned processes
-- [ ] gitnexus_context to see callers and callees
-- [ ] Trace execution flow via process resource if applicable
-- [ ] gitnexus_cypher for custom call chain traces if needed
-- [ ] Read source files to confirm root cause
-```
-
-## Debugging Patterns
-
-| Symptom              | GitNexus Approach                                          |
-| -------------------- | ---------------------------------------------------------- |
-| Error message        | `gitnexus_query` for error text → `context` on throw sites |
-| Wrong return value   | `context` on the function → trace callees for data flow    |
-| Intermittent failure | `context` → look for external calls, async deps            |
-| Performance issue    | `context` → find symbols with many callers (hot paths)     |
-| Recent regression    | `detect_changes` to see what your changes affect           |
-
-## Tools
-
-**gitnexus_query** — find code related to error:
-
-```
-gitnexus_query({query: "payment validation error"})
-→ Processes: CheckoutFlow, ErrorHandling
-→ Symbols: validatePayment, handlePaymentError, PaymentException
-```
-
-**gitnexus_context** — full context for a suspect:
-
-```
-gitnexus_context({name: "validatePayment"})
-→ Incoming calls: processCheckout, webhookHandler
-→ Outgoing calls: verifyCard, fetchRates (external API!)
-→ Processes: CheckoutFlow (step 3/7)
-```
-
-**gitnexus_cypher** — custom call chain traces:
-
-```cypher
-MATCH path = (a)-[:CodeRelation {type: 'CALLS'}*1..2]->(b:Function {name: "validatePayment"})
-RETURN [n IN nodes(path) | n.name] AS chain
-```
-
-## Example: "Payment endpoint returns 500 intermittently"
-
-```
-1. gitnexus_query({query: "payment error handling"})
-   → Processes: CheckoutFlow, ErrorHandling
-   → Symbols: validatePayment, handlePaymentError
-
-2. gitnexus_context({name: "validatePayment"})
-   → Outgoing calls: verifyCard, fetchRates (external API!)
-
-3. READ gitnexus://repo/my-app/process/CheckoutFlow
-   → Step 3: validatePayment → calls fetchRates (external)
-
-4. Root cause: fetchRates calls external API without proper timeout
-```
-</file>
-
-<file path=".claude/skills/gitnexus/gitnexus-exploring/SKILL.md">
----
-name: gitnexus-exploring
-description: "Use when the user asks how code works, wants to understand architecture, trace execution flows, or explore unfamiliar parts of the codebase. Examples: \"How does X work?\", \"What calls this function?\", \"Show me the auth flow\""
----
-
-# Exploring Codebases with GitNexus
-
-## When to Use
-
-- "How does authentication work?"
-- "What's the project structure?"
-- "Show me the main components"
-- "Where is the database logic?"
-- Understanding code you haven't seen before
-
-## Workflow
-
-```
-1. READ gitnexus://repos                          → Discover indexed repos
-2. READ gitnexus://repo/{name}/context             → Codebase overview, check staleness
-3. gitnexus_query({query: "<what you want to understand>"})  → Find related execution flows
-4. gitnexus_context({name: "<symbol>"})            → Deep dive on specific symbol
-5. READ gitnexus://repo/{name}/process/{name}      → Trace full execution flow
-```
-
-> If step 2 says "Index is stale" → run `npx gitnexus analyze` in terminal.
-
-## Checklist
-
-```
-- [ ] READ gitnexus://repo/{name}/context
-- [ ] gitnexus_query for the concept you want to understand
-- [ ] Review returned processes (execution flows)
-- [ ] gitnexus_context on key symbols for callers/callees
-- [ ] READ process resource for full execution traces
-- [ ] Read source files for implementation details
-```
-
-## Resources
-
-| Resource                                | What you get                                            |
-| --------------------------------------- | ------------------------------------------------------- |
-| `gitnexus://repo/{name}/context`        | Stats, staleness warning (~150 tokens)                  |
-| `gitnexus://repo/{name}/clusters`       | All functional areas with cohesion scores (~300 tokens) |
-| `gitnexus://repo/{name}/cluster/{name}` | Area members with file paths (~500 tokens)              |
-| `gitnexus://repo/{name}/process/{name}` | Step-by-step execution trace (~200 tokens)              |
-
-## Tools
-
-**gitnexus_query** — find execution flows related to a concept:
-
-```
-gitnexus_query({query: "payment processing"})
-→ Processes: CheckoutFlow, RefundFlow, WebhookHandler
-→ Symbols grouped by flow with file locations
-```
-
-**gitnexus_context** — 360-degree view of a symbol:
-
-```
-gitnexus_context({name: "validateUser"})
-→ Incoming calls: loginHandler, apiMiddleware
-→ Outgoing calls: checkToken, getUserById
-→ Processes: LoginFlow (step 2/5), TokenRefresh (step 1/3)
-```
-
-## Example: "How does payment processing work?"
-
-```
-1. READ gitnexus://repo/my-app/context       → 918 symbols, 45 processes
-2. gitnexus_query({query: "payment processing"})
-   → CheckoutFlow: processPayment → validateCard → chargeStripe
-   → RefundFlow: initiateRefund → calculateRefund → processRefund
-3. gitnexus_context({name: "processPayment"})
-   → Incoming: checkoutHandler, webhookHandler
-   → Outgoing: validateCard, chargeStripe, saveTransaction
-4. Read src/payments/processor.ts for implementation details
-```
-</file>
-
-<file path=".claude/skills/gitnexus/gitnexus-guide/SKILL.md">
----
-name: gitnexus-guide
-description: "Use when the user asks about GitNexus itself — available tools, how to query the knowledge graph, MCP resources, graph schema, or workflow reference. Examples: \"What GitNexus tools are available?\", \"How do I use GitNexus?\""
----
-
-# GitNexus Guide
-
-Quick reference for all GitNexus MCP tools, resources, and the knowledge graph schema.
-
-## Always Start Here
-
-For any task involving code understanding, debugging, impact analysis, or refactoring:
-
-1. **Read `gitnexus://repo/{name}/context`** — codebase overview + check index freshness
-2. **Match your task to a skill below** and **read that skill file**
-3. **Follow the skill's workflow and checklist**
-
-> If step 1 warns the index is stale, run `npx gitnexus analyze` in the terminal first.
-
-## Skills
-
-| Task                                         | Skill to read       |
-| -------------------------------------------- | ------------------- |
-| Understand architecture / "How does X work?" | `gitnexus-exploring`         |
-| Blast radius / "What breaks if I change X?"  | `gitnexus-impact-analysis`   |
-| Trace bugs / "Why is X failing?"             | `gitnexus-debugging`         |
-| Rename / extract / split / refactor          | `gitnexus-refactoring`       |
-| Tools, resources, schema reference           | `gitnexus-guide` (this file) |
-| Index, status, clean, wiki CLI commands      | `gitnexus-cli`               |
-
-## Tools Reference
-
-| Tool             | What it gives you                                                        |
-| ---------------- | ------------------------------------------------------------------------ |
-| `query`          | Process-grouped code intelligence — execution flows related to a concept |
-| `context`        | 360-degree symbol view — categorized refs, processes it participates in  |
-| `impact`         | Symbol blast radius — what breaks at depth 1/2/3 with confidence         |
-| `detect_changes` | Git-diff impact — what do your current changes affect                    |
-| `rename`         | Multi-file coordinated rename with confidence-tagged edits               |
-| `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
-| `list_repos`     | Discover indexed repos                                                   |
-
-## Resources Reference
-
-Lightweight reads (~100-500 tokens) for navigation:
-
-| Resource                                       | Content                                   |
-| ---------------------------------------------- | ----------------------------------------- |
-| `gitnexus://repo/{name}/context`               | Stats, staleness check                    |
-| `gitnexus://repo/{name}/clusters`              | All functional areas with cohesion scores |
-| `gitnexus://repo/{name}/cluster/{clusterName}` | Area members                              |
-| `gitnexus://repo/{name}/processes`             | All execution flows                       |
-| `gitnexus://repo/{name}/process/{processName}` | Step-by-step trace                        |
-| `gitnexus://repo/{name}/schema`                | Graph schema for Cypher                   |
-
-## Graph Schema
-
-**Nodes:** File, Function, Class, Interface, Method, Community, Process
-**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS
-
-```cypher
-MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "myFunc"})
-RETURN caller.name, caller.filePath
-```
-</file>
-
-<file path=".claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md">
----
-name: gitnexus-impact-analysis
-description: "Use when the user wants to know what will break if they change something, or needs safety analysis before editing code. Examples: \"Is it safe to change X?\", \"What depends on this?\", \"What will break?\""
----
-
-# Impact Analysis with GitNexus
-
-## When to Use
-
-- "Is it safe to change this function?"
-- "What will break if I modify X?"
-- "Show me the blast radius"
-- "Who uses this code?"
-- Before making non-trivial code changes
-- Before committing — to understand what your changes affect
-
-## Workflow
-
-```
-1. gitnexus_impact({target: "X", direction: "upstream"})  → What depends on this
-2. READ gitnexus://repo/{name}/processes                   → Check affected execution flows
-3. gitnexus_detect_changes()                               → Map current git changes to affected flows
-4. Assess risk and report to user
-```
-
-> If "Index is stale" → run `npx gitnexus analyze` in terminal.
-
-## Checklist
-
-```
-- [ ] gitnexus_impact({target, direction: "upstream"}) to find dependents
-- [ ] Review d=1 items first (these WILL BREAK)
-- [ ] Check high-confidence (>0.8) dependencies
-- [ ] READ processes to check affected execution flows
-- [ ] gitnexus_detect_changes() for pre-commit check
-- [ ] Assess risk level and report to user
-```
-
-## Understanding Output
-
-| Depth | Risk Level       | Meaning                  |
-| ----- | ---------------- | ------------------------ |
-| d=1   | **WILL BREAK**   | Direct callers/importers |
-| d=2   | LIKELY AFFECTED  | Indirect dependencies    |
-| d=3   | MAY NEED TESTING | Transitive effects       |
-
-## Risk Assessment
-
-| Affected                       | Risk     |
-| ------------------------------ | -------- |
-| <5 symbols, few processes      | LOW      |
-| 5-15 symbols, 2-5 processes    | MEDIUM   |
-| >15 symbols or many processes  | HIGH     |
-| Critical path (auth, payments) | CRITICAL |
-
-## Tools
-
-**gitnexus_impact** — the primary tool for symbol blast radius:
-
-```
-gitnexus_impact({
-  target: "validateUser",
-  direction: "upstream",
-  minConfidence: 0.8,
-  maxDepth: 3
-})
-
-→ d=1 (WILL BREAK):
-  - loginHandler (src/auth/login.ts:42) [CALLS, 100%]
-  - apiMiddleware (src/api/middleware.ts:15) [CALLS, 100%]
-
-→ d=2 (LIKELY AFFECTED):
-  - authRouter (src/routes/auth.ts:22) [CALLS, 95%]
-```
-
-**gitnexus_detect_changes** — git-diff based impact analysis:
-
-```
-gitnexus_detect_changes({scope: "staged"})
-
-→ Changed: 5 symbols in 3 files
-→ Affected: LoginFlow, TokenRefresh, APIMiddlewarePipeline
-→ Risk: MEDIUM
-```
-
-## Example: "What breaks if I change validateUser?"
-
-```
-1. gitnexus_impact({target: "validateUser", direction: "upstream"})
-   → d=1: loginHandler, apiMiddleware (WILL BREAK)
-   → d=2: authRouter, sessionManager (LIKELY AFFECTED)
-
-2. READ gitnexus://repo/my-app/processes
-   → LoginFlow and TokenRefresh touch validateUser
-
-3. Risk: 2 direct callers, 2 processes = MEDIUM
-```
-</file>
-
-<file path=".claude/skills/gitnexus/gitnexus-refactoring/SKILL.md">
----
-name: gitnexus-refactoring
-description: "Use when the user wants to rename, extract, split, move, or restructure code safely. Examples: \"Rename this function\", \"Extract this into a module\", \"Refactor this class\", \"Move this to a separate file\""
----
-
-# Refactoring with GitNexus
-
-## When to Use
-
-- "Rename this function safely"
-- "Extract this into a module"
-- "Split this service"
-- "Move this to a new file"
-- Any task involving renaming, extracting, splitting, or restructuring code
-
-## Workflow
-
-```
-1. gitnexus_impact({target: "X", direction: "upstream"})  → Map all dependents
-2. gitnexus_query({query: "X"})                            → Find execution flows involving X
-3. gitnexus_context({name: "X"})                           → See all incoming/outgoing refs
-4. Plan update order: interfaces → implementations → callers → tests
-```
-
-> If "Index is stale" → run `npx gitnexus analyze` in terminal.
-
-## Checklists
-
-### Rename Symbol
-
-```
-- [ ] gitnexus_rename({symbol_name: "oldName", new_name: "newName", dry_run: true}) — preview all edits
-- [ ] Review graph edits (high confidence) and ast_search edits (review carefully)
-- [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
-- [ ] gitnexus_detect_changes() — verify only expected files changed
-- [ ] Run tests for affected processes
-```
-
-### Extract Module
-
-```
-- [ ] gitnexus_context({name: target}) — see all incoming/outgoing refs
-- [ ] gitnexus_impact({target, direction: "upstream"}) — find all external callers
-- [ ] Define new module interface
-- [ ] Extract code, update imports
-- [ ] gitnexus_detect_changes() — verify affected scope
-- [ ] Run tests for affected processes
-```
-
-### Split Function/Service
-
-```
-- [ ] gitnexus_context({name: target}) — understand all callees
-- [ ] Group callees by responsibility
-- [ ] gitnexus_impact({target, direction: "upstream"}) — map callers to update
-- [ ] Create new functions/services
-- [ ] Update callers
-- [ ] gitnexus_detect_changes() — verify affected scope
-- [ ] Run tests for affected processes
-```
-
-## Tools
-
-**gitnexus_rename** — automated multi-file rename:
-
-```
-gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
-→ 12 edits across 8 files
-→ 10 graph edits (high confidence), 2 ast_search edits (review)
-→ Changes: [{file_path, edits: [{line, old_text, new_text, confidence}]}]
-```
-
-**gitnexus_impact** — map all dependents first:
-
-```
-gitnexus_impact({target: "validateUser", direction: "upstream"})
-→ d=1: loginHandler, apiMiddleware, testUtils
-→ Affected Processes: LoginFlow, TokenRefresh
-```
-
-**gitnexus_detect_changes** — verify your changes after refactoring:
-
-```
-gitnexus_detect_changes({scope: "all"})
-→ Changed: 8 files, 12 symbols
-→ Affected processes: LoginFlow, TokenRefresh
-→ Risk: MEDIUM
-```
-
-**gitnexus_cypher** — custom reference queries:
-
-```cypher
-MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "validateUser"})
-RETURN caller.name, caller.filePath ORDER BY caller.filePath
-```
-
-## Risk Rules
-
-| Risk Factor         | Mitigation                                |
-| ------------------- | ----------------------------------------- |
-| Many callers (>5)   | Use gitnexus_rename for automated updates |
-| Cross-area refs     | Use detect_changes after to verify scope  |
-| String/dynamic refs | gitnexus_query to find them               |
-| External/public API | Version and deprecate properly            |
-
-## Example: Rename `validateUser` to `authenticateUser`
-
-```
-1. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
-   → 12 edits: 10 graph (safe), 2 ast_search (review)
-   → Files: validator.ts, login.ts, middleware.ts, config.json...
-
-2. Review ast_search edits (config.json: dynamic reference!)
-
-3. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: false})
-   → Applied 12 edits across 8 files
-
-4. gitnexus_detect_changes({scope: "all"})
-   → Affected: LoginFlow, TokenRefresh
-   → Risk: MEDIUM — run tests for these flows
-```
-</file>
-
-<file path="python/tests/test_validator_engine.py">
-from pathlib import Path
-import sys
-
-sys.path.append(str(Path(__file__).parent.parent))
-
-from validator_engine import validate_schedule
-
-
-def _entry(klass: str, day: str, period: int, subject: str, teacher: str) -> dict:
-    return {
-        "class": klass,
-        "day": day,
-        "period": period,
-        "subject": subject,
-        "teacher": teacher,
-    }
-
-
-def _spec(spec_id: str, kind: str, params: dict, severity: str = "hard") -> dict:
-    return {
-        "id": spec_id,
-        "kind": kind,
-        "severity": severity,
-        "params": params,
-    }
-
-
-def test_subject_consecutive_allows_remainder_periods_rule_a():
-    report = validate_schedule(
-        [
-            _entry("6A", "mon", 1, "Toán", "Sơn"),
-            _entry("6A", "mon", 2, "Toán", "Sơn"),
-            _entry("6A", "wed", 1, "Toán", "Sơn"),
-            _entry("6A", "wed", 2, "Toán", "Sơn"),
-            _entry("6A", "fri", 5, "Toán", "Sơn"),
-        ],
-        [_spec("subject_consecutive_rule_a", "subject_consecutive", {"subject": "Toán", "length": 2})],
-    )
-
-    assert report["violations"] == []
-
-
-def test_class_no_double_subject_day_honors_custom_max_per_day():
-    report = validate_schedule(
-        [
-            _entry("6A", "mon", 1, "Toán", "Sơn"),
-            _entry("6A", "mon", 2, "Toán", "Sơn"),
-            _entry("6A", "mon", 3, "Toán", "Sơn"),
-        ],
-        [
-            _spec(
-                "class_no_double_custom",
-                "class_no_double_subject_day",
-                {"class": "6A", "subject": "Toán", "maxPerDay": 2},
-            )
-        ],
-    )
-
-    assert len(report["violations"]) == 1
-    assert report["violations"][0]["constraintId"] == "class_no_double_custom"
-
-
-def test_validator_checks_resource_capacity_session_limit_and_subject_group_daily_limit():
-    schedule = [
-        _entry("6A", "mon", 1, "Toán", "Sơn"),
-        _entry("6B", "mon", 1, "Toán", "Mai"),
-        _entry("6A", "tue", 1, "Văn", "Sơn"),
-        _entry("6A", "tue", 2, "Anh", "Sơn"),
-        _entry("6A", "tue", 3, "Sử", "Sơn"),
-    ]
-    specs = [
-        _spec("capacity", "resource_capacity", {"subject": "Toán", "capacity": 1}),
-        _spec("session", "session_limit", {"teacher": "Sơn", "maxPeriods": 2}),
-        _spec("group", "subject_group_daily_limit", {"class": "6A", "maxPerDay": 2}),
-    ]
-
-    report = validate_schedule(schedule, specs)
-
-    assert {violation["constraintId"] for violation in report["violations"]} == {"capacity", "session", "group"}
-</file>
-
 <file path="src/app/globals.css">
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400&family=JetBrains+Mono:wght@400&display=swap');
 @import "tailwindcss";
@@ -1691,52 +1059,6 @@ export function cn(...inputs: ClassValue[]) {
 }
 </file>
 
-<file path="CLAUDE.md">
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **timetable** (1933 symbols, 2820 relationships, 63 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/timetable/clusters` | All functional areas |
-| `gitnexus://repo/timetable/processes` | All execution flows |
-| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
-</file>
-
 <file path="components.json">
 {
   "$schema": "https://ui.shadcn.com/schema.json",
@@ -1834,6 +1156,556 @@ const config: Config = {
   plugins: [tailwindcssAnimate],
 };
 export default config;
+</file>
+
+<file path=".claude/skills/gitnexus/gitnexus-cli/SKILL.md">
+---
+name: gitnexus-cli
+description: "Use when the user needs to run GitNexus CLI commands like analyze/index a repo, check status, clean the index, generate a wiki, or list indexed repos. Examples: \"Index this repo\", \"Reanalyze the codebase\", \"Generate a wiki\""
+---
+
+# GitNexus CLI Commands
+
+All commands work via `npx` — no global install required.
+
+## Commands
+
+### analyze — Build or refresh the index
+
+```bash
+npx gitnexus analyze
+```
+
+Run from the project root. This parses all source files, builds the knowledge graph, writes it to `.gitnexus/`, and generates CLAUDE.md / AGENTS.md context files.
+
+| Flag           | Effect                                                           |
+| -------------- | ---------------------------------------------------------------- |
+| `--force`      | Force full re-index even if up to date                           |
+| `--embeddings` | Enable embedding generation for semantic search (off by default) |
+| `--drop-embeddings` | Drop existing embeddings on rebuild. By default, an `analyze` without `--embeddings` preserves them. |
+
+**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale. In Claude Code, a PostToolUse hook detects staleness after `git commit` and `git merge` and notifies the agent to run `analyze` — the hook does not run analyze itself, to avoid blocking the agent for up to 120s and risking KuzuDB corruption on timeout.
+
+### status — Check index freshness
+
+```bash
+npx gitnexus status
+```
+
+Shows whether the current repo has a GitNexus index, when it was last updated, and symbol/relationship counts. Use this to check if re-indexing is needed.
+
+### clean — Delete the index
+
+```bash
+npx gitnexus clean
+```
+
+Deletes the `.gitnexus/` directory and unregisters the repo from the global registry. Use before re-indexing if the index is corrupt or after removing GitNexus from a project.
+
+| Flag      | Effect                                            |
+| --------- | ------------------------------------------------- |
+| `--force` | Skip confirmation prompt                          |
+| `--all`   | Clean all indexed repos, not just the current one |
+
+### wiki — Generate documentation from the graph
+
+```bash
+npx gitnexus wiki
+```
+
+Generates repository documentation from the knowledge graph using an LLM. Requires an API key (saved to `~/.gitnexus/config.json` on first use).
+
+| Flag                | Effect                                    |
+| ------------------- | ----------------------------------------- |
+| `--force`           | Force full regeneration                   |
+| `--model <model>`   | LLM model (default: minimax/minimax-m2.5) |
+| `--base-url <url>`  | LLM API base URL                          |
+| `--api-key <key>`   | LLM API key                               |
+| `--concurrency <n>` | Parallel LLM calls (default: 3)           |
+| `--gist`            | Publish wiki as a public GitHub Gist      |
+
+### list — Show all indexed repos
+
+```bash
+npx gitnexus list
+```
+
+Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_repos` tool provides the same information.
+
+## After Indexing
+
+1. **Read `gitnexus://repo/{name}/context`** to verify the index loaded
+2. Use the other GitNexus skills (`exploring`, `debugging`, `impact-analysis`, `refactoring`) for your task
+
+## Troubleshooting
+
+- **"Not inside a git repository"**: Run from a directory inside a git repo
+- **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
+- **Embeddings slow**: Omit `--embeddings` (it's off by default) or set `OPENAI_API_KEY` for faster API-based embedding
+</file>
+
+<file path=".claude/skills/gitnexus/gitnexus-debugging/SKILL.md">
+---
+name: gitnexus-debugging
+description: "Use when the user is debugging a bug, tracing an error, or asking why something fails. Examples: \"Why is X failing?\", \"Where does this error come from?\", \"Trace this bug\""
+---
+
+# Debugging with GitNexus
+
+## When to Use
+
+- "Why is this function failing?"
+- "Trace where this error comes from"
+- "Who calls this method?"
+- "This endpoint returns 500"
+- Investigating bugs, errors, or unexpected behavior
+
+## Workflow
+
+```
+1. gitnexus_query({query: "<error or symptom>"})            → Find related execution flows
+2. gitnexus_context({name: "<suspect>"})                    → See callers/callees/processes
+3. READ gitnexus://repo/{name}/process/{name}                → Trace execution flow
+4. gitnexus_cypher({query: "MATCH path..."})                 → Custom traces if needed
+```
+
+> If "Index is stale" → run `npx gitnexus analyze` in terminal.
+
+## Checklist
+
+```
+- [ ] Understand the symptom (error message, unexpected behavior)
+- [ ] gitnexus_query for error text or related code
+- [ ] Identify the suspect function from returned processes
+- [ ] gitnexus_context to see callers and callees
+- [ ] Trace execution flow via process resource if applicable
+- [ ] gitnexus_cypher for custom call chain traces if needed
+- [ ] Read source files to confirm root cause
+```
+
+## Debugging Patterns
+
+| Symptom              | GitNexus Approach                                          |
+| -------------------- | ---------------------------------------------------------- |
+| Error message        | `gitnexus_query` for error text → `context` on throw sites |
+| Wrong return value   | `context` on the function → trace callees for data flow    |
+| Intermittent failure | `context` → look for external calls, async deps            |
+| Performance issue    | `context` → find symbols with many callers (hot paths)     |
+| Recent regression    | `detect_changes` to see what your changes affect           |
+
+## Tools
+
+**gitnexus_query** — find code related to error:
+
+```
+gitnexus_query({query: "payment validation error"})
+→ Processes: CheckoutFlow, ErrorHandling
+→ Symbols: validatePayment, handlePaymentError, PaymentException
+```
+
+**gitnexus_context** — full context for a suspect:
+
+```
+gitnexus_context({name: "validatePayment"})
+→ Incoming calls: processCheckout, webhookHandler
+→ Outgoing calls: verifyCard, fetchRates (external API!)
+→ Processes: CheckoutFlow (step 3/7)
+```
+
+**gitnexus_cypher** — custom call chain traces:
+
+```cypher
+MATCH path = (a)-[:CodeRelation {type: 'CALLS'}*1..2]->(b:Function {name: "validatePayment"})
+RETURN [n IN nodes(path) | n.name] AS chain
+```
+
+## Example: "Payment endpoint returns 500 intermittently"
+
+```
+1. gitnexus_query({query: "payment error handling"})
+   → Processes: CheckoutFlow, ErrorHandling
+   → Symbols: validatePayment, handlePaymentError
+
+2. gitnexus_context({name: "validatePayment"})
+   → Outgoing calls: verifyCard, fetchRates (external API!)
+
+3. READ gitnexus://repo/my-app/process/CheckoutFlow
+   → Step 3: validatePayment → calls fetchRates (external)
+
+4. Root cause: fetchRates calls external API without proper timeout
+```
+</file>
+
+<file path=".claude/skills/gitnexus/gitnexus-exploring/SKILL.md">
+---
+name: gitnexus-exploring
+description: "Use when the user asks how code works, wants to understand architecture, trace execution flows, or explore unfamiliar parts of the codebase. Examples: \"How does X work?\", \"What calls this function?\", \"Show me the auth flow\""
+---
+
+# Exploring Codebases with GitNexus
+
+## When to Use
+
+- "How does authentication work?"
+- "What's the project structure?"
+- "Show me the main components"
+- "Where is the database logic?"
+- Understanding code you haven't seen before
+
+## Workflow
+
+```
+1. READ gitnexus://repos                          → Discover indexed repos
+2. READ gitnexus://repo/{name}/context             → Codebase overview, check staleness
+3. gitnexus_query({query: "<what you want to understand>"})  → Find related execution flows
+4. gitnexus_context({name: "<symbol>"})            → Deep dive on specific symbol
+5. READ gitnexus://repo/{name}/process/{name}      → Trace full execution flow
+```
+
+> If step 2 says "Index is stale" → run `npx gitnexus analyze` in terminal.
+
+## Checklist
+
+```
+- [ ] READ gitnexus://repo/{name}/context
+- [ ] gitnexus_query for the concept you want to understand
+- [ ] Review returned processes (execution flows)
+- [ ] gitnexus_context on key symbols for callers/callees
+- [ ] READ process resource for full execution traces
+- [ ] Read source files for implementation details
+```
+
+## Resources
+
+| Resource                                | What you get                                            |
+| --------------------------------------- | ------------------------------------------------------- |
+| `gitnexus://repo/{name}/context`        | Stats, staleness warning (~150 tokens)                  |
+| `gitnexus://repo/{name}/clusters`       | All functional areas with cohesion scores (~300 tokens) |
+| `gitnexus://repo/{name}/cluster/{name}` | Area members with file paths (~500 tokens)              |
+| `gitnexus://repo/{name}/process/{name}` | Step-by-step execution trace (~200 tokens)              |
+
+## Tools
+
+**gitnexus_query** — find execution flows related to a concept:
+
+```
+gitnexus_query({query: "payment processing"})
+→ Processes: CheckoutFlow, RefundFlow, WebhookHandler
+→ Symbols grouped by flow with file locations
+```
+
+**gitnexus_context** — 360-degree view of a symbol:
+
+```
+gitnexus_context({name: "validateUser"})
+→ Incoming calls: loginHandler, apiMiddleware
+→ Outgoing calls: checkToken, getUserById
+→ Processes: LoginFlow (step 2/5), TokenRefresh (step 1/3)
+```
+
+## Example: "How does payment processing work?"
+
+```
+1. READ gitnexus://repo/my-app/context       → 918 symbols, 45 processes
+2. gitnexus_query({query: "payment processing"})
+   → CheckoutFlow: processPayment → validateCard → chargeStripe
+   → RefundFlow: initiateRefund → calculateRefund → processRefund
+3. gitnexus_context({name: "processPayment"})
+   → Incoming: checkoutHandler, webhookHandler
+   → Outgoing: validateCard, chargeStripe, saveTransaction
+4. Read src/payments/processor.ts for implementation details
+```
+</file>
+
+<file path=".claude/skills/gitnexus/gitnexus-guide/SKILL.md">
+---
+name: gitnexus-guide
+description: "Use when the user asks about GitNexus itself — available tools, how to query the knowledge graph, MCP resources, graph schema, or workflow reference. Examples: \"What GitNexus tools are available?\", \"How do I use GitNexus?\""
+---
+
+# GitNexus Guide
+
+Quick reference for all GitNexus MCP tools, resources, and the knowledge graph schema.
+
+## Always Start Here
+
+For any task involving code understanding, debugging, impact analysis, or refactoring:
+
+1. **Read `gitnexus://repo/{name}/context`** — codebase overview + check index freshness
+2. **Match your task to a skill below** and **read that skill file**
+3. **Follow the skill's workflow and checklist**
+
+> If step 1 warns the index is stale, run `npx gitnexus analyze` in the terminal first.
+
+## Skills
+
+| Task                                         | Skill to read       |
+| -------------------------------------------- | ------------------- |
+| Understand architecture / "How does X work?" | `gitnexus-exploring`         |
+| Blast radius / "What breaks if I change X?"  | `gitnexus-impact-analysis`   |
+| Trace bugs / "Why is X failing?"             | `gitnexus-debugging`         |
+| Rename / extract / split / refactor          | `gitnexus-refactoring`       |
+| Tools, resources, schema reference           | `gitnexus-guide` (this file) |
+| Index, status, clean, wiki CLI commands      | `gitnexus-cli`               |
+
+## Tools Reference
+
+| Tool             | What it gives you                                                        |
+| ---------------- | ------------------------------------------------------------------------ |
+| `query`          | Process-grouped code intelligence — execution flows related to a concept |
+| `context`        | 360-degree symbol view — categorized refs, processes it participates in  |
+| `impact`         | Symbol blast radius — what breaks at depth 1/2/3 with confidence         |
+| `detect_changes` | Git-diff impact — what do your current changes affect                    |
+| `rename`         | Multi-file coordinated rename with confidence-tagged edits               |
+| `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
+| `list_repos`     | Discover indexed repos                                                   |
+
+## Resources Reference
+
+Lightweight reads (~100-500 tokens) for navigation:
+
+| Resource                                       | Content                                   |
+| ---------------------------------------------- | ----------------------------------------- |
+| `gitnexus://repo/{name}/context`               | Stats, staleness check                    |
+| `gitnexus://repo/{name}/clusters`              | All functional areas with cohesion scores |
+| `gitnexus://repo/{name}/cluster/{clusterName}` | Area members                              |
+| `gitnexus://repo/{name}/processes`             | All execution flows                       |
+| `gitnexus://repo/{name}/process/{processName}` | Step-by-step trace                        |
+| `gitnexus://repo/{name}/schema`                | Graph schema for Cypher                   |
+
+## Graph Schema
+
+**Nodes:** File, Function, Class, Interface, Method, Community, Process
+**Edges (via CodeRelation.type):** CALLS, IMPORTS, EXTENDS, IMPLEMENTS, DEFINES, MEMBER_OF, STEP_IN_PROCESS
+
+```cypher
+MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "myFunc"})
+RETURN caller.name, caller.filePath
+```
+</file>
+
+<file path=".claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md">
+---
+name: gitnexus-impact-analysis
+description: "Use when the user wants to know what will break if they change something, or needs safety analysis before editing code. Examples: \"Is it safe to change X?\", \"What depends on this?\", \"What will break?\""
+---
+
+# Impact Analysis with GitNexus
+
+## When to Use
+
+- "Is it safe to change this function?"
+- "What will break if I modify X?"
+- "Show me the blast radius"
+- "Who uses this code?"
+- Before making non-trivial code changes
+- Before committing — to understand what your changes affect
+
+## Workflow
+
+```
+1. gitnexus_impact({target: "X", direction: "upstream"})  → What depends on this
+2. READ gitnexus://repo/{name}/processes                   → Check affected execution flows
+3. gitnexus_detect_changes()                               → Map current git changes to affected flows
+4. Assess risk and report to user
+```
+
+> If "Index is stale" → run `npx gitnexus analyze` in terminal.
+
+## Checklist
+
+```
+- [ ] gitnexus_impact({target, direction: "upstream"}) to find dependents
+- [ ] Review d=1 items first (these WILL BREAK)
+- [ ] Check high-confidence (>0.8) dependencies
+- [ ] READ processes to check affected execution flows
+- [ ] gitnexus_detect_changes() for pre-commit check
+- [ ] Assess risk level and report to user
+```
+
+## Understanding Output
+
+| Depth | Risk Level       | Meaning                  |
+| ----- | ---------------- | ------------------------ |
+| d=1   | **WILL BREAK**   | Direct callers/importers |
+| d=2   | LIKELY AFFECTED  | Indirect dependencies    |
+| d=3   | MAY NEED TESTING | Transitive effects       |
+
+## Risk Assessment
+
+| Affected                       | Risk     |
+| ------------------------------ | -------- |
+| <5 symbols, few processes      | LOW      |
+| 5-15 symbols, 2-5 processes    | MEDIUM   |
+| >15 symbols or many processes  | HIGH     |
+| Critical path (auth, payments) | CRITICAL |
+
+## Tools
+
+**gitnexus_impact** — the primary tool for symbol blast radius:
+
+```
+gitnexus_impact({
+  target: "validateUser",
+  direction: "upstream",
+  minConfidence: 0.8,
+  maxDepth: 3
+})
+
+→ d=1 (WILL BREAK):
+  - loginHandler (src/auth/login.ts:42) [CALLS, 100%]
+  - apiMiddleware (src/api/middleware.ts:15) [CALLS, 100%]
+
+→ d=2 (LIKELY AFFECTED):
+  - authRouter (src/routes/auth.ts:22) [CALLS, 95%]
+```
+
+**gitnexus_detect_changes** — git-diff based impact analysis:
+
+```
+gitnexus_detect_changes({scope: "staged"})
+
+→ Changed: 5 symbols in 3 files
+→ Affected: LoginFlow, TokenRefresh, APIMiddlewarePipeline
+→ Risk: MEDIUM
+```
+
+## Example: "What breaks if I change validateUser?"
+
+```
+1. gitnexus_impact({target: "validateUser", direction: "upstream"})
+   → d=1: loginHandler, apiMiddleware (WILL BREAK)
+   → d=2: authRouter, sessionManager (LIKELY AFFECTED)
+
+2. READ gitnexus://repo/my-app/processes
+   → LoginFlow and TokenRefresh touch validateUser
+
+3. Risk: 2 direct callers, 2 processes = MEDIUM
+```
+</file>
+
+<file path=".claude/skills/gitnexus/gitnexus-refactoring/SKILL.md">
+---
+name: gitnexus-refactoring
+description: "Use when the user wants to rename, extract, split, move, or restructure code safely. Examples: \"Rename this function\", \"Extract this into a module\", \"Refactor this class\", \"Move this to a separate file\""
+---
+
+# Refactoring with GitNexus
+
+## When to Use
+
+- "Rename this function safely"
+- "Extract this into a module"
+- "Split this service"
+- "Move this to a new file"
+- Any task involving renaming, extracting, splitting, or restructuring code
+
+## Workflow
+
+```
+1. gitnexus_impact({target: "X", direction: "upstream"})  → Map all dependents
+2. gitnexus_query({query: "X"})                            → Find execution flows involving X
+3. gitnexus_context({name: "X"})                           → See all incoming/outgoing refs
+4. Plan update order: interfaces → implementations → callers → tests
+```
+
+> If "Index is stale" → run `npx gitnexus analyze` in terminal.
+
+## Checklists
+
+### Rename Symbol
+
+```
+- [ ] gitnexus_rename({symbol_name: "oldName", new_name: "newName", dry_run: true}) — preview all edits
+- [ ] Review graph edits (high confidence) and ast_search edits (review carefully)
+- [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
+- [ ] gitnexus_detect_changes() — verify only expected files changed
+- [ ] Run tests for affected processes
+```
+
+### Extract Module
+
+```
+- [ ] gitnexus_context({name: target}) — see all incoming/outgoing refs
+- [ ] gitnexus_impact({target, direction: "upstream"}) — find all external callers
+- [ ] Define new module interface
+- [ ] Extract code, update imports
+- [ ] gitnexus_detect_changes() — verify affected scope
+- [ ] Run tests for affected processes
+```
+
+### Split Function/Service
+
+```
+- [ ] gitnexus_context({name: target}) — understand all callees
+- [ ] Group callees by responsibility
+- [ ] gitnexus_impact({target, direction: "upstream"}) — map callers to update
+- [ ] Create new functions/services
+- [ ] Update callers
+- [ ] gitnexus_detect_changes() — verify affected scope
+- [ ] Run tests for affected processes
+```
+
+## Tools
+
+**gitnexus_rename** — automated multi-file rename:
+
+```
+gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
+→ 12 edits across 8 files
+→ 10 graph edits (high confidence), 2 ast_search edits (review)
+→ Changes: [{file_path, edits: [{line, old_text, new_text, confidence}]}]
+```
+
+**gitnexus_impact** — map all dependents first:
+
+```
+gitnexus_impact({target: "validateUser", direction: "upstream"})
+→ d=1: loginHandler, apiMiddleware, testUtils
+→ Affected Processes: LoginFlow, TokenRefresh
+```
+
+**gitnexus_detect_changes** — verify your changes after refactoring:
+
+```
+gitnexus_detect_changes({scope: "all"})
+→ Changed: 8 files, 12 symbols
+→ Affected processes: LoginFlow, TokenRefresh
+→ Risk: MEDIUM
+```
+
+**gitnexus_cypher** — custom reference queries:
+
+```cypher
+MATCH (caller)-[:CodeRelation {type: 'CALLS'}]->(f:Function {name: "validateUser"})
+RETURN caller.name, caller.filePath ORDER BY caller.filePath
+```
+
+## Risk Rules
+
+| Risk Factor         | Mitigation                                |
+| ------------------- | ----------------------------------------- |
+| Many callers (>5)   | Use gitnexus_rename for automated updates |
+| Cross-area refs     | Use detect_changes after to verify scope  |
+| String/dynamic refs | gitnexus_query to find them               |
+| External/public API | Version and deprecate properly            |
+
+## Example: Rename `validateUser` to `authenticateUser`
+
+```
+1. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
+   → 12 edits: 10 graph (safe), 2 ast_search (review)
+   → Files: validator.ts, login.ts, middleware.ts, config.json...
+
+2. Review ast_search edits (config.json: dynamic reference!)
+
+3. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: false})
+   → Applied 12 edits across 8 files
+
+4. gitnexus_detect_changes({scope: "all"})
+   → Affected: LoginFlow, TokenRefresh
+   → Risk: MEDIUM — run tests for these flows
+```
 </file>
 
 <file path="electron/preload.ts">
@@ -2015,400 +1887,86 @@ def test_run_in_sandbox_non_strict_returns_error_payload(monkeypatch: pytest.Mon
     assert result["sandbox"] is True
 </file>
 
-<file path="python/validator_engine.py">
-from __future__ import annotations
+<file path="python/tests/test_validator_engine.py">
+from pathlib import Path
+import sys
 
-from typing import Any
+sys.path.append(str(Path(__file__).parent.parent))
 
-
-def _to_period(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+from validator_engine import validate_schedule
 
 
-def _evaluate_condition(condition: dict[str, Any], schedule: list[dict[str, Any]]) -> bool:
-    op = condition.get("op")
-    if op == "teacher_teaches_on_day":
-        teacher = condition.get("teacher")
-        day = condition.get("day")
-        return any(e.get("teacher") == teacher and e.get("day") == day for e in schedule)
-    if op == "teacher_teaches_at_slot":
-        teacher = condition.get("teacher")
-        day = condition.get("day")
-        period = condition.get("period")
-        return any(
-            e.get("teacher") == teacher
-            and e.get("day") == day
-            and _to_period(e.get("period")) == _to_period(period)
-            for e in schedule
-        )
-    if op == "and":
-        return all(_evaluate_condition(arg, schedule) for arg in condition.get("args", []))
-    if op == "or":
-        return any(_evaluate_condition(arg, schedule) for arg in condition.get("args", []))
-    if op == "not":
-        return not _evaluate_condition(condition.get("arg", {}), schedule)
-    return False
-
-
-def _violation(constraint_id: str, kind: str, message: str, entries: list[dict[str, Any]]) -> dict[str, Any]:
+def _entry(klass: str, day: str, period: int, subject: str, teacher: str) -> dict:
     return {
-        "constraintId": constraint_id,
+        "class": klass,
+        "day": day,
+        "period": period,
+        "subject": subject,
+        "teacher": teacher,
+    }
+
+
+def _spec(spec_id: str, kind: str, params: dict, severity: str = "hard") -> dict:
+    return {
+        "id": spec_id,
         "kind": kind,
-        "message": message,
-        "offendingEntries": entries,
+        "severity": severity,
+        "params": params,
     }
 
 
-def _base_checks(schedule: list[dict[str, Any]], assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    violations: list[dict[str, Any]] = []
-    teacher_slot: dict[str, list[dict[str, Any]]] = {}
-    class_slot: dict[str, list[dict[str, Any]]] = {}
+def test_subject_consecutive_allows_remainder_periods_rule_a():
+    report = validate_schedule(
+        [
+            _entry("6A", "mon", 1, "Toán", "Sơn"),
+            _entry("6A", "mon", 2, "Toán", "Sơn"),
+            _entry("6A", "wed", 1, "Toán", "Sơn"),
+            _entry("6A", "wed", 2, "Toán", "Sơn"),
+            _entry("6A", "fri", 5, "Toán", "Sơn"),
+        ],
+        [_spec("subject_consecutive_rule_a", "subject_consecutive", {"subject": "Toán", "length": 2})],
+    )
 
-    for entry in schedule:
-        tkey = f"{entry.get('teacher')}::{entry.get('day')}::{entry.get('period')}"
-        ckey = f"{entry.get('class')}::{entry.get('day')}::{entry.get('period')}"
-        teacher_slot.setdefault(tkey, []).append(entry)
-        class_slot.setdefault(ckey, []).append(entry)
+    assert report["violations"] == []
 
-    for entries in teacher_slot.values():
-        if len(entries) > 1:
-            violations.append(
-                _violation(
-                    "base_teacher_clash",
-                    "base_constraint",
-                    "Teacher clash tại cùng slot.",
-                    entries,
-                )
+
+def test_class_no_double_subject_day_honors_custom_max_per_day():
+    report = validate_schedule(
+        [
+            _entry("6A", "mon", 1, "Toán", "Sơn"),
+            _entry("6A", "mon", 2, "Toán", "Sơn"),
+            _entry("6A", "mon", 3, "Toán", "Sơn"),
+        ],
+        [
+            _spec(
+                "class_no_double_custom",
+                "class_no_double_subject_day",
+                {"class": "6A", "subject": "Toán", "maxPerDay": 2},
             )
+        ],
+    )
 
-    for entries in class_slot.values():
-        if len(entries) > 1:
-            violations.append(
-                _violation(
-                    "base_class_clash",
-                    "base_constraint",
-                    "Class clash tại cùng slot.",
-                    entries,
-                )
-            )
-
-    for assignment in assignments:
-        matched = [
-            e
-            for e in schedule
-            if e.get("class") == assignment.get("class")
-            and e.get("subject") == assignment.get("subject")
-            and e.get("teacher") == assignment.get("teacher")
-        ]
-        expected = int(assignment.get("weeklyPeriods", 0))
-        if len(matched) != expected:
-            violations.append(
-                _violation(
-                    f"base_weekly_{assignment.get('id', 'unknown')}",
-                    "base_constraint",
-                    f"Weekly periods mismatch: expected {expected}, got {len(matched)}.",
-                    matched,
-                )
-            )
-    return violations
+    assert len(report["violations"]) == 1
+    assert report["violations"][0]["constraintId"] == "class_no_double_custom"
 
 
-def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    kind = spec.get("kind")
-    params = spec.get("params", {})
-    cid = spec.get("id", "unknown")
-
-    if kind == "teacher_block_day":
-        entries = [e for e in schedule if e.get("teacher") == params.get("teacher") and e.get("day") == params.get("day")]
-        return [] if not entries else [_violation(cid, kind, "teacher_block_day violated.", entries)]
-
-    if kind == "teacher_block_period":
-        period = _to_period(params.get("period"))
-        entries = [e for e in schedule if e.get("teacher") == params.get("teacher") and _to_period(e.get("period")) == period]
-        return [] if not entries else [_violation(cid, kind, "teacher_block_period violated.", entries)]
-
-    if kind == "teacher_block_slot":
-        period = _to_period(params.get("period"))
-        entries = [
-            e
-            for e in schedule
-            if e.get("teacher") == params.get("teacher")
-            and e.get("day") == params.get("day")
-            and _to_period(e.get("period")) == period
-        ]
-        return [] if not entries else [_violation(cid, kind, "teacher_block_slot violated.", entries)]
-
-    if kind == "teacher_max_per_day":
-        max_per_day = int(params.get("maxPerDay", 0))
-        by_day: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if entry.get("teacher") != params.get("teacher"):
-                continue
-            by_day.setdefault(str(entry.get("day")), []).append(entry)
-        out: list[dict[str, Any]] = []
-        for entries in by_day.values():
-            if len(entries) > max_per_day:
-                out.append(_violation(cid, kind, "teacher_max_per_day violated.", entries))
-        return out
-
-    if kind == "teacher_max_consecutive":
-        max_consecutive = int(params.get("maxConsecutive", 0))
-        by_day: dict[str, list[int]] = {}
-        for entry in schedule:
-            if entry.get("teacher") != params.get("teacher"):
-                continue
-            p = _to_period(entry.get("period"))
-            if p is None:
-                continue
-            by_day.setdefault(str(entry.get("day")), []).append(p)
-
-        out: list[dict[str, Any]] = []
-        for day, periods in by_day.items():
-            sorted_periods = sorted(periods)
-            if not sorted_periods:
-                continue
-            streak = 1 if sorted_periods else 0
-            longest = streak
-            for i in range(1, len(sorted_periods)):
-                if sorted_periods[i] == sorted_periods[i - 1] + 1:
-                    streak += 1
-                else:
-                    streak = 1
-                longest = max(longest, streak)
-            if longest > max_consecutive:
-                entries = [
-                    e
-                    for e in schedule
-                    if e.get("teacher") == params.get("teacher") and e.get("day") == day
-                ]
-                out.append(_violation(cid, kind, "teacher_max_consecutive violated.", entries))
-        return out
-
-    if kind == "subject_pin_period":
-        allowed = {_to_period(p) for p in params.get("periods", [])}
-        classes = params.get("classes")
-        entries = []
-        for entry in schedule:
-            if entry.get("subject") != params.get("subject"):
-                continue
-            if classes and entry.get("class") not in classes:
-                continue
-            if _to_period(entry.get("period")) not in allowed:
-                entries.append(entry)
-        return [] if not entries else [_violation(cid, kind, "subject_pin_period violated.", entries)]
-
-    if kind == "subject_consecutive":
-        length = int(params.get("length", 2))
-        subject = params.get("subject")
-        classes = params.get("classes")
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if entry.get("subject") != subject:
-                continue
-            if classes and entry.get("class") not in classes:
-                continue
-            grouped.setdefault(f"{entry.get('class')}::{entry.get('day')}", []).append(entry)
-
-        out: list[dict[str, Any]] = []
-        for entries in grouped.values():
-            periods = sorted(
-                p for p in (_to_period(e.get("period")) for e in entries) if p is not None
-            )
-            if len(periods) < length:
-                continue
-            total_periods = len(periods)
-            required_runs = total_periods // length
-            runs_of_correct_length = 0
-            streak = 1
-            for i in range(1, len(periods)):
-                if periods[i] == periods[i - 1] + 1:
-                    streak += 1
-                else:
-                    if streak >= length:
-                        runs_of_correct_length += streak // length
-                    streak = 1
-            if streak >= length:
-                runs_of_correct_length += streak // length
-            if runs_of_correct_length < required_runs:
-                out.append(_violation(cid, kind, "subject_consecutive violated.", entries))
-        return out
-
-    if kind == "class_no_double_subject_day":
-        klass = params.get("class")
-        subject = params.get("subject")
-        try:
-            max_per_day = int(params.get("maxPerDay", 1))
-        except (TypeError, ValueError):
-            max_per_day = 1
-        if max_per_day < 1:
-            max_per_day = 1
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if entry.get("class") != klass:
-                continue
-            if subject and entry.get("subject") != subject:
-                continue
-            key = f"{entry.get('day')}::{entry.get('subject')}"
-            grouped.setdefault(key, []).append(entry)
-        out: list[dict[str, Any]] = []
-        for entries in grouped.values():
-            if len(entries) > max_per_day:
-                out.append(_violation(cid, kind, "class_no_double_subject_day violated.", entries))
-        return out
-
-    if kind == "weekly_periods_exact":
-        expected = int(params.get("weeklyPeriods", 0))
-        entries = [
-            e
-            for e in schedule
-            if (not params.get("teacher") or e.get("teacher") == params.get("teacher"))
-            and (not params.get("subject") or e.get("subject") == params.get("subject"))
-            and (not params.get("class") or e.get("class") == params.get("class"))
-        ]
-        return [] if len(entries) == expected else [_violation(cid, kind, "weekly_periods_exact violated.", entries)]
-
-    if kind == "pair_not_same_slot":
-        teachers = params.get("teachers", [])
-        if len(teachers) != 2:
-            return []
-        scope_day = (params.get("scope") or {}).get("day")
-        relevant = [
-            e
-            for e in schedule
-            if e.get("teacher") in teachers and (scope_day is None or e.get("day") == scope_day)
-        ]
-        slots: dict[str, list[dict[str, Any]]] = {}
-        for entry in relevant:
-            key = f"{entry.get('day')}::{entry.get('period')}"
-            slots.setdefault(key, []).append(entry)
-        out: list[dict[str, Any]] = []
-        for entries in slots.values():
-            if len({e.get("teacher") for e in entries}) > 1:
-                out.append(_violation(cid, kind, "pair_not_same_slot violated.", entries))
-        return out
-
-    if kind == "if_then":
-        condition = params.get("if", {})
-        then_list = params.get("then", [])
-        if not _evaluate_condition(condition, schedule):
-            return []
-        out: list[dict[str, Any]] = []
-        for index, nested in enumerate(then_list):
-            nested_spec = {
-                "id": f"{cid}:then:{index + 1}",
-                "kind": nested.get("kind", "custom_dsl"),
-                "params": nested.get("params", {}),
-            }
-            for violation in _check_single(nested_spec, schedule):
-                out.append(
-                    _violation(
-                        cid,
-                        kind,
-                        f"if_then violated: {violation['message']}",
-                        violation["offendingEntries"],
-                    )
-                )
-        return out
-
-    if kind == "resource_capacity":
-        subject = params.get("subject")
-        try:
-            capacity = int(params.get("capacity", 1))
-        except (TypeError, ValueError):
-            capacity = 1
-        by_slot: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if entry.get("subject") != subject:
-                continue
-            key = f"{entry.get('day')}::{entry.get('period')}"
-            by_slot.setdefault(key, []).append(entry)
-        out: list[dict[str, Any]] = []
-        for entries in by_slot.values():
-            if len(entries) > capacity:
-                out.append(_violation(cid, kind, "resource_capacity violated.", entries))
-        return out
-
-    if kind == "session_limit":
-        teacher = params.get("teacher")
-        try:
-            max_periods = int(params.get("maxPeriods", 1))
-        except (TypeError, ValueError):
-            max_periods = 1
-        if not teacher:
-            return []
-        by_day: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if entry.get("teacher") != teacher:
-                continue
-            by_day.setdefault(str(entry.get("day")), []).append(entry)
-        out: list[dict[str, Any]] = []
-        for entries in by_day.values():
-            if len(entries) > max_periods:
-                out.append(_violation(cid, kind, "session_limit violated.", entries))
-        return out
-
-    if kind == "subject_group_daily_limit":
-        target_class = params.get("class")
-        try:
-            max_per_day = int(params.get("maxPerDay", 1))
-        except (TypeError, ValueError):
-            max_per_day = 1
-        by_day_subjects: dict[str, set[Any]] = {}
-        by_day_entries: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if target_class and entry.get("class") != target_class:
-                continue
-            day_key = str(entry.get("day"))
-            by_day_subjects.setdefault(day_key, set()).add(entry.get("subject"))
-            by_day_entries.setdefault(day_key, []).append(entry)
-        out: list[dict[str, Any]] = []
-        for day_key, subjects in by_day_subjects.items():
-            if len(subjects) > max_per_day:
-                out.append(
-                    _violation(cid, kind, "subject_group_daily_limit violated.", by_day_entries.get(day_key, []))
-                )
-        return out
-
-    return []
-
-
-def validate_schedule(
-    schedule: list[dict[str, Any]],
-    constraint_specs: list[dict[str, Any]],
-    assignments: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    assignments = assignments or []
-    base_violations = _base_checks(schedule, assignments)
-    violations = list(base_violations)
-    unchecked: list[str] = []
-
-    for spec in constraint_specs:
-        if spec.get("kind") == "custom_dsl":
-            unchecked.append(str(spec.get("id", "unknown")))
-            continue
-        violations.extend(_check_single(spec, schedule))
-
-    hard_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "hard"}
-    soft_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "soft"}
-
-    hard_violations = [
-        v for v in violations if v.get("kind") == "base_constraint" or v.get("constraintId") in hard_ids
+def test_validator_checks_resource_capacity_session_limit_and_subject_group_daily_limit():
+    schedule = [
+        _entry("6A", "mon", 1, "Toán", "Sơn"),
+        _entry("6B", "mon", 1, "Toán", "Mai"),
+        _entry("6A", "tue", 1, "Văn", "Sơn"),
+        _entry("6A", "tue", 2, "Anh", "Sơn"),
+        _entry("6A", "tue", 3, "Sử", "Sơn"),
     ]
-    soft_violations = [v for v in violations if v.get("constraintId") in soft_ids]
+    specs = [
+        _spec("capacity", "resource_capacity", {"subject": "Toán", "capacity": 1}),
+        _spec("session", "session_limit", {"teacher": "Sơn", "maxPeriods": 2}),
+        _spec("group", "subject_group_daily_limit", {"class": "6A", "maxPerDay": 2}),
+    ]
 
-    return {
-        "ok": len(violations) == 0,
-        "baseConstraintPass": len(base_violations) == 0,
-        "hardConstraintPass": len(hard_violations) == 0,
-        "softConstraintPass": len(soft_violations) == 0,
-        "violations": violations,
-        "hardViolations": hard_violations,
-        "softViolations": soft_violations,
-        "uncheckedConstraintIds": unchecked,
-    }
+    report = validate_schedule(schedule, specs)
+
+    assert {violation["constraintId"] for violation in report["violations"]} == {"capacity", "session", "group"}
 </file>
 
 <file path="sandbox/.dockerignore">
@@ -4317,6 +3875,52 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
 }
 </file>
 
+<file path="CLAUDE.md">
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **timetable** (1861 symbols, 2746 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/timetable/clusters` | All functional areas |
+| `gitnexus://repo/timetable/processes` | All execution flows |
+| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
+</file>
+
 <file path="eslint.config.mjs">
 import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 import nextTypescript from "eslint-config-next/typescript";
@@ -4548,6 +4152,8 @@ kind: ConstraintKind,         // xem bảng dưới
 
 params: { ... },              // tùy kind, xem bảng
 
+weight?: number,              // BẮT BUỘC với soft khi đề bài ghi weight=N; mặc định 1
+
 notes?: string                // ghi chú edge case nếu có
 
 }
@@ -4565,7 +4171,10 @@ notes?: string                // ghi chú edge case nếu có
 | `teacher_max_consecutive` | "GV X tối đa N tiết liên tiếp" | `{ teacher: string, maxConsecutive: number }` |
 | `subject_pin_period` | "Môn X chỉ xếp tiết Y" | `{ subject: string, periods: number[], classes?: string[] }` |
 | `subject_consecutive` | "Môn X cần có block liên tiếp N tiết" | `{ subject: string, length: number, classes?: string[] }` |
-| `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" | `{ class: string, subject?: string }` |
+| `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" / "phân bổ đều, không quá N tiết/ngày" | `{ class?: string, subject?: string, maxPerDay?: number }` |
+| `class_subjects_not_same_day` | "Không xếp môn A và môn B cùng ngày cho cùng lớp" | `{ subjects: string[], class?: string, maxSubjectsPerDay?: number }` |
+| `teacher_max_working_days` | "GV X có ít nhất N ngày nghỉ" / "GV dạy tối đa N ngày/tuần" | `{ teacher?: string, minDaysOff?: number, maxDays?: number }` |
+| `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` |
 | `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
 | `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |
 | `custom_dsl` | Không khớp loại nào ở trên | `{ pythonPredicate: string, naturalLanguage: string }` |
@@ -4599,6 +4208,7 @@ type ConditionExpr =
 5. Nếu câu có dạng implication phức tạp (vd ví dụ Trang/Thúy/Hòa), DÙNG `if_then` với `then` là MẢNG các sub-constraint (không phải 1 cái).
 6. KHÔNG được tự thêm constraint không có trong input. KHÔNG được lược bỏ constraint.
 7. `severity` mặc định theo `severity_hint`. Nếu không có hint: "không, cấm, phải" → hard; "nên, ưu tiên, cố gắng" → soft.
+8. Với soft constraint, nếu input ghi "weight=N", gán `weight: N` cho từng spec trong nhóm đó. Nếu câu áp cho "mỗi giáo viên" hoặc "mọi lớp", để trống field `teacher`/`class` tương ứng để hệ thống áp globally.
 
 ## Ví dụ mẫu (FEW-SHOT)
 
@@ -4717,6 +4327,402 @@ def test_bwrap_mounts_python_package_roots(monkeypatch, tmp_path):
     assert "PYTHONPATH" in cmd
     pythonpath = cmd[cmd.index("PYTHONPATH") + 1]
     assert "/tmp/timetable-python-site-0" in pythonpath
+</file>
+
+<file path="python/validator_engine.py">
+from __future__ import annotations
+
+from typing import Any
+
+
+def _to_period(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _evaluate_condition(condition: dict[str, Any], schedule: list[dict[str, Any]]) -> bool:
+    op = condition.get("op")
+    if op == "teacher_teaches_on_day":
+        teacher = condition.get("teacher")
+        day = condition.get("day")
+        return any(e.get("teacher") == teacher and e.get("day") == day for e in schedule)
+    if op == "teacher_teaches_at_slot":
+        teacher = condition.get("teacher")
+        day = condition.get("day")
+        period = condition.get("period")
+        return any(
+            e.get("teacher") == teacher
+            and e.get("day") == day
+            and _to_period(e.get("period")) == _to_period(period)
+            for e in schedule
+        )
+    if op == "and":
+        return all(_evaluate_condition(arg, schedule) for arg in condition.get("args", []))
+    if op == "or":
+        return any(_evaluate_condition(arg, schedule) for arg in condition.get("args", []))
+    if op == "not":
+        return not _evaluate_condition(condition.get("arg", {}), schedule)
+    return False
+
+
+def _violation(constraint_id: str, kind: str, message: str, entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "constraintId": constraint_id,
+        "kind": kind,
+        "message": message,
+        "offendingEntries": entries,
+    }
+
+
+def _base_checks(schedule: list[dict[str, Any]], assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    violations: list[dict[str, Any]] = []
+    teacher_slot: dict[str, list[dict[str, Any]]] = {}
+    class_slot: dict[str, list[dict[str, Any]]] = {}
+
+    for entry in schedule:
+        tkey = f"{entry.get('teacher')}::{entry.get('day')}::{entry.get('period')}"
+        ckey = f"{entry.get('class')}::{entry.get('day')}::{entry.get('period')}"
+        teacher_slot.setdefault(tkey, []).append(entry)
+        class_slot.setdefault(ckey, []).append(entry)
+
+    for entries in teacher_slot.values():
+        if len(entries) > 1:
+            violations.append(
+                _violation(
+                    "base_teacher_clash",
+                    "base_constraint",
+                    "Teacher clash tại cùng slot.",
+                    entries,
+                )
+            )
+
+    for entries in class_slot.values():
+        if len(entries) > 1:
+            violations.append(
+                _violation(
+                    "base_class_clash",
+                    "base_constraint",
+                    "Class clash tại cùng slot.",
+                    entries,
+                )
+            )
+
+    for assignment in assignments:
+        matched = [
+            e
+            for e in schedule
+            if e.get("class") == assignment.get("class")
+            and e.get("subject") == assignment.get("subject")
+            and e.get("teacher") == assignment.get("teacher")
+        ]
+        expected = int(assignment.get("weeklyPeriods", 0))
+        if len(matched) != expected:
+            violations.append(
+                _violation(
+                    f"base_weekly_{assignment.get('id', 'unknown')}",
+                    "base_constraint",
+                    f"Weekly periods mismatch: expected {expected}, got {len(matched)}.",
+                    matched,
+                )
+            )
+    return violations
+
+
+def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    kind = spec.get("kind")
+    params = spec.get("params", {})
+    cid = spec.get("id", "unknown")
+
+    if kind == "teacher_block_day":
+        entries = [e for e in schedule if e.get("teacher") == params.get("teacher") and e.get("day") == params.get("day")]
+        return [] if not entries else [_violation(cid, kind, "teacher_block_day violated.", entries)]
+
+    if kind == "teacher_block_period":
+        period = _to_period(params.get("period"))
+        entries = [e for e in schedule if e.get("teacher") == params.get("teacher") and _to_period(e.get("period")) == period]
+        return [] if not entries else [_violation(cid, kind, "teacher_block_period violated.", entries)]
+
+    if kind == "teacher_block_slot":
+        period = _to_period(params.get("period"))
+        entries = [
+            e
+            for e in schedule
+            if e.get("teacher") == params.get("teacher")
+            and e.get("day") == params.get("day")
+            and _to_period(e.get("period")) == period
+        ]
+        return [] if not entries else [_violation(cid, kind, "teacher_block_slot violated.", entries)]
+
+    if kind == "teacher_max_per_day":
+        max_per_day = int(params.get("maxPerDay", 0))
+        by_day: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("teacher") != params.get("teacher"):
+                continue
+            by_day.setdefault(str(entry.get("day")), []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in by_day.values():
+            if len(entries) > max_per_day:
+                out.append(_violation(cid, kind, "teacher_max_per_day violated.", entries))
+        return out
+
+    if kind == "teacher_max_consecutive":
+        max_consecutive = int(params.get("maxConsecutive", 0))
+        by_day: dict[str, list[int]] = {}
+        for entry in schedule:
+            if entry.get("teacher") != params.get("teacher"):
+                continue
+            p = _to_period(entry.get("period"))
+            if p is None:
+                continue
+            by_day.setdefault(str(entry.get("day")), []).append(p)
+
+        out: list[dict[str, Any]] = []
+        for day, periods in by_day.items():
+            sorted_periods = sorted(periods)
+            if not sorted_periods:
+                continue
+            streak = 1 if sorted_periods else 0
+            longest = streak
+            for i in range(1, len(sorted_periods)):
+                if sorted_periods[i] == sorted_periods[i - 1] + 1:
+                    streak += 1
+                else:
+                    streak = 1
+                longest = max(longest, streak)
+            if longest > max_consecutive:
+                entries = [
+                    e
+                    for e in schedule
+                    if e.get("teacher") == params.get("teacher") and e.get("day") == day
+                ]
+                out.append(_violation(cid, kind, "teacher_max_consecutive violated.", entries))
+        return out
+
+    if kind == "subject_pin_period":
+        allowed = {_to_period(p) for p in params.get("periods", [])}
+        classes = params.get("classes")
+        entries = []
+        for entry in schedule:
+            if entry.get("subject") != params.get("subject"):
+                continue
+            if classes and entry.get("class") not in classes:
+                continue
+            if _to_period(entry.get("period")) not in allowed:
+                entries.append(entry)
+        return [] if not entries else [_violation(cid, kind, "subject_pin_period violated.", entries)]
+
+    if kind == "subject_consecutive":
+        length = int(params.get("length", 2))
+        subject = params.get("subject")
+        classes = params.get("classes")
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("subject") != subject:
+                continue
+            if classes and entry.get("class") not in classes:
+                continue
+            grouped.setdefault(f"{entry.get('class')}::{entry.get('day')}", []).append(entry)
+
+        out: list[dict[str, Any]] = []
+        for entries in grouped.values():
+            periods = sorted(
+                p for p in (_to_period(e.get("period")) for e in entries) if p is not None
+            )
+            if len(periods) < length:
+                continue
+            total_periods = len(periods)
+            required_runs = total_periods // length
+            runs_of_correct_length = 0
+            streak = 1
+            for i in range(1, len(periods)):
+                if periods[i] == periods[i - 1] + 1:
+                    streak += 1
+                else:
+                    if streak >= length:
+                        runs_of_correct_length += streak // length
+                    streak = 1
+            if streak >= length:
+                runs_of_correct_length += streak // length
+            if runs_of_correct_length < required_runs:
+                out.append(_violation(cid, kind, "subject_consecutive violated.", entries))
+        return out
+
+    if kind == "class_no_double_subject_day":
+        klass = params.get("class")
+        subject = params.get("subject")
+        try:
+            max_per_day = int(params.get("maxPerDay", 1))
+        except (TypeError, ValueError):
+            max_per_day = 1
+        if max_per_day < 1:
+            max_per_day = 1
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("class") != klass:
+                continue
+            if subject and entry.get("subject") != subject:
+                continue
+            key = f"{entry.get('day')}::{entry.get('subject')}"
+            grouped.setdefault(key, []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in grouped.values():
+            if len(entries) > max_per_day:
+                out.append(_violation(cid, kind, "class_no_double_subject_day violated.", entries))
+        return out
+
+    if kind == "weekly_periods_exact":
+        expected = int(params.get("weeklyPeriods", 0))
+        entries = [
+            e
+            for e in schedule
+            if (not params.get("teacher") or e.get("teacher") == params.get("teacher"))
+            and (not params.get("subject") or e.get("subject") == params.get("subject"))
+            and (not params.get("class") or e.get("class") == params.get("class"))
+        ]
+        return [] if len(entries) == expected else [_violation(cid, kind, "weekly_periods_exact violated.", entries)]
+
+    if kind == "pair_not_same_slot":
+        teachers = params.get("teachers", [])
+        if len(teachers) != 2:
+            return []
+        scope_day = (params.get("scope") or {}).get("day")
+        relevant = [
+            e
+            for e in schedule
+            if e.get("teacher") in teachers and (scope_day is None or e.get("day") == scope_day)
+        ]
+        slots: dict[str, list[dict[str, Any]]] = {}
+        for entry in relevant:
+            key = f"{entry.get('day')}::{entry.get('period')}"
+            slots.setdefault(key, []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in slots.values():
+            if len({e.get("teacher") for e in entries}) > 1:
+                out.append(_violation(cid, kind, "pair_not_same_slot violated.", entries))
+        return out
+
+    if kind == "if_then":
+        condition = params.get("if", {})
+        then_list = params.get("then", [])
+        if not _evaluate_condition(condition, schedule):
+            return []
+        out: list[dict[str, Any]] = []
+        for index, nested in enumerate(then_list):
+            nested_spec = {
+                "id": f"{cid}:then:{index + 1}",
+                "kind": nested.get("kind", "custom_dsl"),
+                "params": nested.get("params", {}),
+            }
+            for violation in _check_single(nested_spec, schedule):
+                out.append(
+                    _violation(
+                        cid,
+                        kind,
+                        f"if_then violated: {violation['message']}",
+                        violation["offendingEntries"],
+                    )
+                )
+        return out
+
+    if kind == "resource_capacity":
+        subject = params.get("subject")
+        try:
+            capacity = int(params.get("capacity", 1))
+        except (TypeError, ValueError):
+            capacity = 1
+        by_slot: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("subject") != subject:
+                continue
+            key = f"{entry.get('day')}::{entry.get('period')}"
+            by_slot.setdefault(key, []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in by_slot.values():
+            if len(entries) > capacity:
+                out.append(_violation(cid, kind, "resource_capacity violated.", entries))
+        return out
+
+    if kind == "session_limit":
+        teacher = params.get("teacher")
+        try:
+            max_periods = int(params.get("maxPeriods", 1))
+        except (TypeError, ValueError):
+            max_periods = 1
+        if not teacher:
+            return []
+        by_day: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("teacher") != teacher:
+                continue
+            by_day.setdefault(str(entry.get("day")), []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in by_day.values():
+            if len(entries) > max_periods:
+                out.append(_violation(cid, kind, "session_limit violated.", entries))
+        return out
+
+    if kind == "subject_group_daily_limit":
+        target_class = params.get("class")
+        try:
+            max_per_day = int(params.get("maxPerDay", 1))
+        except (TypeError, ValueError):
+            max_per_day = 1
+        by_day_subjects: dict[str, set[Any]] = {}
+        by_day_entries: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if target_class and entry.get("class") != target_class:
+                continue
+            day_key = str(entry.get("day"))
+            by_day_subjects.setdefault(day_key, set()).add(entry.get("subject"))
+            by_day_entries.setdefault(day_key, []).append(entry)
+        out: list[dict[str, Any]] = []
+        for day_key, subjects in by_day_subjects.items():
+            if len(subjects) > max_per_day:
+                out.append(
+                    _violation(cid, kind, "subject_group_daily_limit violated.", by_day_entries.get(day_key, []))
+                )
+        return out
+
+    return []
+
+
+def validate_schedule(
+    schedule: list[dict[str, Any]],
+    constraint_specs: list[dict[str, Any]],
+    assignments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    assignments = assignments or []
+    base_violations = _base_checks(schedule, assignments)
+    violations = list(base_violations)
+    unchecked: list[str] = []
+
+    for spec in constraint_specs:
+        if spec.get("kind") == "custom_dsl":
+            unchecked.append(str(spec.get("id", "unknown")))
+            continue
+        violations.extend(_check_single(spec, schedule))
+
+    hard_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "hard"}
+    soft_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "soft"}
+
+    hard_violations = [
+        v for v in violations if v.get("kind") == "base_constraint" or v.get("constraintId") in hard_ids
+    ]
+    soft_violations = [v for v in violations if v.get("constraintId") in soft_ids]
+
+    return {
+        "ok": len(violations) == 0,
+        "baseConstraintPass": len(base_violations) == 0,
+        "hardConstraintPass": len(hard_violations) == 0,
+        "softConstraintPass": len(soft_violations) == 0,
+        "violations": violations,
+        "hardViolations": hard_violations,
+        "softViolations": soft_violations,
+        "uncheckedConstraintIds": unchecked,
+    }
 </file>
 
 <file path="sandbox/run.py">
@@ -5168,329 +5174,6 @@ export default function RootLayout({
     </html>
   );
 }
-</file>
-
-<file path="src/features/timetable/ai/deterministic-validator.test.ts">
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
-
-import type { ConstraintKind, ConstraintSpec, ScheduleEntry } from './constraint-spec';
-import { validateSchedule } from './deterministic-validator';
-
-type CheckerCase = {
-  kind: ConstraintKind;
-  spec: ConstraintSpec;
-  pass: ScheduleEntry[];
-  fail: ScheduleEntry[];
-};
-
-const entry = (
-  klass: string,
-  day: string,
-  period: number,
-  subject: string,
-  teacher: string
-): ScheduleEntry => ({
-  class: klass,
-  day,
-  period,
-  subject,
-  teacher,
-});
-
-const spec = (
-  id: string,
-  kind: ConstraintKind,
-  params: Record<string, unknown>,
-  severity: ConstraintSpec['severity'] = 'hard'
-): ConstraintSpec => ({
-  id,
-  original: id,
-  severity,
-  kind,
-  params,
-});
-
-const checkerCases: CheckerCase[] = [
-  {
-    kind: 'teacher_block_day',
-    spec: spec('teacher_block_day', 'teacher_block_day', { teacher: 'Sơn', day: 'mon' }),
-    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'teacher_block_period',
-    spec: spec('teacher_block_period', 'teacher_block_period', { teacher: 'Sơn', period: 3 }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'teacher_block_slot',
-    spec: spec('teacher_block_slot', 'teacher_block_slot', {
-      teacher: 'Sơn',
-      day: 'mon',
-      period: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 2, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'teacher_max_per_day',
-    spec: spec('teacher_max_per_day', 'teacher_max_per_day', {
-      teacher: 'Sơn',
-      maxPerDay: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
-      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'teacher_max_consecutive',
-    spec: spec('teacher_max_consecutive', 'teacher_max_consecutive', {
-      teacher: 'Sơn',
-      maxConsecutive: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
-      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'subject_pin_period',
-    spec: spec('subject_pin_period', 'subject_pin_period', { subject: 'Toán', periods: [1, 2] }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Toán', 'Thúy')],
-    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'subject_consecutive',
-    spec: spec('subject_consecutive', 'subject_consecutive', { subject: 'Toán', length: 2 }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'class_no_double_subject_day',
-    spec: spec('class_no_double_subject_day', 'class_no_double_subject_day', {
-      class: '6A',
-      subject: 'Toán',
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'weekly_periods_exact',
-    spec: spec('weekly_periods_exact', 'weekly_periods_exact', {
-      teacher: 'Sơn',
-      subject: 'Toán',
-      class: '6A',
-      weeklyPeriods: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'if_then',
-    spec: spec('if_then', 'if_then', {
-      if: { op: 'teacher_teaches_on_day', teacher: 'Sơn', day: 'mon' },
-      then: [{ kind: 'teacher_block_day', params: { teacher: 'Thúy', day: 'mon' } }],
-    }),
-    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
-  },
-  {
-    kind: 'pair_not_same_slot',
-    spec: spec('pair_not_same_slot', 'pair_not_same_slot', { teachers: ['Sơn', 'Thúy'] }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Văn', 'Thúy')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
-  },
-  {
-    kind: 'custom_dsl',
-    spec: spec('custom_dsl', 'custom_dsl', { naturalLanguage: 'custom expression' }, 'soft'),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-  },
-];
-
-describe('checker matrix', () => {
-  for (const checkerCase of checkerCases) {
-    it(`${checkerCase.kind} passes valid schedule`, () => {
-      const report = validateSchedule(checkerCase.pass, [checkerCase.spec]);
-
-      assert.deepEqual(report.violations, []);
-      if (checkerCase.kind === 'custom_dsl') {
-        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
-      }
-    });
-
-    it(`${checkerCase.kind} catches invalid schedule`, () => {
-      const report = validateSchedule(checkerCase.fail, [checkerCase.spec]);
-
-      if (checkerCase.kind === 'custom_dsl') {
-        assert.deepEqual(report.violations, []);
-        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
-        return;
-      }
-
-      assert.ok(report.violations.length > 0);
-    });
-  }
-});
-
-describe('validator edge cases', () => {
-  it('teacher_max_consecutive passes when teacher has no scheduled entries', () => {
-    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [
-      spec('teacher_max_consecutive_empty', 'teacher_max_consecutive', {
-        teacher: 'Minh',
-        maxConsecutive: 1,
-      }),
-    ]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('teacher_max_consecutive detects overrun 7 with max 6', () => {
-    const localSchedule = Array.from({ length: 7 }, (_, index) =>
-      entry('6A', 'mon', index + 1, 'Toán', 'Sơn')
-    );
-    const report = validateSchedule(localSchedule, [
-      spec('teacher_max_consecutive_overrun', 'teacher_max_consecutive', {
-        teacher: 'Sơn',
-        maxConsecutive: 6,
-      }),
-    ]);
-    assert.equal(report.violations.length, 1);
-  });
-
-  it('teacher_max_consecutive handles split sessions without false positive', () => {
-    const localSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 5, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 6, 'Toán', 'Sơn'),
-    ];
-    const report = validateSchedule(localSchedule, [
-      spec('teacher_max_consecutive_split', 'teacher_max_consecutive', {
-        teacher: 'Sơn',
-        maxConsecutive: 2,
-      }),
-    ]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('subject_consecutive accepts long run divisible by block length', () => {
-    const localSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 4, 'Toán', 'Sơn'),
-    ];
-    const report = validateSchedule(localSchedule, [
-      spec('subject_consecutive_long_run', 'subject_consecutive', { subject: 'Toán', length: 2 }),
-    ]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('subject_consecutive follows Rule A for remainder periods', () => {
-    const subjectConsecutiveRule = spec('subject_consecutive_rule_a', 'subject_consecutive', {
-      subject: 'Toán',
-      length: 2,
-    });
-
-    const threePeriodsReport = validateSchedule(
-      [
-        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
-      ],
-      [subjectConsecutiveRule]
-    );
-    assert.equal(threePeriodsReport.violations.length, 0);
-
-    const fivePeriodsReport = validateSchedule(
-      [
-        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
-        entry('6A', 'wed', 2, 'Toán', 'Sơn'),
-        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
-      ],
-      [subjectConsecutiveRule]
-    );
-    assert.equal(fivePeriodsReport.violations.length, 0);
-  });
-
-  it('subject_consecutive fails when Rule A required run count is not met', () => {
-    const report = validateSchedule(
-      [
-        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-        entry('6A', 'tue', 4, 'Toán', 'Sơn'),
-        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
-        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
-      ],
-      [spec('subject_consecutive_rule_a_fail', 'subject_consecutive', { subject: 'Toán', length: 2 })]
-    );
-
-    assert.equal(report.violations.length, 1);
-  });
-
-  it('weekly_periods_exact skips validation with auto_base tag', () => {
-    const autoBaseSpec = spec('weekly_periods_auto_base', 'weekly_periods_exact', {
-      assignmentId: 'asg_1',
-      weeklyPeriods: 10,
-    });
-    autoBaseSpec.tags = ['auto_base'];
-
-    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [autoBaseSpec]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('class_no_double_subject_day honors custom maxPerDay parameter', () => {
-    const customDoubleSpec = spec('class_no_double_subject_day_custom', 'class_no_double_subject_day', {
-      class: '6A',
-      subject: 'Toán',
-      maxPerDay: 2,
-    });
-
-    const passSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-    ];
-    const passReport = validateSchedule(passSchedule, [customDoubleSpec]);
-    assert.equal(passReport.violations.length, 0);
-
-    const failSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
-    ];
-    const failReport = validateSchedule(failSchedule, [customDoubleSpec]);
-    assert.equal(failReport.violations.length, 1);
-    assert.match(failReport.violations[0].message, /tối đa 2/);
-  });
-
-  it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
-    const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
-      naturalLanguage: 'custom hard constraint description',
-    }, 'hard');
-
-    const report = validateSchedule(
-      [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-      [uncheckedHardSpec]
-    );
-
-    assert.equal(report.ok, false);
-    assert.equal(report.hardConstraintPass, false);
-    assert.equal(report.hardCoverageComplete, false);
-    assert.deepEqual(report.hardUncheckedConstraintIds, ['unchecked_hard_spec']);
-  });
-});
 </file>
 
 <file path="src/features/timetable/ai/input-compressor.ts">
@@ -6790,103 +6473,360 @@ test('ensureCoverage - throws when code has no evidence of handling id', async (
 });
 </file>
 
-<file path="src/features/timetable/ai/constraint-spec.ts">
-export type ConstraintKind =
-  | 'teacher_block_day'
-  | 'teacher_block_period'
-  | 'teacher_block_slot'
-  | 'teacher_max_per_day'
-  | 'teacher_max_consecutive'
-  | 'subject_pin_period'
-  | 'subject_consecutive'
-  | 'class_no_double_subject_day'
-  | 'weekly_periods_exact'
-  | 'if_then'
-  | 'pair_not_same_slot'
-  | 'resource_capacity'
-  | 'session_limit'
-  | 'subject_group'
-  | 'subject_group_daily_limit'
-  | 'custom_dsl';
+<file path="src/features/timetable/ai/deterministic-validator.test.ts">
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 
-export type ConditionExpr =
-  | { op: 'teacher_teaches_on_day'; teacher: string; day: string }
-  | { op: 'teacher_teaches_at_slot'; teacher: string; day: string; period: number }
-  | { op: 'and'; args: ConditionExpr[] }
-  | { op: 'or'; args: ConditionExpr[] }
-  | { op: 'not'; arg: ConditionExpr };
+import type { ConstraintKind, ConstraintSpec, ScheduleEntry } from './constraint-spec';
+import { validateSchedule } from './deterministic-validator';
 
-export type ConstraintSeverity = 'hard' | 'soft' | 'info';
-export type ConstraintTag = 'auto_base' | 'user_required' | 'user_preferred';
-
-export type ConstraintSpec = {
-  id: string;
-  original: string;
-  severity: ConstraintSeverity;
+type CheckerCase = {
   kind: ConstraintKind;
-  params: Record<string, unknown>;
-  tags?: ConstraintTag[];
-  notes?: string;
+  spec: ConstraintSpec;
+  pass: ScheduleEntry[];
+  fail: ScheduleEntry[];
 };
 
-export type Plan = {
-  decisionVars: string;
-  domainSize: {
-    classes: number;
-    days: number;
-    periods: number;
-    estimated?: number;
-    estimatedVars?: number;
-  };
-  constraintOrder: string[];
-  reifiedNeeded: string[];
-  objective: 'none' | 'maximize_soft' | 'minimize_gaps';
-  templatesUsed: string[];
-  objectiveFunction?: string;
-  provenPatterns?: string[];
-  risks: string[];
-};
+const entry = (
+  klass: string,
+  day: string,
+  period: number,
+  subject: string,
+  teacher: string
+): ScheduleEntry => ({
+  class: klass,
+  day,
+  period,
+  subject,
+  teacher,
+});
 
-export type ScheduleEntry = {
-  assignmentId?: string;
-  class: string;
-  day: string;
-  period: number | string;
-  subject: string;
-  teacher: string;
-};
+const spec = (
+  id: string,
+  kind: ConstraintKind,
+  params: Record<string, unknown>,
+  severity: ConstraintSpec['severity'] = 'hard'
+): ConstraintSpec => ({
+  id,
+  original: id,
+  severity,
+  kind,
+  params,
+});
 
-export type Violation = {
-  constraintId: string;
-  kind: ConstraintKind | 'base_constraint';
-  message: string;
-  offendingEntries: ScheduleEntry[];
-};
+const checkerCases: CheckerCase[] = [
+  {
+    kind: 'teacher_block_day',
+    spec: spec('teacher_block_day', 'teacher_block_day', { teacher: 'Sơn', day: 'mon' }),
+    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'teacher_block_period',
+    spec: spec('teacher_block_period', 'teacher_block_period', { teacher: 'Sơn', period: 3 }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'teacher_block_slot',
+    spec: spec('teacher_block_slot', 'teacher_block_slot', {
+      teacher: 'Sơn',
+      day: 'mon',
+      period: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 2, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'teacher_max_per_day',
+    spec: spec('teacher_max_per_day', 'teacher_max_per_day', {
+      teacher: 'Sơn',
+      maxPerDay: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
+      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'teacher_max_consecutive',
+    spec: spec('teacher_max_consecutive', 'teacher_max_consecutive', {
+      teacher: 'Sơn',
+      maxConsecutive: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
+      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'subject_pin_period',
+    spec: spec('subject_pin_period', 'subject_pin_period', { subject: 'Toán', periods: [1, 2] }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Toán', 'Thúy')],
+    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'subject_consecutive',
+    spec: spec('subject_consecutive', 'subject_consecutive', { subject: 'Toán', length: 2 }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'class_no_double_subject_day',
+    spec: spec('class_no_double_subject_day', 'class_no_double_subject_day', {
+      class: '6A',
+      subject: 'Toán',
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'class_subjects_not_same_day',
+    spec: spec('class_subjects_not_same_day', 'class_subjects_not_same_day', {
+      class: '6A',
+      subjects: ['Toán', 'Văn'],
+      maxSubjectsPerDay: 1,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Lan')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Lan')],
+  },
+  {
+    kind: 'teacher_max_working_days',
+    spec: spec('teacher_max_working_days', 'teacher_max_working_days', {
+      teacher: 'Sơn',
+      maxDays: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'tue', 1, 'Văn', 'Sơn'),
+      entry('6A', 'wed', 1, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'subject_max_consecutive',
+    spec: spec('subject_max_consecutive', 'subject_max_consecutive', {
+      subject: 'KHTN',
+      maxConsecutive: 1,
+      classes: ['6A'],
+    }),
+    pass: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 3, 'KHTN', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 2, 'KHTN', 'Sơn')],
+  },
+  {
+    kind: 'weekly_periods_exact',
+    spec: spec('weekly_periods_exact', 'weekly_periods_exact', {
+      teacher: 'Sơn',
+      subject: 'Toán',
+      class: '6A',
+      weeklyPeriods: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'if_then',
+    spec: spec('if_then', 'if_then', {
+      if: { op: 'teacher_teaches_on_day', teacher: 'Sơn', day: 'mon' },
+      then: [{ kind: 'teacher_block_day', params: { teacher: 'Thúy', day: 'mon' } }],
+    }),
+    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
+  },
+  {
+    kind: 'pair_not_same_slot',
+    spec: spec('pair_not_same_slot', 'pair_not_same_slot', { teachers: ['Sơn', 'Thúy'] }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Văn', 'Thúy')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
+  },
+  {
+    kind: 'custom_dsl',
+    spec: spec('custom_dsl', 'custom_dsl', { naturalLanguage: 'custom expression' }, 'soft'),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+  },
+];
 
-export type DeterministicValidationContext = {
-  assignments?: Array<{
-    id: string;
-    class: string;
-    subject: string;
-    teacher: string;
-    weeklyPeriods: number;
-  }>;
-};
+describe('checker matrix', () => {
+  for (const checkerCase of checkerCases) {
+    it(`${checkerCase.kind} passes valid schedule`, () => {
+      const report = validateSchedule(checkerCase.pass, [checkerCase.spec]);
 
-export type DeterministicValidationReport = {
-  ok: boolean;
-  baseConstraintPass: boolean;
-  hardConstraintPass: boolean;
-  softConstraintPass: boolean;
-  /** True khi MỌI hard constraint đều có checker thực sự kiểm (fail-closed). */
-  hardCoverageComplete: boolean;
-  violations: Violation[];
-  hardViolations: Violation[];
-  softViolations: Violation[];
-  uncheckedConstraintIds: string[];
-  /** Các hard constraint không được deterministic check (custom_dsl/không có checker). */
-  hardUncheckedConstraintIds: string[];
-};
+      assert.deepEqual(report.violations, []);
+      if (checkerCase.kind === 'custom_dsl') {
+        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
+      }
+    });
+
+    it(`${checkerCase.kind} catches invalid schedule`, () => {
+      const report = validateSchedule(checkerCase.fail, [checkerCase.spec]);
+
+      if (checkerCase.kind === 'custom_dsl') {
+        assert.deepEqual(report.violations, []);
+        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
+        return;
+      }
+
+      assert.ok(report.violations.length > 0);
+    });
+  }
+});
+
+describe('validator edge cases', () => {
+  it('teacher_max_consecutive passes when teacher has no scheduled entries', () => {
+    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [
+      spec('teacher_max_consecutive_empty', 'teacher_max_consecutive', {
+        teacher: 'Minh',
+        maxConsecutive: 1,
+      }),
+    ]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('teacher_max_consecutive detects overrun 7 with max 6', () => {
+    const localSchedule = Array.from({ length: 7 }, (_, index) =>
+      entry('6A', 'mon', index + 1, 'Toán', 'Sơn')
+    );
+    const report = validateSchedule(localSchedule, [
+      spec('teacher_max_consecutive_overrun', 'teacher_max_consecutive', {
+        teacher: 'Sơn',
+        maxConsecutive: 6,
+      }),
+    ]);
+    assert.equal(report.violations.length, 1);
+  });
+
+  it('teacher_max_consecutive handles split sessions without false positive', () => {
+    const localSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 5, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 6, 'Toán', 'Sơn'),
+    ];
+    const report = validateSchedule(localSchedule, [
+      spec('teacher_max_consecutive_split', 'teacher_max_consecutive', {
+        teacher: 'Sơn',
+        maxConsecutive: 2,
+      }),
+    ]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('subject_consecutive accepts long run divisible by block length', () => {
+    const localSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+    ];
+    const report = validateSchedule(localSchedule, [
+      spec('subject_consecutive_long_run', 'subject_consecutive', { subject: 'Toán', length: 2 }),
+    ]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('subject_consecutive follows Rule A for remainder periods', () => {
+    const subjectConsecutiveRule = spec('subject_consecutive_rule_a', 'subject_consecutive', {
+      subject: 'Toán',
+      length: 2,
+    });
+
+    const threePeriodsReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+      ],
+      [subjectConsecutiveRule]
+    );
+    assert.equal(threePeriodsReport.violations.length, 0);
+
+    const fivePeriodsReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 2, 'Toán', 'Sơn'),
+        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
+      ],
+      [subjectConsecutiveRule]
+    );
+    assert.equal(fivePeriodsReport.violations.length, 0);
+  });
+
+  it('subject_consecutive fails when Rule A required run count is not met', () => {
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'tue', 4, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
+        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
+      ],
+      [spec('subject_consecutive_rule_a_fail', 'subject_consecutive', { subject: 'Toán', length: 2 })]
+    );
+
+    assert.equal(report.violations.length, 1);
+  });
+
+  it('weekly_periods_exact skips validation with auto_base tag', () => {
+    const autoBaseSpec = spec('weekly_periods_auto_base', 'weekly_periods_exact', {
+      assignmentId: 'asg_1',
+      weeklyPeriods: 10,
+    });
+    autoBaseSpec.tags = ['auto_base'];
+
+    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [autoBaseSpec]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('class_no_double_subject_day honors custom maxPerDay parameter', () => {
+    const customDoubleSpec = spec('class_no_double_subject_day_custom', 'class_no_double_subject_day', {
+      class: '6A',
+      subject: 'Toán',
+      maxPerDay: 2,
+    });
+
+    const passSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+    ];
+    const passReport = validateSchedule(passSchedule, [customDoubleSpec]);
+    assert.equal(passReport.violations.length, 0);
+
+    const failSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+    ];
+    const failReport = validateSchedule(failSchedule, [customDoubleSpec]);
+    assert.equal(failReport.violations.length, 1);
+    assert.match(failReport.violations[0].message, /tối đa 2/);
+  });
+
+  it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
+    const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
+      naturalLanguage: 'custom hard constraint description',
+    }, 'hard');
+
+    const report = validateSchedule(
+      [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+      [uncheckedHardSpec]
+    );
+
+    assert.equal(report.ok, false);
+    assert.equal(report.hardConstraintPass, false);
+    assert.equal(report.hardCoverageComplete, false);
+    assert.deepEqual(report.hardUncheckedConstraintIds, ['unchecked_hard_spec']);
+  });
+});
 </file>
 
 <file path="src/features/timetable/ai/planner.ts">
@@ -7252,15 +7192,20 @@ Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind bui
 - subject_pin_period
 - subject_consecutive
 - class_no_double_subject_day
+- class_subjects_not_same_day
+- teacher_max_working_days
+- subject_max_consecutive
 - weekly_periods_exact
 - if_then
 - pair_not_same_slot
 
 Bạn KHÔNG viết code cho các kind trên.
 
+Ngoài ra, MỌI constraint có `severity != "hard"` đều do built-in registry tự xử lý dưới dạng penalty + objective. Bạn KHÔNG viết code cho bất kỳ soft constraint nào, kể cả `custom_dsl` soft.
+
 Bạn CHỈ viết code cho:
 
-- custom_dsl
+- custom_dsl có `severity == "hard"`
 
 ## Vùng được điền
 
@@ -8162,6 +8107,110 @@ export async function POST(request: Request) {
 }
 </file>
 
+<file path="src/features/timetable/ai/constraint-spec.ts">
+export type ConstraintKind =
+  | 'teacher_block_day'
+  | 'teacher_block_period'
+  | 'teacher_block_slot'
+  | 'teacher_max_per_day'
+  | 'teacher_max_consecutive'
+  | 'subject_pin_period'
+  | 'subject_consecutive'
+  | 'class_no_double_subject_day'
+  | 'class_subjects_not_same_day'
+  | 'teacher_max_working_days'
+  | 'subject_max_consecutive'
+  | 'weekly_periods_exact'
+  | 'if_then'
+  | 'pair_not_same_slot'
+  | 'resource_capacity'
+  | 'session_limit'
+  | 'subject_group'
+  | 'subject_group_daily_limit'
+  | 'custom_dsl';
+
+export type ConditionExpr =
+  | { op: 'teacher_teaches_on_day'; teacher: string; day: string }
+  | { op: 'teacher_teaches_at_slot'; teacher: string; day: string; period: number }
+  | { op: 'and'; args: ConditionExpr[] }
+  | { op: 'or'; args: ConditionExpr[] }
+  | { op: 'not'; arg: ConditionExpr };
+
+export type ConstraintSeverity = 'hard' | 'soft' | 'info';
+export type ConstraintTag = 'auto_base' | 'user_required' | 'user_preferred';
+
+export type ConstraintSpec = {
+  id: string;
+  original: string;
+  severity: ConstraintSeverity;
+  kind: ConstraintKind;
+  params: Record<string, unknown>;
+  /** Trọng số cho soft constraint. Mặc định 1 nếu bỏ trống. */
+  weight?: number;
+  tags?: ConstraintTag[];
+  notes?: string;
+};
+
+export type Plan = {
+  decisionVars: string;
+  domainSize: {
+    classes: number;
+    days: number;
+    periods: number;
+    estimated?: number;
+    estimatedVars?: number;
+  };
+  constraintOrder: string[];
+  reifiedNeeded: string[];
+  objective: 'none' | 'maximize_soft' | 'minimize_gaps';
+  templatesUsed: string[];
+  objectiveFunction?: string;
+  provenPatterns?: string[];
+  risks: string[];
+};
+
+export type ScheduleEntry = {
+  assignmentId?: string;
+  class: string;
+  day: string;
+  period: number | string;
+  subject: string;
+  teacher: string;
+};
+
+export type Violation = {
+  constraintId: string;
+  kind: ConstraintKind | 'base_constraint';
+  message: string;
+  offendingEntries: ScheduleEntry[];
+};
+
+export type DeterministicValidationContext = {
+  assignments?: Array<{
+    id: string;
+    class: string;
+    subject: string;
+    teacher: string;
+    weeklyPeriods: number;
+  }>;
+};
+
+export type DeterministicValidationReport = {
+  ok: boolean;
+  baseConstraintPass: boolean;
+  hardConstraintPass: boolean;
+  softConstraintPass: boolean;
+  /** True khi MỌI hard constraint đều có checker thực sự kiểm (fail-closed). */
+  hardCoverageComplete: boolean;
+  violations: Violation[];
+  hardViolations: Violation[];
+  softViolations: Violation[];
+  uncheckedConstraintIds: string[];
+  /** Các hard constraint không được deterministic check (custom_dsl/không có checker). */
+  hardUncheckedConstraintIds: string[];
+};
+</file>
+
 <file path="src/features/timetable/ai/cp-sat-roundtrip.ts">
 import type { ScheduleEntry } from './constraint-spec';
 
@@ -8276,6 +8325,249 @@ export function verifyCpSatRoundTrip(
   }
 
   return { ok: true, message: 'Round-trip verified.' };
+}
+</file>
+
+<file path="src/features/timetable/ai/python-bridge.ts">
+/**
+ * python-bridge.ts
+ * High-level bridge between the local AI agent and the Python execution host.
+ *
+ * In the final implementation this talks to the main process via IPC.
+ * For now it contains the interface + a dev stub.
+ */
+
+import type { ExecutionResult } from './types';
+
+export interface PythonBridgeOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Execute a piece of Python code generated by the Coder.
+ * The code will be run inside the `code_executor` binary with the provided input.
+ */
+export async function executeGeneratedCode(
+  code: string,
+  input: unknown,
+  options: PythonBridgeOptions = {}
+): Promise<ExecutionResult> {
+  const timeout = options.timeoutMs ?? 360_000;
+
+  // In production this will be an IPC call to the main process
+  // which actually spawns the bundled binary.
+  if (typeof window !== 'undefined' && (window as any).electron?.python?.executeCode) {
+    return (window as any).electron.python.executeCode(code, input, timeout);
+  }
+
+  // Web fallback: call server-side executor route.
+  if (typeof window !== 'undefined') {
+    const response = await fetch('/api/ai/python-execute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code,
+        input,
+        timeoutMs: timeout,
+      }),
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok || !payload?.ok || !payload?.result) {
+      throw new Error(
+        payload?.error ||
+          `[python-bridge] Server executor failed with HTTP ${response.status}`
+      );
+    }
+
+    return payload.result as ExecutionResult;
+  }
+
+  throw new Error(
+    '[python-bridge] Python executor IPC is not available. Please run inside Electron app (with preload exposing window.electron.python.executeCode) or wire a server execution route.'
+  );
+}
+</file>
+
+<file path="src/features/timetable/ai/repair.ts">
+import { z } from 'zod';
+
+import type { Plan, Violation } from './constraint-spec';
+import { parseModelJson } from './parse-model-json';
+import type { AIProviderConfig, ChatUsage, RepairTurnResult } from './types';
+import { invokeChat } from './chat-client';
+
+type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
+
+const repairResponseSchema = z.object({
+  summary: z.string(),
+  patches: z.array(
+    z.object({
+      oldStr: z.string(),
+      newStr: z.string(),
+      reason: z.string(),
+      replaceAll: z.boolean().optional(),
+    })
+  ),
+  assumptions: z.array(z.string()),
+});
+
+const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
+
+function loadRepairSystemPrompt(): Promise<string> {
+  return fetch('/prompts/repair.system.md')
+    .then(async (response) => {
+      if (!response.ok) {
+        return 'You are a repair agent. Return strict JSON patches.';
+      }
+      return response.text();
+    })
+    .catch(() => 'You are a repair agent. Return strict JSON patches.');
+}
+
+export async function runRepairTurn(
+  config: AIProviderConfig,
+  payload: {
+    plan: Plan;
+    constraintCode: string;
+    violations: Violation[];
+    compileOrRunError?: string;
+  },
+  invokeChat: ChatInvoke = defaultInvokeChat
+): Promise<RepairTurnResult> {
+  const systemPrompt = await loadRepairSystemPrompt();
+  const chatPayload = {
+    baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
+    apiKey: config.apiKey,
+    model: config.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          plan: payload.plan,
+          currentCode: payload.constraintCode,
+          constraintCode: payload.constraintCode,
+          violations: payload.violations.map((violation) => ({
+            constraintId: violation.constraintId,
+            kind: violation.kind,
+            message: violation.message,
+            count: violation.offendingEntries.length,
+            sample: violation.offendingEntries.slice(0, 3),
+          })),
+          compileOrRunError: payload.compileOrRunError ?? '',
+        }),
+      },
+    ],
+    temperature: 0.1,
+    max_tokens: 2200,
+    cache_control: { enable: true },
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'repair_output',
+        schema: {
+          type: 'object',
+          properties: {
+            summary: { type: 'string' },
+            patches: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  oldStr: { type: 'string' },
+                  newStr: { type: 'string' },
+                  reason: { type: 'string' },
+                  replaceAll: { type: 'boolean' },
+                },
+                required: ['oldStr', 'newStr', 'reason'],
+                additionalProperties: false,
+              },
+            },
+            assumptions: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['summary', 'patches', 'assumptions'],
+          additionalProperties: false,
+        },
+      },
+    },
+  };
+
+  const response = await invokeChat(chatPayload);
+  const parsed = repairResponseSchema.parse(parseModelJson(response.content));
+  return {
+    ...parsed,
+    rawResponse: response.content,
+    usageTokens: response.usage?.total_tokens,
+  };
+}
+
+export function applyRepairPatches(
+  source: string,
+  patches: RepairTurnResult['patches']
+): string {
+  // Atomic apply thật sự (fix bug #8):
+  //   1) Validate TẤT CẢ patches trên source GỐC: tìm vị trí và kiểm duplicate.
+  //   2) Sort theo vị trí tăng dần, kiểm tra KHÔNG overlap.
+  //   3) Stitch ra string mới bằng slice + concat — mỗi patch gắn 1 lần
+  //      đúng tại vị trí nó đã được validate, tránh trường hợp patch trước
+  //      làm oldStr của patch sau xuất hiện nhiều hơn.
+  const plan: Array<{ start: number; end: number; patch: typeof patches[0]; allOccurrences?: number[] }> = [];
+  for (const patch of patches) {
+    if (!patch.oldStr) continue;
+    const occurrences: number[] = [];
+    let from = 0;
+    while (from <= source.length) {
+      const idx = source.indexOf(patch.oldStr, from);
+      if (idx === -1) break;
+      occurrences.push(idx);
+      from = idx + Math.max(1, patch.oldStr.length);
+    }
+    if (occurrences.length === 0) {
+      throw new Error(
+        `Repair patch oldStr not found in source. Preview: ${patch.oldStr.slice(0, 120)}`
+      );
+    }
+    if (occurrences.length > 1 && !patch.replaceAll) {
+      throw new Error(
+        `Repair patch ambiguous: oldStr xuất hiện ${occurrences.length} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
+      );
+    }
+    if (patch.replaceAll) {
+      for (const idx of occurrences) {
+        plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
+      }
+    } else {
+      const idx = occurrences[0];
+      plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
+    }
+  }
+
+  plan.sort((a, b) => a.start - b.start);
+
+  // Detect overlap.
+  for (let i = 1; i < plan.length; i += 1) {
+    if (plan[i].start < plan[i - 1].end) {
+      throw new Error(
+        `Repair patches overlap at offset ${plan[i].start}. Tránh đề các patch chồng nhau.`
+      );
+    }
+  }
+
+  // Stitch.
+  let cursor = 0;
+  const out: string[] = [];
+  for (const segment of plan) {
+    out.push(source.slice(cursor, segment.start));
+    out.push(segment.patch.newStr);
+    cursor = segment.end;
+  }
+  out.push(source.slice(cursor));
+  return out.join('');
 }
 </file>
 
@@ -8909,6 +9201,7 @@ test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', 
 
 <file path="python/templates/solver_skeleton.py">
 import json
+import os as _os
 from ortools.sat.python import cp_model
 
 with open("input.json", encoding="utf-8") as f:
@@ -8965,11 +9258,235 @@ def build_custom_constraints(model, slots, data):
     periods_by_day = data.get("periodsByDay") or {}
     constraints = data["constraints"]
 
+    soft_terms = []
+
     def _periods_for(d):
         day_periods = periods_by_day.get(d)
         if isinstance(day_periods, list) and day_periods:
             return day_periods
         return periods
+
+    def _soft_weight(spec):
+        weight = spec.get("weight")
+        if weight is None:
+            weight = spec.get("params", {}).get("weight")
+        try:
+            weight = int(weight)
+        except (TypeError, ValueError):
+            weight = 1
+        return max(1, weight)
+
+    def _penalize_forbidden_slots(spec, slot_vars):
+        weight = _soft_weight(spec)
+        for var in slot_vars:
+            soft_terms.append((weight, var))
+
+    def _penalize_excess(spec, count_vars, limit, tag):
+        if not count_vars:
+            return
+        weight = _soft_weight(spec)
+        excess = model.NewIntVar(0, len(count_vars), f"soft_excess_{spec.get('id', 'x')}_{tag}")
+        model.Add(excess >= sum(count_vars) - limit)
+        soft_terms.append((weight, excess))
+
+    def _resolve_group_subjects(group_name):
+        group_specs = [
+            s for s in constraints
+            if s.get("kind") == "subject_group"
+            and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
+        ]
+        group_subjects = set()
+        for gs in group_specs:
+            src = gs.get("params", {}) or {}
+            for subject in (src.get("subjects") or gs.get("subjects", [])):
+                group_subjects.add(subject)
+        return group_subjects
+
+    def _add_class_subjects_not_same_day(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        subjects = params.get("subjects") or []
+        target_class = params.get("class")
+        max_subjects = int(params.get("maxSubjectsPerDay", 1) or 1)
+        if len(subjects) < 2:
+            return
+        target_classes = [target_class] if target_class else data["classes"]
+        for c in target_classes:
+            for d in days:
+                present_vars = []
+                for subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+                    slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                    if not slot_vars:
+                        continue
+                    present = model.NewBoolVar(f"pres_{c}_{subject}_{d}")
+                    model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(present)
+                    model.Add(sum(slot_vars) == 0).OnlyEnforceIf(present.Not())
+                    present_vars.append(present)
+                if len(present_vars) <= max_subjects:
+                    continue
+                if soft_terms_ref is None:
+                    model.Add(sum(present_vars) <= max_subjects)
+                else:
+                    excess = model.NewIntVar(0, len(present_vars), f"soft_pair_{c}_{d}")
+                    model.Add(excess >= sum(present_vars) - max_subjects)
+                    soft_terms_ref.append((_soft_weight(spec), excess))
+
+    def _add_teacher_max_working_days(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        teacher = params.get("teacher")
+        total_days = len(days)
+        if params.get("maxDays") is not None:
+            max_days = int(params.get("maxDays"))
+        elif params.get("minDaysOff") is not None:
+            max_days = total_days - int(params.get("minDaysOff"))
+        else:
+            max_days = total_days - 1
+        target_teachers = [teacher] if teacher else list({a["teacher"] for a in assignments})
+        for target_teacher in target_teachers:
+            teacher_asgs = [a for a in assignments if a["teacher"] == target_teacher]
+            work_vars = []
+            for d in days:
+                day_slots = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                if not day_slots:
+                    continue
+                work_var = model.NewBoolVar(f"work_{target_teacher}_{d}")
+                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(work_var)
+                model.Add(sum(day_slots) == 0).OnlyEnforceIf(work_var.Not())
+                work_vars.append(work_var)
+            if not work_vars:
+                continue
+            if soft_terms_ref is None:
+                model.Add(sum(work_vars) <= max_days)
+            else:
+                excess = model.NewIntVar(0, len(work_vars), f"soft_workdays_{target_teacher}")
+                model.Add(excess >= sum(work_vars) - max_days)
+                soft_terms_ref.append((_soft_weight(spec), excess))
+
+    def _add_subject_max_consecutive(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        subject = params.get("subject")
+        max_consecutive = int(params.get("maxConsecutive", 1) or 1)
+        if max_consecutive <= 0:
+            return
+        target_classes = set(params.get("classes") or data["classes"])
+        window_length = max_consecutive + 1
+        for c in target_classes:
+            asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+            if not asgs:
+                continue
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(0, max(0, len(day_periods) - window_length + 1)):
+                    window = day_periods[i:i + window_length]
+                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    window_slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in window]
+                    if soft_terms_ref is None:
+                        model.Add(sum(window_slot_vars) <= max_consecutive)
+                    else:
+                        over = model.NewBoolVar(f"soft_consec_{c}_{subject}_{d}_{window[0]}")
+                        model.Add(sum(window_slot_vars) >= window_length).OnlyEnforceIf(over)
+                        model.Add(sum(window_slot_vars) <= window_length - 1).OnlyEnforceIf(over.Not())
+                        soft_terms_ref.append((_soft_weight(spec), over))
+
+    def _add_soft_constraint(spec):
+        kind = spec.get("kind")
+        params = spec.get("params", {})
+
+        if kind == "subject_pin_period":
+            subject = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            forbidden = []
+            for a in assignments:
+                if a["subject"] == subject and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                forbidden.append(slots[(a["id"], d, p)])
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_block_day":
+            teacher = params.get("teacher")
+            day = params.get("day")
+            forbidden = [
+                slots[(a["id"], day, p)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for p in _periods_for(day)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_block_period":
+            teacher = params.get("teacher")
+            period = int(params.get("period"))
+            forbidden = [
+                slots[(a["id"], d, period)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for d in days
+                if period in _periods_for(d)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_block_slot":
+            teacher = params.get("teacher")
+            day = params.get("day")
+            period = int(params.get("period"))
+            forbidden = [
+                slots[(a["id"], day, period)]
+                for a in assignments
+                if a["teacher"] == teacher
+                if period in _periods_for(day)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_max_per_day":
+            teacher = params.get("teacher")
+            limit = int(params.get("maxPerDay"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in days:
+                count_vars = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                _penalize_excess(spec, count_vars, limit, f"{teacher}_{d}")
+
+        elif kind == "class_no_double_subject_day":
+            target_class = params.get("class")
+            subject = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                subjects = {subject} if subject else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        count_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                        _penalize_excess(spec, count_vars, max_per_day, f"{c}_{current_subject}_{d}")
+
+        elif kind == "subject_group_daily_limit":
+            group_name = params.get("groupName")
+            max_per_day = int(params.get("maxPerDay", 1))
+            target_class = params.get("class")
+            group_subjects = _resolve_group_subjects(group_name)
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                class_assignments = [
+                    a for a in assignments if a["class"] == c and a["subject"] in group_subjects
+                ]
+                for d in days:
+                    count_vars = [slots[(a["id"], d, p)] for a in class_assignments for p in _periods_for(d)]
+                    _penalize_excess(spec, count_vars, max_per_day, f"grp_{c}_{d}")
+
+        elif kind == "class_subjects_not_same_day":
+            _add_class_subjects_not_same_day(spec, soft_terms_ref=soft_terms)
+
+        elif kind == "teacher_max_working_days":
+            _add_teacher_max_working_days(spec, soft_terms_ref=soft_terms)
+
+        elif kind == "subject_max_consecutive":
+            _add_subject_max_consecutive(spec, soft_terms_ref=soft_terms)
+
+        else:
+            return
 
     def _build_condition_literal(condition):
         op = condition.get("op") if isinstance(condition, dict) else None
@@ -9161,6 +9678,7 @@ def build_custom_constraints(model, slots, data):
         severity = spec.get("severity", "hard")
 
         if severity != "hard":
+            _add_soft_constraint(spec)
             continue
 
         if kind == "weekly_periods_exact":
@@ -9269,6 +9787,15 @@ def build_custom_constraints(model, slots, data):
         elif kind == "subject_consecutive":
             _add_subject_consecutive(spec)
 
+        elif kind == "class_subjects_not_same_day":
+            _add_class_subjects_not_same_day(spec)
+
+        elif kind == "teacher_max_working_days":
+            _add_teacher_max_working_days(spec)
+
+        elif kind == "subject_max_consecutive":
+            _add_subject_max_consecutive(spec)
+
         elif kind == "resource_capacity":
             subj = params.get("subject")
             capacity = int(params.get("capacity", 1))
@@ -9366,19 +9893,51 @@ def build_custom_constraints(model, slots, data):
     # <<< AI_FILL_HERE >>>
     pass
 
+    return soft_terms
 
-build_custom_constraints(model, slots, data)
+
+soft_terms = build_custom_constraints(model, slots, data)
 
 solver = cp_model.CpSolver()
 # Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
 # timeoutMs phía Node (fix bug #29).
-import os as _os
 try:
     _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
 except Exception:
     _max_seconds = 60.0
-solver.parameters.max_time_in_seconds = _max_seconds
-status = solver.Solve(model)
+try:
+    _workers = int(_os.environ.get("SOLVER_WORKERS", "") or 8)
+except Exception:
+    _workers = 8
+solver.parameters.num_search_workers = max(1, _workers)
+try:
+    solver.parameters.random_seed = int(_os.environ.get("SOLVER_RANDOM_SEED", "") or 42)
+except Exception:
+    solver.parameters.random_seed = 42
+
+best_values = None
+
+if soft_terms:
+    phase1 = max(5.0, _max_seconds * 0.4)
+    solver.parameters.max_time_in_seconds = phase1
+    status = solver.Solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        for key, var in slots.items():
+            model.AddHint(var, best_values[key])
+
+    model.Minimize(sum(int(weight) * var for (weight, var) in soft_terms))
+    phase2 = max(5.0, _max_seconds - phase1)
+    solver.parameters.max_time_in_seconds = phase2
+    status2 = solver.Solve(model)
+    if status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        status = status2
+else:
+    solver.parameters.max_time_in_seconds = _max_seconds
+    status = solver.Solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
 
 result = {
     "classes": classes,
@@ -9389,11 +9948,11 @@ result = {
     "schedule": [],
 }
 
-if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+if best_values is not None:
     for a in assignments:
         for d in days:
             for p in periods_for_day(d):
-                if solver.Value(slots[(a["id"], d, p)]) == 1:
+                if best_values.get((a["id"], d, p)) == 1:
                     result["schedule"].append(
                         {
                             "assignmentId": a["id"],
@@ -9411,6 +9970,279 @@ else:
     with open("result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
     print(f"NO_SOLUTION:{solver.StatusName(status)}")
+</file>
+
+<file path="python/code_executor.py">
+#!/usr/bin/env python3
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# TIMEOUT_SECONDS mặc định; có thể override qua đối số dòng lệnh argv[1]
+# hoặc env EXECUTOR_TIMEOUT_SECONDS để đồng bộ với timeoutMs phía Node
+# (fix bug #6).
+import os as _os_mod
+
+
+def _default_timeout() -> int:
+    env_value = _os_mod.environ.get("EXECUTOR_TIMEOUT_SECONDS")
+    if env_value:
+        try:
+            v = int(float(env_value))
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    if len(sys.argv) >= 2:
+        try:
+            v = int(float(sys.argv[1]))
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return 360
+
+
+TIMEOUT_SECONDS = _default_timeout()
+MAX_STDOUT_LINES = 100
+
+
+def _truncate_output(text: str, max_lines: int = MAX_STDOUT_LINES) -> str:
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    head = "\n".join(lines[:max_lines])
+    return f"{head}\n...[truncated {len(lines) - max_lines} lines]"
+
+
+def _digest_error(stderr: str, max_length: int = 800) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    focused = "\n".join(lines[-12:])
+    return focused[:max_length]
+
+
+def _map_status(raw: str) -> str:
+    status = raw.upper()
+    if status == "OPTIMAL":
+        return "optimal"
+    if status == "FEASIBLE":
+        return "feasible"
+    if status in {"INFEASIBLE", "MODEL_INVALID"}:
+        return "infeasible"
+    if status in {"UNKNOWN"}:
+        return "unknown"
+    return "unknown"
+
+
+def run_user_code(code: str, timeout: int) -> dict[str, Any]:
+    started = time.time()
+    with tempfile.TemporaryDirectory(prefix="timetable_exec_") as temp_dir:
+        workspace = Path(temp_dir)
+        input_src = Path.cwd() / "input.json"
+        input_dst = workspace / "input.json"
+        solver_path = workspace / "solver_generated.py"
+        result_path = workspace / "result.json"
+
+        if input_src.exists():
+            shutil.copy2(input_src, input_dst)
+        else:
+            input_dst.write_text("{}", encoding="utf-8")
+
+        solver_path.write_text(code, encoding="utf-8")
+
+        compile_proc = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(solver_path)],
+            capture_output=True,
+            text=True,
+            cwd=workspace,
+        )
+        if compile_proc.returncode != 0:
+            return {
+                "phase": "compile",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": _digest_error(compile_proc.stderr or compile_proc.stdout),
+                "stdout": _truncate_output(compile_proc.stdout or ""),
+                "stderr": _truncate_output(compile_proc.stderr or ""),
+            }
+
+        from sandbox.run import run_sandboxed
+
+        try:
+            sandbox_result = run_sandboxed(
+                file_path=str(solver_path),
+                timeout=timeout,
+                workspace_dir=str(workspace),
+            )
+        except Exception as exc:
+            return {
+                "phase": "run",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": _digest_error(str(exc)),
+                "stdout": "",
+                "stderr": str(exc),
+            }
+
+        stdout = sandbox_result.get("stdout", "") or ""
+        stderr = sandbox_result.get("stderr", "") or ""
+        return_code = sandbox_result.get("return_code", -1)
+
+        if "timed out" in stderr.lower() or sandbox_result.get("message") == "Timeout":
+            return {
+                "phase": "run",
+                "ok": False,
+                "status": "timeout",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": f"Execution timed out after {timeout}s",
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr),
+            }
+
+        upper_stdout = stdout.upper()
+        marker_count = upper_stdout.count("SOLUTION_FOUND")
+
+        # Early return if SOLUTION_FOUND appears more than once, as this indicates multiple
+        # distinct solver solutions were outputted, which violates parsing guarantees.
+        if marker_count > 1:
+            return {
+                "phase": "parse",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": "Invalid marker count: SOLUTION_FOUND appears more than once.",
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr),
+            }
+
+        if not result_path.exists():
+            return {
+                "phase": "parse",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": "result.json was not generated by solver.",
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr),
+            }
+
+        try:
+            result_json = json.loads(result_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {
+                "phase": "parse",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": f"Invalid result.json format: {exc}",
+                "stdout": _truncate_output(stdout),
+                "stderr": _truncate_output(stderr),
+            }
+
+        schedule = result_json.get("schedule", []) if isinstance(result_json, dict) else []
+        status_raw = result_json.get("status", "unknown") if isinstance(result_json, dict) else "unknown"
+        status = _map_status(str(status_raw))
+
+        # Validation sanity: nếu schedule trống mà status nói optimal/feasible → ép infeasible.
+        if status in {"optimal", "feasible"} and not schedule:
+            status = "infeasible"
+
+        unscheduled: list[str] = []
+        if isinstance(result_json, dict) and isinstance(result_json.get("assignments"), list):
+            scheduled_ids = {
+                str(entry.get("assignmentId"))
+                for entry in schedule
+                if isinstance(entry, dict) and entry.get("assignmentId") is not None
+            }
+            unscheduled = [
+                str(item.get("id"))
+                for item in result_json["assignments"]
+                if isinstance(item, dict) and str(item.get("id")) not in scheduled_ids
+            ]
+
+        ok = return_code == 0 and status in {"optimal", "feasible"}
+        digest_source = stderr if stderr.strip() else stdout
+
+        artifact_dir = Path.cwd() / ".ai_results"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        # Cleanup: giữ tối đa 50 file gần nhất
+        _MAX_ARTIFACTS = 50
+        existing = sorted(artifact_dir.glob("result_*.json"), key=lambda p: p.stat().st_mtime)
+        for old in existing[:-_MAX_ARTIFACTS]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+        artifact_path = artifact_dir / f"result_{int(time.time() * 1000)}.json"
+        artifact_path.write_text(json.dumps(result_json, ensure_ascii=False), encoding="utf-8")
+
+        return {
+            "phase": "run",
+            "ok": ok,
+            "status": status if status in {"optimal", "feasible", "infeasible"} else "unknown",
+            "durationMs": int((time.time() - started) * 1000),
+            "resultPath": str(artifact_path),
+            "resultSummary": {
+                "scheduledCount": len(schedule) if isinstance(schedule, list) else 0,
+                "unscheduledAssignments": unscheduled,
+            },
+            "errorDigest": _digest_error(digest_source) if not ok else "",
+            "stdout": _truncate_output(stdout),
+            "stderr": _truncate_output(stderr),
+        }
+
+
+def main() -> None:
+    code = sys.stdin.read()
+    if not code.strip():
+        print(
+            json.dumps(
+                {
+                    "phase": "parse",
+                    "ok": False,
+                    "status": "crashed",
+                    "durationMs": 0,
+                    "errorDigest": "No code received on stdin.",
+                    "stdout": "",
+                    "stderr": "",
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    try:
+        result = run_user_code(code, TIMEOUT_SECONDS)
+    except Exception:
+        result = {
+            "phase": "run",
+            "ok": False,
+            "status": "crashed",
+            "durationMs": 0,
+            "errorDigest": _digest_error(traceback.format_exc()),
+            "stdout": "",
+            "stderr": "",
+        }
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
 </file>
 
 <file path="src/features/timetable/ai/deterministic-validator.ts">
@@ -9817,6 +10649,115 @@ const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+const checkClassSubjectsNotSameDay: CheckFn = (spec, schedule) => {
+  const subjects = Array.isArray(spec.params.subjects)
+    ? spec.params.subjects.map((value) => String(value))
+    : [];
+  if (subjects.length < 2) return [];
+  const targetClass = spec.params.class ? String(spec.params.class) : null;
+  const parsedMax = Number(spec.params.maxSubjectsPerDay);
+  const maxSubjectsPerDay = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
+  const subjectSet = new Set(subjects);
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, Map<string, ScheduleEntry[]>>();
+
+  for (const entry of schedule) {
+    if (targetClass && entry.class !== targetClass) continue;
+    if (!subjectSet.has(entry.subject)) continue;
+    const key = `${entry.class}::${entry.day}`;
+    if (!byClassDay.has(key)) byClassDay.set(key, new Map());
+    const subjectMap = byClassDay.get(key)!;
+    subjectMap.set(entry.subject, [...(subjectMap.get(entry.subject) ?? []), entry]);
+  }
+
+  for (const [key, subjectMap] of byClassDay.entries()) {
+    if (subjectMap.size <= maxSubjectsPerDay) continue;
+    const [klass, day] = key.split('::');
+    violations.push({
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Lớp ${klass} có ${subjectMap.size} môn {${subjects.join(', ')}} cùng ngày ${day} (tối đa ${maxSubjectsPerDay}).`,
+      offendingEntries: [...subjectMap.values()].flat(),
+    });
+  }
+
+  return violations;
+};
+
+const checkTeacherMaxWorkingDays: CheckFn = (spec, schedule) => {
+  const teacher = spec.params.teacher ? String(spec.params.teacher) : null;
+  const totalDays = new Set(schedule.map((entry) => entry.day)).size;
+  let maxDays: number;
+  if (spec.params.maxDays !== undefined && spec.params.maxDays !== null) {
+    maxDays = Number(spec.params.maxDays);
+  } else if (spec.params.minDaysOff !== undefined && spec.params.minDaysOff !== null) {
+    maxDays = totalDays - Number(spec.params.minDaysOff);
+  } else {
+    maxDays = totalDays - 1;
+  }
+
+  const teachers = teacher ? [teacher] : [...new Set(schedule.map((entry) => entry.teacher))];
+  const violations: Violation[] = [];
+
+  for (const targetTeacher of teachers) {
+    const entries = schedule.filter((entry) => entry.teacher === targetTeacher);
+    const workingDays = new Set(entries.map((entry) => entry.day));
+    if (workingDays.size > maxDays) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `${targetTeacher} dạy ${workingDays.size} ngày/tuần (tối đa ${maxDays}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+
+  return violations;
+};
+
+const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const parsedMax = Number(spec.params.maxConsecutive);
+  const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
+  const classes = Array.isArray(spec.params.classes)
+    ? spec.params.classes.map((value) => String(value))
+    : null;
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, ScheduleEntry[]>();
+
+  for (const entry of schedule) {
+    if (entry.subject !== subject) continue;
+    if (classes && !classes.includes(entry.class)) continue;
+    const key = `${entry.class}::${entry.day}`;
+    byClassDay.set(key, [...(byClassDay.get(key) ?? []), entry]);
+  }
+
+  for (const [key, entries] of byClassDay.entries()) {
+    const periods = entries
+      .map((entry) => toPeriod(entry.period))
+      .filter((period): period is number => period !== null)
+      .sort((a, b) => a - b);
+    let streak = 1;
+    let maxSeen = periods.length ? 1 : 0;
+    for (let i = 1; i < periods.length; i += 1) {
+      if (periods[i] === periods[i - 1] + 1) streak += 1;
+      else streak = 1;
+      if (streak > maxSeen) maxSeen = streak;
+    }
+    if (maxSeen > maxConsecutive) {
+      const [klass, day] = key.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Lớp ${klass} có ${maxSeen} tiết ${subject} liên tiếp ngày ${day} (tối đa ${maxConsecutive}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+
+  return violations;
+};
+
 const checkWeeklyPeriodsExact: CheckFn = (spec, schedule, ctx) => {
   if (spec.tags?.includes('auto_base')) return [];
 
@@ -10009,6 +10950,9 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   subject_pin_period: checkSubjectPinPeriod,
   subject_consecutive: checkSubjectConsecutive,
   class_no_double_subject_day: checkClassNoDoubleSubjectDay,
+  class_subjects_not_same_day: checkClassSubjectsNotSameDay,
+  teacher_max_working_days: checkTeacherMaxWorkingDays,
+  subject_max_consecutive: checkSubjectMaxConsecutive,
   weekly_periods_exact: checkWeeklyPeriodsExact,
   pair_not_same_slot: checkPairNotSameSlot,
   if_then: checkIfThen,
@@ -10419,522 +11363,6 @@ test('runLocalAgent returns a clear repeated-violation error instead of stopped 
     (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
   }
 });
-</file>
-
-<file path="src/features/timetable/ai/python-bridge.ts">
-/**
- * python-bridge.ts
- * High-level bridge between the local AI agent and the Python execution host.
- *
- * In the final implementation this talks to the main process via IPC.
- * For now it contains the interface + a dev stub.
- */
-
-import type { ExecutionResult } from './types';
-
-export interface PythonBridgeOptions {
-  timeoutMs?: number;
-  signal?: AbortSignal;
-}
-
-/**
- * Execute a piece of Python code generated by the Coder.
- * The code will be run inside the `code_executor` binary with the provided input.
- */
-export async function executeGeneratedCode(
-  code: string,
-  input: unknown,
-  options: PythonBridgeOptions = {}
-): Promise<ExecutionResult> {
-  const timeout = options.timeoutMs ?? 360_000;
-
-  // In production this will be an IPC call to the main process
-  // which actually spawns the bundled binary.
-  if (typeof window !== 'undefined' && (window as any).electron?.python?.executeCode) {
-    return (window as any).electron.python.executeCode(code, input, timeout);
-  }
-
-  // Web fallback: call server-side executor route.
-  if (typeof window !== 'undefined') {
-    const response = await fetch('/api/ai/python-execute', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        code,
-        input,
-        timeoutMs: timeout,
-      }),
-    });
-
-    const payload = await response.json().catch(() => null);
-
-    if (!response.ok || !payload?.ok || !payload?.result) {
-      throw new Error(
-        payload?.error ||
-          `[python-bridge] Server executor failed with HTTP ${response.status}`
-      );
-    }
-
-    return payload.result as ExecutionResult;
-  }
-
-  throw new Error(
-    '[python-bridge] Python executor IPC is not available. Please run inside Electron app (with preload exposing window.electron.python.executeCode) or wire a server execution route.'
-  );
-}
-</file>
-
-<file path="src/features/timetable/ai/repair.ts">
-import { z } from 'zod';
-
-import type { Plan, Violation } from './constraint-spec';
-import { parseModelJson } from './parse-model-json';
-import type { AIProviderConfig, ChatUsage, RepairTurnResult } from './types';
-import { invokeChat } from './chat-client';
-
-type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
-
-const repairResponseSchema = z.object({
-  summary: z.string(),
-  patches: z.array(
-    z.object({
-      oldStr: z.string(),
-      newStr: z.string(),
-      reason: z.string(),
-      replaceAll: z.boolean().optional(),
-    })
-  ),
-  assumptions: z.array(z.string()),
-});
-
-const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
-
-function loadRepairSystemPrompt(): Promise<string> {
-  return fetch('/prompts/repair.system.md')
-    .then(async (response) => {
-      if (!response.ok) {
-        return 'You are a repair agent. Return strict JSON patches.';
-      }
-      return response.text();
-    })
-    .catch(() => 'You are a repair agent. Return strict JSON patches.');
-}
-
-export async function runRepairTurn(
-  config: AIProviderConfig,
-  payload: {
-    plan: Plan;
-    constraintCode: string;
-    violations: Violation[];
-    compileOrRunError?: string;
-  },
-  invokeChat: ChatInvoke = defaultInvokeChat
-): Promise<RepairTurnResult> {
-  const systemPrompt = await loadRepairSystemPrompt();
-  const chatPayload = {
-    baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
-    apiKey: config.apiKey,
-    model: config.model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          plan: payload.plan,
-          currentCode: payload.constraintCode,
-          constraintCode: payload.constraintCode,
-          violations: payload.violations.map((violation) => ({
-            constraintId: violation.constraintId,
-            kind: violation.kind,
-            message: violation.message,
-            count: violation.offendingEntries.length,
-            sample: violation.offendingEntries.slice(0, 3),
-          })),
-          compileOrRunError: payload.compileOrRunError ?? '',
-        }),
-      },
-    ],
-    temperature: 0.1,
-    max_tokens: 2200,
-    cache_control: { enable: true },
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'repair_output',
-        schema: {
-          type: 'object',
-          properties: {
-            summary: { type: 'string' },
-            patches: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  oldStr: { type: 'string' },
-                  newStr: { type: 'string' },
-                  reason: { type: 'string' },
-                  replaceAll: { type: 'boolean' },
-                },
-                required: ['oldStr', 'newStr', 'reason'],
-                additionalProperties: false,
-              },
-            },
-            assumptions: { type: 'array', items: { type: 'string' } },
-          },
-          required: ['summary', 'patches', 'assumptions'],
-          additionalProperties: false,
-        },
-      },
-    },
-  };
-
-  const response = await invokeChat(chatPayload);
-  const parsed = repairResponseSchema.parse(parseModelJson(response.content));
-  return {
-    ...parsed,
-    rawResponse: response.content,
-    usageTokens: response.usage?.total_tokens,
-  };
-}
-
-export function applyRepairPatches(
-  source: string,
-  patches: RepairTurnResult['patches']
-): string {
-  // Atomic apply thật sự (fix bug #8):
-  //   1) Validate TẤT CẢ patches trên source GỐC: tìm vị trí và kiểm duplicate.
-  //   2) Sort theo vị trí tăng dần, kiểm tra KHÔNG overlap.
-  //   3) Stitch ra string mới bằng slice + concat — mỗi patch gắn 1 lần
-  //      đúng tại vị trí nó đã được validate, tránh trường hợp patch trước
-  //      làm oldStr của patch sau xuất hiện nhiều hơn.
-  const plan: Array<{ start: number; end: number; patch: typeof patches[0]; allOccurrences?: number[] }> = [];
-  for (const patch of patches) {
-    if (!patch.oldStr) continue;
-    const occurrences: number[] = [];
-    let from = 0;
-    while (from <= source.length) {
-      const idx = source.indexOf(patch.oldStr, from);
-      if (idx === -1) break;
-      occurrences.push(idx);
-      from = idx + Math.max(1, patch.oldStr.length);
-    }
-    if (occurrences.length === 0) {
-      throw new Error(
-        `Repair patch oldStr not found in source. Preview: ${patch.oldStr.slice(0, 120)}`
-      );
-    }
-    if (occurrences.length > 1 && !patch.replaceAll) {
-      throw new Error(
-        `Repair patch ambiguous: oldStr xuất hiện ${occurrences.length} lần. Mở rộng context hoặc set replaceAll=true. Preview: ${patch.oldStr.slice(0, 120)}`
-      );
-    }
-    if (patch.replaceAll) {
-      for (const idx of occurrences) {
-        plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
-      }
-    } else {
-      const idx = occurrences[0];
-      plan.push({ start: idx, end: idx + patch.oldStr.length, patch });
-    }
-  }
-
-  plan.sort((a, b) => a.start - b.start);
-
-  // Detect overlap.
-  for (let i = 1; i < plan.length; i += 1) {
-    if (plan[i].start < plan[i - 1].end) {
-      throw new Error(
-        `Repair patches overlap at offset ${plan[i].start}. Tránh đề các patch chồng nhau.`
-      );
-    }
-  }
-
-  // Stitch.
-  let cursor = 0;
-  const out: string[] = [];
-  for (const segment of plan) {
-    out.push(source.slice(cursor, segment.start));
-    out.push(segment.patch.newStr);
-    cursor = segment.end;
-  }
-  out.push(source.slice(cursor));
-  return out.join('');
-}
-</file>
-
-<file path="python/code_executor.py">
-#!/usr/bin/env python3
-
-import json
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
-import traceback
-from pathlib import Path
-from typing import Any
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-# TIMEOUT_SECONDS mặc định; có thể override qua đối số dòng lệnh argv[1]
-# hoặc env EXECUTOR_TIMEOUT_SECONDS để đồng bộ với timeoutMs phía Node
-# (fix bug #6).
-import os as _os_mod
-
-
-def _default_timeout() -> int:
-    env_value = _os_mod.environ.get("EXECUTOR_TIMEOUT_SECONDS")
-    if env_value:
-        try:
-            v = int(float(env_value))
-            if v > 0:
-                return v
-        except ValueError:
-            pass
-    if len(sys.argv) >= 2:
-        try:
-            v = int(float(sys.argv[1]))
-            if v > 0:
-                return v
-        except ValueError:
-            pass
-    return 360
-
-
-TIMEOUT_SECONDS = _default_timeout()
-MAX_STDOUT_LINES = 100
-
-
-def _truncate_output(text: str, max_lines: int = MAX_STDOUT_LINES) -> str:
-    lines = text.splitlines()
-    if len(lines) <= max_lines:
-        return text
-    head = "\n".join(lines[:max_lines])
-    return f"{head}\n...[truncated {len(lines) - max_lines} lines]"
-
-
-def _digest_error(stderr: str, max_length: int = 800) -> str:
-    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
-    focused = "\n".join(lines[-12:])
-    return focused[:max_length]
-
-
-def _map_status(raw: str) -> str:
-    status = raw.upper()
-    if status == "OPTIMAL":
-        return "optimal"
-    if status == "FEASIBLE":
-        return "feasible"
-    if status in {"INFEASIBLE", "MODEL_INVALID"}:
-        return "infeasible"
-    if status in {"UNKNOWN"}:
-        return "unknown"
-    return "unknown"
-
-
-def run_user_code(code: str, timeout: int) -> dict[str, Any]:
-    started = time.time()
-    with tempfile.TemporaryDirectory(prefix="timetable_exec_") as temp_dir:
-        workspace = Path(temp_dir)
-        input_src = Path.cwd() / "input.json"
-        input_dst = workspace / "input.json"
-        solver_path = workspace / "solver_generated.py"
-        result_path = workspace / "result.json"
-
-        if input_src.exists():
-            shutil.copy2(input_src, input_dst)
-        else:
-            input_dst.write_text("{}", encoding="utf-8")
-
-        solver_path.write_text(code, encoding="utf-8")
-
-        compile_proc = subprocess.run(
-            [sys.executable, "-m", "py_compile", str(solver_path)],
-            capture_output=True,
-            text=True,
-            cwd=workspace,
-        )
-        if compile_proc.returncode != 0:
-            return {
-                "phase": "compile",
-                "ok": False,
-                "status": "crashed",
-                "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": _digest_error(compile_proc.stderr or compile_proc.stdout),
-                "stdout": _truncate_output(compile_proc.stdout or ""),
-                "stderr": _truncate_output(compile_proc.stderr or ""),
-            }
-
-        from sandbox.run import run_sandboxed
-
-        try:
-            sandbox_result = run_sandboxed(
-                file_path=str(solver_path),
-                timeout=timeout,
-                workspace_dir=str(workspace),
-            )
-        except Exception as exc:
-            return {
-                "phase": "run",
-                "ok": False,
-                "status": "crashed",
-                "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": _digest_error(str(exc)),
-                "stdout": "",
-                "stderr": str(exc),
-            }
-
-        stdout = sandbox_result.get("stdout", "") or ""
-        stderr = sandbox_result.get("stderr", "") or ""
-        return_code = sandbox_result.get("return_code", -1)
-
-        if "timed out" in stderr.lower() or sandbox_result.get("message") == "Timeout":
-            return {
-                "phase": "run",
-                "ok": False,
-                "status": "timeout",
-                "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": f"Execution timed out after {timeout}s",
-                "stdout": _truncate_output(stdout),
-                "stderr": _truncate_output(stderr),
-            }
-
-        upper_stdout = stdout.upper()
-        marker_count = upper_stdout.count("SOLUTION_FOUND")
-
-        # Early return if SOLUTION_FOUND appears more than once, as this indicates multiple
-        # distinct solver solutions were outputted, which violates parsing guarantees.
-        if marker_count > 1:
-            return {
-                "phase": "parse",
-                "ok": False,
-                "status": "crashed",
-                "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": "Invalid marker count: SOLUTION_FOUND appears more than once.",
-                "stdout": _truncate_output(stdout),
-                "stderr": _truncate_output(stderr),
-            }
-
-        if not result_path.exists():
-            return {
-                "phase": "parse",
-                "ok": False,
-                "status": "crashed",
-                "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": "result.json was not generated by solver.",
-                "stdout": _truncate_output(stdout),
-                "stderr": _truncate_output(stderr),
-            }
-
-        try:
-            result_json = json.loads(result_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            return {
-                "phase": "parse",
-                "ok": False,
-                "status": "crashed",
-                "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": f"Invalid result.json format: {exc}",
-                "stdout": _truncate_output(stdout),
-                "stderr": _truncate_output(stderr),
-            }
-
-        schedule = result_json.get("schedule", []) if isinstance(result_json, dict) else []
-        status_raw = result_json.get("status", "unknown") if isinstance(result_json, dict) else "unknown"
-        status = _map_status(str(status_raw))
-
-        # Validation sanity: nếu schedule trống mà status nói optimal/feasible → ép infeasible.
-        if status in {"optimal", "feasible"} and not schedule:
-            status = "infeasible"
-
-        unscheduled: list[str] = []
-        if isinstance(result_json, dict) and isinstance(result_json.get("assignments"), list):
-            scheduled_ids = {
-                str(entry.get("assignmentId"))
-                for entry in schedule
-                if isinstance(entry, dict) and entry.get("assignmentId") is not None
-            }
-            unscheduled = [
-                str(item.get("id"))
-                for item in result_json["assignments"]
-                if isinstance(item, dict) and str(item.get("id")) not in scheduled_ids
-            ]
-
-        ok = return_code == 0 and status in {"optimal", "feasible"}
-        digest_source = stderr if stderr.strip() else stdout
-
-        artifact_dir = Path.cwd() / ".ai_results"
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-
-        # Cleanup: giữ tối đa 50 file gần nhất
-        _MAX_ARTIFACTS = 50
-        existing = sorted(artifact_dir.glob("result_*.json"), key=lambda p: p.stat().st_mtime)
-        for old in existing[:-_MAX_ARTIFACTS]:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-
-        artifact_path = artifact_dir / f"result_{int(time.time() * 1000)}.json"
-        artifact_path.write_text(json.dumps(result_json, ensure_ascii=False), encoding="utf-8")
-
-        return {
-            "phase": "run",
-            "ok": ok,
-            "status": status if status in {"optimal", "feasible", "infeasible"} else "unknown",
-            "durationMs": int((time.time() - started) * 1000),
-            "resultPath": str(artifact_path),
-            "resultSummary": {
-                "scheduledCount": len(schedule) if isinstance(schedule, list) else 0,
-                "unscheduledAssignments": unscheduled,
-            },
-            "errorDigest": _digest_error(digest_source) if not ok else "",
-            "stdout": _truncate_output(stdout),
-            "stderr": _truncate_output(stderr),
-        }
-
-
-def main() -> None:
-    code = sys.stdin.read()
-    if not code.strip():
-        print(
-            json.dumps(
-                {
-                    "phase": "parse",
-                    "ok": False,
-                    "status": "crashed",
-                    "durationMs": 0,
-                    "errorDigest": "No code received on stdin.",
-                    "stdout": "",
-                    "stderr": "",
-                },
-                ensure_ascii=False,
-            )
-        )
-        return
-
-    try:
-        result = run_user_code(code, TIMEOUT_SECONDS)
-    except Exception:
-        result = {
-            "phase": "run",
-            "ok": False,
-            "status": "crashed",
-            "durationMs": 0,
-            "errorDigest": _digest_error(traceback.format_exc()),
-            "stdout": "",
-            "stderr": "",
-        }
-    print(json.dumps(result, ensure_ascii=False))
-
-
-if __name__ == "__main__":
-    main()
 </file>
 
 <file path="README.md">
@@ -13796,7 +14224,7 @@ Luồng chính: UI nhập liệu -> AI Local Agent (TS) sinh code Python -> Th�
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **timetable** (1933 symbols, 2820 relationships, 63 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **timetable** (1861 symbols, 2746 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

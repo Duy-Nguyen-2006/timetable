@@ -1,4 +1,5 @@
 import json
+import os as _os
 from ortools.sat.python import cp_model
 
 with open("input.json", encoding="utf-8") as f:
@@ -55,11 +56,235 @@ def build_custom_constraints(model, slots, data):
     periods_by_day = data.get("periodsByDay") or {}
     constraints = data["constraints"]
 
+    soft_terms = []
+
     def _periods_for(d):
         day_periods = periods_by_day.get(d)
         if isinstance(day_periods, list) and day_periods:
             return day_periods
         return periods
+
+    def _soft_weight(spec):
+        weight = spec.get("weight")
+        if weight is None:
+            weight = spec.get("params", {}).get("weight")
+        try:
+            weight = int(weight)
+        except (TypeError, ValueError):
+            weight = 1
+        return max(1, weight)
+
+    def _penalize_forbidden_slots(spec, slot_vars):
+        weight = _soft_weight(spec)
+        for var in slot_vars:
+            soft_terms.append((weight, var))
+
+    def _penalize_excess(spec, count_vars, limit, tag):
+        if not count_vars:
+            return
+        weight = _soft_weight(spec)
+        excess = model.NewIntVar(0, len(count_vars), f"soft_excess_{spec.get('id', 'x')}_{tag}")
+        model.Add(excess >= sum(count_vars) - limit)
+        soft_terms.append((weight, excess))
+
+    def _resolve_group_subjects(group_name):
+        group_specs = [
+            s for s in constraints
+            if s.get("kind") == "subject_group"
+            and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
+        ]
+        group_subjects = set()
+        for gs in group_specs:
+            src = gs.get("params", {}) or {}
+            for subject in (src.get("subjects") or gs.get("subjects", [])):
+                group_subjects.add(subject)
+        return group_subjects
+
+    def _add_class_subjects_not_same_day(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        subjects = params.get("subjects") or []
+        target_class = params.get("class")
+        max_subjects = int(params.get("maxSubjectsPerDay", 1) or 1)
+        if len(subjects) < 2:
+            return
+        target_classes = [target_class] if target_class else data["classes"]
+        for c in target_classes:
+            for d in days:
+                present_vars = []
+                for subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+                    slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                    if not slot_vars:
+                        continue
+                    present = model.NewBoolVar(f"pres_{c}_{subject}_{d}")
+                    model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(present)
+                    model.Add(sum(slot_vars) == 0).OnlyEnforceIf(present.Not())
+                    present_vars.append(present)
+                if len(present_vars) <= max_subjects:
+                    continue
+                if soft_terms_ref is None:
+                    model.Add(sum(present_vars) <= max_subjects)
+                else:
+                    excess = model.NewIntVar(0, len(present_vars), f"soft_pair_{c}_{d}")
+                    model.Add(excess >= sum(present_vars) - max_subjects)
+                    soft_terms_ref.append((_soft_weight(spec), excess))
+
+    def _add_teacher_max_working_days(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        teacher = params.get("teacher")
+        total_days = len(days)
+        if params.get("maxDays") is not None:
+            max_days = int(params.get("maxDays"))
+        elif params.get("minDaysOff") is not None:
+            max_days = total_days - int(params.get("minDaysOff"))
+        else:
+            max_days = total_days - 1
+        target_teachers = [teacher] if teacher else list({a["teacher"] for a in assignments})
+        for target_teacher in target_teachers:
+            teacher_asgs = [a for a in assignments if a["teacher"] == target_teacher]
+            work_vars = []
+            for d in days:
+                day_slots = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                if not day_slots:
+                    continue
+                work_var = model.NewBoolVar(f"work_{target_teacher}_{d}")
+                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(work_var)
+                model.Add(sum(day_slots) == 0).OnlyEnforceIf(work_var.Not())
+                work_vars.append(work_var)
+            if not work_vars:
+                continue
+            if soft_terms_ref is None:
+                model.Add(sum(work_vars) <= max_days)
+            else:
+                excess = model.NewIntVar(0, len(work_vars), f"soft_workdays_{target_teacher}")
+                model.Add(excess >= sum(work_vars) - max_days)
+                soft_terms_ref.append((_soft_weight(spec), excess))
+
+    def _add_subject_max_consecutive(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        subject = params.get("subject")
+        max_consecutive = int(params.get("maxConsecutive", 1) or 1)
+        if max_consecutive <= 0:
+            return
+        target_classes = set(params.get("classes") or data["classes"])
+        window_length = max_consecutive + 1
+        for c in target_classes:
+            asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+            if not asgs:
+                continue
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(0, max(0, len(day_periods) - window_length + 1)):
+                    window = day_periods[i:i + window_length]
+                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    window_slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in window]
+                    if soft_terms_ref is None:
+                        model.Add(sum(window_slot_vars) <= max_consecutive)
+                    else:
+                        over = model.NewBoolVar(f"soft_consec_{c}_{subject}_{d}_{window[0]}")
+                        model.Add(sum(window_slot_vars) >= window_length).OnlyEnforceIf(over)
+                        model.Add(sum(window_slot_vars) <= window_length - 1).OnlyEnforceIf(over.Not())
+                        soft_terms_ref.append((_soft_weight(spec), over))
+
+    def _add_soft_constraint(spec):
+        kind = spec.get("kind")
+        params = spec.get("params", {})
+
+        if kind == "subject_pin_period":
+            subject = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            forbidden = []
+            for a in assignments:
+                if a["subject"] == subject and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                forbidden.append(slots[(a["id"], d, p)])
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_block_day":
+            teacher = params.get("teacher")
+            day = params.get("day")
+            forbidden = [
+                slots[(a["id"], day, p)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for p in _periods_for(day)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_block_period":
+            teacher = params.get("teacher")
+            period = int(params.get("period"))
+            forbidden = [
+                slots[(a["id"], d, period)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for d in days
+                if period in _periods_for(d)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_block_slot":
+            teacher = params.get("teacher")
+            day = params.get("day")
+            period = int(params.get("period"))
+            forbidden = [
+                slots[(a["id"], day, period)]
+                for a in assignments
+                if a["teacher"] == teacher
+                if period in _periods_for(day)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
+
+        elif kind == "teacher_max_per_day":
+            teacher = params.get("teacher")
+            limit = int(params.get("maxPerDay"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in days:
+                count_vars = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                _penalize_excess(spec, count_vars, limit, f"{teacher}_{d}")
+
+        elif kind == "class_no_double_subject_day":
+            target_class = params.get("class")
+            subject = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                subjects = {subject} if subject else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        count_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                        _penalize_excess(spec, count_vars, max_per_day, f"{c}_{current_subject}_{d}")
+
+        elif kind == "subject_group_daily_limit":
+            group_name = params.get("groupName")
+            max_per_day = int(params.get("maxPerDay", 1))
+            target_class = params.get("class")
+            group_subjects = _resolve_group_subjects(group_name)
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                class_assignments = [
+                    a for a in assignments if a["class"] == c and a["subject"] in group_subjects
+                ]
+                for d in days:
+                    count_vars = [slots[(a["id"], d, p)] for a in class_assignments for p in _periods_for(d)]
+                    _penalize_excess(spec, count_vars, max_per_day, f"grp_{c}_{d}")
+
+        elif kind == "class_subjects_not_same_day":
+            _add_class_subjects_not_same_day(spec, soft_terms_ref=soft_terms)
+
+        elif kind == "teacher_max_working_days":
+            _add_teacher_max_working_days(spec, soft_terms_ref=soft_terms)
+
+        elif kind == "subject_max_consecutive":
+            _add_subject_max_consecutive(spec, soft_terms_ref=soft_terms)
+
+        else:
+            return
 
     def _build_condition_literal(condition):
         op = condition.get("op") if isinstance(condition, dict) else None
@@ -251,6 +476,7 @@ def build_custom_constraints(model, slots, data):
         severity = spec.get("severity", "hard")
 
         if severity != "hard":
+            _add_soft_constraint(spec)
             continue
 
         if kind == "weekly_periods_exact":
@@ -359,6 +585,15 @@ def build_custom_constraints(model, slots, data):
         elif kind == "subject_consecutive":
             _add_subject_consecutive(spec)
 
+        elif kind == "class_subjects_not_same_day":
+            _add_class_subjects_not_same_day(spec)
+
+        elif kind == "teacher_max_working_days":
+            _add_teacher_max_working_days(spec)
+
+        elif kind == "subject_max_consecutive":
+            _add_subject_max_consecutive(spec)
+
         elif kind == "resource_capacity":
             subj = params.get("subject")
             capacity = int(params.get("capacity", 1))
@@ -456,19 +691,51 @@ def build_custom_constraints(model, slots, data):
     # <<< AI_FILL_HERE >>>
     pass
 
+    return soft_terms
 
-build_custom_constraints(model, slots, data)
+
+soft_terms = build_custom_constraints(model, slots, data)
 
 solver = cp_model.CpSolver()
 # Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
 # timeoutMs phía Node (fix bug #29).
-import os as _os
 try:
     _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
 except Exception:
     _max_seconds = 60.0
-solver.parameters.max_time_in_seconds = _max_seconds
-status = solver.Solve(model)
+try:
+    _workers = int(_os.environ.get("SOLVER_WORKERS", "") or 8)
+except Exception:
+    _workers = 8
+solver.parameters.num_search_workers = max(1, _workers)
+try:
+    solver.parameters.random_seed = int(_os.environ.get("SOLVER_RANDOM_SEED", "") or 42)
+except Exception:
+    solver.parameters.random_seed = 42
+
+best_values = None
+
+if soft_terms:
+    phase1 = max(5.0, _max_seconds * 0.4)
+    solver.parameters.max_time_in_seconds = phase1
+    status = solver.Solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        for key, var in slots.items():
+            model.AddHint(var, best_values[key])
+
+    model.Minimize(sum(int(weight) * var for (weight, var) in soft_terms))
+    phase2 = max(5.0, _max_seconds - phase1)
+    solver.parameters.max_time_in_seconds = phase2
+    status2 = solver.Solve(model)
+    if status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        status = status2
+else:
+    solver.parameters.max_time_in_seconds = _max_seconds
+    status = solver.Solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
 
 result = {
     "classes": classes,
@@ -479,11 +746,11 @@ result = {
     "schedule": [],
 }
 
-if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+if best_values is not None:
     for a in assignments:
         for d in days:
             for p in periods_for_day(d):
-                if solver.Value(slots[(a["id"], d, p)]) == 1:
+                if best_values.get((a["id"], d, p)) == 1:
                     result["schedule"].append(
                         {
                             "assignmentId": a["id"],

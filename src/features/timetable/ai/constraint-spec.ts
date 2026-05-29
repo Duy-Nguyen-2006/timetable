@@ -7,6 +7,9 @@ export type ConstraintKind =
   | 'subject_pin_period'
   | 'subject_consecutive'
   | 'class_no_double_subject_day'
+  | 'class_subjects_not_same_day'
+  | 'teacher_max_working_days'
+  | 'subject_max_consecutive'
   | 'weekly_periods_exact'
   | 'if_then'
   | 'pair_not_same_slot'
@@ -32,6 +35,8 @@ export type ConstraintSpec = {
   severity: ConstraintSeverity;
   kind: ConstraintKind;
   params: Record<string, unknown>;
+  /** Trọng số cho soft constraint. Mặc định 1 nếu bỏ trống. */
+  weight?: number;
   tags?: ConstraintTag[];
   notes?: string;
 };

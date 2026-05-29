@@ -401,6 +401,115 @@ const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+const checkClassSubjectsNotSameDay: CheckFn = (spec, schedule) => {
+  const subjects = Array.isArray(spec.params.subjects)
+    ? spec.params.subjects.map((value) => String(value))
+    : [];
+  if (subjects.length < 2) return [];
+  const targetClass = spec.params.class ? String(spec.params.class) : null;
+  const parsedMax = Number(spec.params.maxSubjectsPerDay);
+  const maxSubjectsPerDay = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
+  const subjectSet = new Set(subjects);
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, Map<string, ScheduleEntry[]>>();
+
+  for (const entry of schedule) {
+    if (targetClass && entry.class !== targetClass) continue;
+    if (!subjectSet.has(entry.subject)) continue;
+    const key = `${entry.class}::${entry.day}`;
+    if (!byClassDay.has(key)) byClassDay.set(key, new Map());
+    const subjectMap = byClassDay.get(key)!;
+    subjectMap.set(entry.subject, [...(subjectMap.get(entry.subject) ?? []), entry]);
+  }
+
+  for (const [key, subjectMap] of byClassDay.entries()) {
+    if (subjectMap.size <= maxSubjectsPerDay) continue;
+    const [klass, day] = key.split('::');
+    violations.push({
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Lớp ${klass} có ${subjectMap.size} môn {${subjects.join(', ')}} cùng ngày ${day} (tối đa ${maxSubjectsPerDay}).`,
+      offendingEntries: [...subjectMap.values()].flat(),
+    });
+  }
+
+  return violations;
+};
+
+const checkTeacherMaxWorkingDays: CheckFn = (spec, schedule) => {
+  const teacher = spec.params.teacher ? String(spec.params.teacher) : null;
+  const totalDays = new Set(schedule.map((entry) => entry.day)).size;
+  let maxDays: number;
+  if (spec.params.maxDays !== undefined && spec.params.maxDays !== null) {
+    maxDays = Number(spec.params.maxDays);
+  } else if (spec.params.minDaysOff !== undefined && spec.params.minDaysOff !== null) {
+    maxDays = totalDays - Number(spec.params.minDaysOff);
+  } else {
+    maxDays = totalDays - 1;
+  }
+
+  const teachers = teacher ? [teacher] : [...new Set(schedule.map((entry) => entry.teacher))];
+  const violations: Violation[] = [];
+
+  for (const targetTeacher of teachers) {
+    const entries = schedule.filter((entry) => entry.teacher === targetTeacher);
+    const workingDays = new Set(entries.map((entry) => entry.day));
+    if (workingDays.size > maxDays) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `${targetTeacher} dạy ${workingDays.size} ngày/tuần (tối đa ${maxDays}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+
+  return violations;
+};
+
+const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const parsedMax = Number(spec.params.maxConsecutive);
+  const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
+  const classes = Array.isArray(spec.params.classes)
+    ? spec.params.classes.map((value) => String(value))
+    : null;
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, ScheduleEntry[]>();
+
+  for (const entry of schedule) {
+    if (entry.subject !== subject) continue;
+    if (classes && !classes.includes(entry.class)) continue;
+    const key = `${entry.class}::${entry.day}`;
+    byClassDay.set(key, [...(byClassDay.get(key) ?? []), entry]);
+  }
+
+  for (const [key, entries] of byClassDay.entries()) {
+    const periods = entries
+      .map((entry) => toPeriod(entry.period))
+      .filter((period): period is number => period !== null)
+      .sort((a, b) => a - b);
+    let streak = 1;
+    let maxSeen = periods.length ? 1 : 0;
+    for (let i = 1; i < periods.length; i += 1) {
+      if (periods[i] === periods[i - 1] + 1) streak += 1;
+      else streak = 1;
+      if (streak > maxSeen) maxSeen = streak;
+    }
+    if (maxSeen > maxConsecutive) {
+      const [klass, day] = key.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Lớp ${klass} có ${maxSeen} tiết ${subject} liên tiếp ngày ${day} (tối đa ${maxConsecutive}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+
+  return violations;
+};
+
 const checkWeeklyPeriodsExact: CheckFn = (spec, schedule, ctx) => {
   if (spec.tags?.includes('auto_base')) return [];
 
@@ -593,6 +702,9 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   subject_pin_period: checkSubjectPinPeriod,
   subject_consecutive: checkSubjectConsecutive,
   class_no_double_subject_day: checkClassNoDoubleSubjectDay,
+  class_subjects_not_same_day: checkClassSubjectsNotSameDay,
+  teacher_max_working_days: checkTeacherMaxWorkingDays,
+  subject_max_consecutive: checkSubjectMaxConsecutive,
   weekly_periods_exact: checkWeeklyPeriodsExact,
   pair_not_same_slot: checkPairNotSameSlot,
   if_then: checkIfThen,

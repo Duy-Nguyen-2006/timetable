@@ -60,6 +60,8 @@ kind: ConstraintKind,         // xem bảng dưới
 
 params: { ... },              // tùy kind, xem bảng
 
+weight?: number,              // BẮT BUỘC với soft khi đề bài ghi weight=N; mặc định 1
+
 notes?: string                // ghi chú edge case nếu có
 
 }
@@ -77,7 +79,10 @@ notes?: string                // ghi chú edge case nếu có
 | `teacher_max_consecutive` | "GV X tối đa N tiết liên tiếp" | `{ teacher: string, maxConsecutive: number }` |
 | `subject_pin_period` | "Môn X chỉ xếp tiết Y" | `{ subject: string, periods: number[], classes?: string[] }` |
 | `subject_consecutive` | "Môn X cần có block liên tiếp N tiết" | `{ subject: string, length: number, classes?: string[] }` |
-| `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" | `{ class: string, subject?: string }` |
+| `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" / "phân bổ đều, không quá N tiết/ngày" | `{ class?: string, subject?: string, maxPerDay?: number }` |
+| `class_subjects_not_same_day` | "Không xếp môn A và môn B cùng ngày cho cùng lớp" | `{ subjects: string[], class?: string, maxSubjectsPerDay?: number }` |
+| `teacher_max_working_days` | "GV X có ít nhất N ngày nghỉ" / "GV dạy tối đa N ngày/tuần" | `{ teacher?: string, minDaysOff?: number, maxDays?: number }` |
+| `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` |
 | `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
 | `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |
 | `custom_dsl` | Không khớp loại nào ở trên | `{ pythonPredicate: string, naturalLanguage: string }` |
@@ -111,6 +116,7 @@ type ConditionExpr =
 5. Nếu câu có dạng implication phức tạp (vd ví dụ Trang/Thúy/Hòa), DÙNG `if_then` với `then` là MẢNG các sub-constraint (không phải 1 cái).
 6. KHÔNG được tự thêm constraint không có trong input. KHÔNG được lược bỏ constraint.
 7. `severity` mặc định theo `severity_hint`. Nếu không có hint: "không, cấm, phải" → hard; "nên, ưu tiên, cố gắng" → soft.
+8. Với soft constraint, nếu input ghi "weight=N", gán `weight: N` cho từng spec trong nhóm đó. Nếu câu áp cho "mỗi giáo viên" hoặc "mọi lớp", để trống field `teacher`/`class` tương ứng để hệ thống áp globally.
 
 ## Ví dụ mẫu (FEW-SHOT)
 

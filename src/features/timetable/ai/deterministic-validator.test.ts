@@ -112,6 +112,39 @@ const checkerCases: CheckerCase[] = [
     fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
   },
   {
+    kind: 'class_subjects_not_same_day',
+    spec: spec('class_subjects_not_same_day', 'class_subjects_not_same_day', {
+      class: '6A',
+      subjects: ['Toán', 'Văn'],
+      maxSubjectsPerDay: 1,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Lan')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Lan')],
+  },
+  {
+    kind: 'teacher_max_working_days',
+    spec: spec('teacher_max_working_days', 'teacher_max_working_days', {
+      teacher: 'Sơn',
+      maxDays: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'tue', 1, 'Văn', 'Sơn'),
+      entry('6A', 'wed', 1, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'subject_max_consecutive',
+    spec: spec('subject_max_consecutive', 'subject_max_consecutive', {
+      subject: 'KHTN',
+      maxConsecutive: 1,
+      classes: ['6A'],
+    }),
+    pass: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 3, 'KHTN', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 2, 'KHTN', 'Sơn')],
+  },
+  {
     kind: 'weekly_periods_exact',
     spec: spec('weekly_periods_exact', 'weekly_periods_exact', {
       teacher: 'Sơn',
