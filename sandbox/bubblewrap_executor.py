@@ -25,7 +25,9 @@ Limitations compared to Docker:
 
 import os
 import shutil
+import site
 import subprocess
+import sysconfig
 import time
 from pathlib import Path
 from typing import Dict, Any
@@ -33,6 +35,23 @@ from typing import Dict, Any
 
 def is_bwrap_available() -> bool:
     return shutil.which("bwrap") is not None
+
+
+def _python_package_roots() -> list[Path]:
+    roots: list[Path] = []
+    candidates = [
+        site.getusersitepackages(),
+        *site.getsitepackages(),
+        sysconfig.get_path("purelib"),
+        sysconfig.get_path("platlib"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate).resolve()
+        if path.exists() and path not in roots:
+            roots.append(path)
+    return roots
 
 
 def run_with_bubblewrap(
@@ -64,6 +83,9 @@ def run_with_bubblewrap(
 
     # Build a minimal bubblewrap command.
     # We bind only the workspace dir + essential system dirs (read-only).
+    package_roots = _python_package_roots()
+    package_mounts = [f"/tmp/timetable-python-site-{index}" for index, _ in enumerate(package_roots)]
+
     cmd = [
         "bwrap",
         "--ro-bind", "/usr", "/usr",
@@ -81,8 +103,15 @@ def run_with_bubblewrap(
         "--unshare-all",          # new user, pid, net, ipc, uts, cgroup, mount namespaces
         "--die-with-parent",
         "--new-session",
-        "python", str(file_path.name),
     ]
+
+    for mount_path, host_path in zip(package_mounts, package_roots):
+        cmd.extend(["--ro-bind", str(host_path), mount_path])
+
+    if package_mounts:
+        cmd.extend(["--setenv", "PYTHONPATH", os.pathsep.join(package_mounts)])
+
+    cmd.extend(["python", str(file_path.name)])
 
     print(f"[Bubblewrap] Running {file_path.name} in lightweight sandbox...")
 
