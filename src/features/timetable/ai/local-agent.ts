@@ -370,11 +370,17 @@ export async function runLocalAgent(
           return spec?.severity === 'hard';
         });
 
-        const uncoveredHardUncheckedIds = hardUncheckedIds.filter(
-          (id) => !latestCoveredConstraintIds.has(id)
-        );
 
-        if (report.hardConstraintPass && report.baseConstraintPass && roundTrip.ok && uncoveredHardUncheckedIds.length === 0) {
+        // (fix bug #1) Coverage do coder TỰ KHAI không còn là điều kiện duyệt.
+        // Chỉ duyệt khi mọi hard constraint đều được deterministic check thực sự
+        // (hardUncheckedIds rỗng). Self-claim chỉ dùng để gợi ý repair bên dưới.
+        if (
+          report.hardConstraintPass &&
+          report.baseConstraintPass &&
+          report.hardCoverageComplete &&
+          roundTrip.ok &&
+          hardUncheckedIds.length === 0
+        ) {
           const finalResult = {
             ...execResult.resultData,
             schedule: scheduleWithAssignmentIds,
@@ -444,14 +450,13 @@ export async function runLocalAgent(
         sampleMessages.unshift(lastRoundTrip.message);
       }
 
-      const uncoveredHardUncheckedIds = lastReport.uncheckedConstraintIds.filter((id) => {
-        const spec = translator.constraintSpecs.find((item) => item.id === id);
-        return spec?.severity === 'hard' && !latestCoveredConstraintIds.has(id);
-      });
+      // (fix bug #1) Báo cho repair MỌI hard constraint chưa có deterministic
+      // checker, bất kể coder khai đã cover hay chưa — vì self-claim không đáng tin.
+      const uncoveredHardUncheckedIds = lastReport.hardUncheckedConstraintIds;
 
       if (uncoveredHardUncheckedIds.length > 0) {
         sampleMessages.unshift(
-          `Hard constraints chưa được AI custom code cover: ${uncoveredHardUncheckedIds.join(', ')}`
+          `Hard constraints chưa được deterministic check (cần code/sửa parser): ${uncoveredHardUncheckedIds.join(', ')}`
         );
       }
 

@@ -202,9 +202,6 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
             if len(periods) < length:
                 continue
             total_periods = len(periods)
-            if total_periods % length != 0:
-                out.append(_violation(cid, kind, "subject_consecutive violated.", entries))
-                continue
             required_runs = total_periods // length
             runs_of_correct_length = 0
             streak = 1
@@ -224,6 +221,12 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
     if kind == "class_no_double_subject_day":
         klass = params.get("class")
         subject = params.get("subject")
+        try:
+            max_per_day = int(params.get("maxPerDay", 1))
+        except (TypeError, ValueError):
+            max_per_day = 1
+        if max_per_day < 1:
+            max_per_day = 1
         grouped: dict[str, list[dict[str, Any]]] = {}
         for entry in schedule:
             if entry.get("class") != klass:
@@ -234,7 +237,7 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
             grouped.setdefault(key, []).append(entry)
         out: list[dict[str, Any]] = []
         for entries in grouped.values():
-            if len(entries) > 1:
+            if len(entries) > max_per_day:
                 out.append(_violation(cid, kind, "class_no_double_subject_day violated.", entries))
         return out
 
@@ -289,6 +292,65 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
                         f"if_then violated: {violation['message']}",
                         violation["offendingEntries"],
                     )
+                )
+        return out
+
+    if kind == "resource_capacity":
+        subject = params.get("subject")
+        try:
+            capacity = int(params.get("capacity", 1))
+        except (TypeError, ValueError):
+            capacity = 1
+        by_slot: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("subject") != subject:
+                continue
+            key = f"{entry.get('day')}::{entry.get('period')}"
+            by_slot.setdefault(key, []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in by_slot.values():
+            if len(entries) > capacity:
+                out.append(_violation(cid, kind, "resource_capacity violated.", entries))
+        return out
+
+    if kind == "session_limit":
+        teacher = params.get("teacher")
+        try:
+            max_periods = int(params.get("maxPeriods", 1))
+        except (TypeError, ValueError):
+            max_periods = 1
+        if not teacher:
+            return []
+        by_day: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if entry.get("teacher") != teacher:
+                continue
+            by_day.setdefault(str(entry.get("day")), []).append(entry)
+        out: list[dict[str, Any]] = []
+        for entries in by_day.values():
+            if len(entries) > max_periods:
+                out.append(_violation(cid, kind, "session_limit violated.", entries))
+        return out
+
+    if kind == "subject_group_daily_limit":
+        target_class = params.get("class")
+        try:
+            max_per_day = int(params.get("maxPerDay", 1))
+        except (TypeError, ValueError):
+            max_per_day = 1
+        by_day_subjects: dict[str, set[Any]] = {}
+        by_day_entries: dict[str, list[dict[str, Any]]] = {}
+        for entry in schedule:
+            if target_class and entry.get("class") != target_class:
+                continue
+            day_key = str(entry.get("day"))
+            by_day_subjects.setdefault(day_key, set()).add(entry.get("subject"))
+            by_day_entries.setdefault(day_key, []).append(entry)
+        out: list[dict[str, Any]] = []
+        for day_key, subjects in by_day_subjects.items():
+            if len(subjects) > max_per_day:
+                out.append(
+                    _violation(cid, kind, "subject_group_daily_limit violated.", by_day_entries.get(day_key, []))
                 )
         return out
 

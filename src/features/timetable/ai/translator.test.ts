@@ -526,10 +526,70 @@ test('fallback parser downgrades Dataset 7 base model constraints instead of cus
   assert.deepEqual(
     specs.slice(3).map((spec) => spec.params),
     [
-      { class: '6A', subject: 'Toán' },
-      { class: '6A', subject: 'Văn' },
+      { class: '6A', subject: 'Toán', maxPerDay: 1 },
+      { class: '6A', subject: 'Văn', maxPerDay: 1 },
     ]
   );
+});
+
+test('fallback parser extracts maxPerDay for per-class and global same-subject daily limits', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'mon', label: 'Thứ 2' },
+      { id: 'tue', label: 'Thứ 3' },
+      { id: 'wed', label: 'Thứ 4' },
+    ],
+    assignments: [
+      sampleInput.assignments[0],
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Mai' },
+        subject: { id: 's2', label: 'Văn' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 2,
+      },
+      {
+        id: 'asg_3',
+        teacher: { id: 't3', label: 'Lan' },
+        subject: { id: 's3', label: 'Toán' },
+        class: { id: 'c2', label: '6B' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [
+      { type: 'required', text: 'Lớp 6A không quá 2 tiết cùng môn trong một ngày' },
+      { type: 'required', text: 'Mỗi lớp không được học cùng 1 môn quá 2 tiết trong cùng 1 ngày' },
+    ],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.deepEqual(specs[0], {
+    id: 'c1',
+    original: 'Lớp 6A không quá 2 tiết cùng môn trong một ngày',
+    severity: 'hard',
+    kind: 'class_no_double_subject_day',
+    params: { class: '6A', maxPerDay: 2 },
+  });
+  assert.deepEqual(
+    specs.slice(1).map((spec) => spec.params),
+    [
+      { class: '6A', subject: 'Toán', maxPerDay: 2 },
+      { class: '6A', subject: 'Văn', maxPerDay: 2 },
+      { class: '6B', subject: 'Toán', maxPerDay: 2 },
+    ]
+  );
+});
+
+test('fallback parser marks unparsed hard constraints explicitly', () => {
+  const specs = __translatorInternal.fallbackFromRuleParser({
+    ...sampleInput,
+    constraints: [{ type: 'required', text: 'Ràng buộc cứng chưa hỗ trợ' }],
+  });
+
+  assert.equal(specs[0].kind, 'custom_dsl');
+  assert.equal(specs[0].notes, 'fallback_parser:UNPARSED_HARD');
 });
 
 test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', () => {
@@ -563,4 +623,3 @@ test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', 
   assert.equal(result.some((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl'), false);
   assert.equal(result.every((spec) => spec.tags?.includes('auto_base')), true);
 });
-

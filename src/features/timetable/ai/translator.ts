@@ -192,15 +192,19 @@ function isAutoBaseConstraintText(text: string): boolean {
   return false;
 }
 
-function isGlobalClassNoDoubleSubjectDayText(text: string): boolean {
+function parseGlobalClassSubjectDailyLimit(text: string): { maxPerDay: number } | null {
   const normalized = normalizeConstraintText(text);
-  return (
-    /\b(moi|tat ca|all|each)\b/u.test(normalized) &&
-    /\blop\b/u.test(normalized) &&
-    /\bcung 1 mon\b/u.test(normalized) &&
-    /(qua 1|hon 1|toi da 1)/u.test(normalized) &&
-    /\bngay\b/u.test(normalized)
-  );
+  const mentionsEvery = /\b(moi|tat ca|all|each)\b/u.test(normalized);
+  const mentionsClass = /\blop\b/u.test(normalized);
+  const mentionsSameSubject = /\bcung\s*(1|mot)?\s*mon\b/u.test(normalized);
+  const mentionsDay = /\bngay\b/u.test(normalized);
+  if (!(mentionsEvery && mentionsClass && mentionsSameSubject && mentionsDay)) {
+    return null;
+  }
+  const m = normalized.match(/(?:khong qua|toi da|hon|qua)\s*(\d+)/u);
+  const maxPerDay = m ? Number(m[1]) : 1;
+  if (!Number.isFinite(maxPerDay) || maxPerDay < 1) return null;
+  return { maxPerDay };
 }
 
 function markAutoBaseSpec(spec: ConstraintSpec): ConstraintSpec {
@@ -567,10 +571,22 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       } satisfies ConstraintSpec;
     }
 
-    if (/không\s*học|khong\s*hoc/u.test(constraint.text) && /(2|hai).*(lần|lan|tiết|tiet).*(ngày|ngay)/u.test(constraint.text)) {
+    const mentionsLegacyNoDouble =
+      /không\s*học|khong\s*hoc/u.test(constraint.text) &&
+      /(2|hai).*(lần|lan|tiết|tiet).*(ngày|ngay)/u.test(constraint.text);
+    const mentionsDailyLimitText =
+      /(không\s*quá|khong\s*qua|không\s*học|khong\s*hoc|tối\s*đa|toi\s*da)/u.test(constraint.text) &&
+      /(cùng|cung).*(môn|mon)/u.test(constraint.text) &&
+      /(ngày|ngay)/u.test(constraint.text);
+    if (mentionsLegacyNoDouble || mentionsDailyLimitText) {
       const klass = classLabels.find((label) => includesLabel(constraint.text, label));
       if (klass) {
         const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+        const limitMatch = normalizeConstraintText(constraint.text).match(
+          /(?:khong qua|toi da|hon|qua)\s*(\d+)/u
+        );
+        const parsedLimit = limitMatch ? Number(limitMatch[1]) : 1;
+        const maxPerDay = Number.isFinite(parsedLimit) && parsedLimit >= 1 ? parsedLimit : 1;
         return {
           id,
           original: constraint.text,
@@ -579,12 +595,14 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           params: {
             class: klass,
             ...(subject ? { subject } : {}),
+            maxPerDay,
           },
         } satisfies ConstraintSpec;
       }
     }
 
-    if (isGlobalClassNoDoubleSubjectDayText(constraint.text)) {
+    const globalDailyLimit = parseGlobalClassSubjectDailyLimit(constraint.text);
+    if (globalDailyLimit) {
       const classSubjectPairs = [
         ...new Map(
           input.assignments.map((assignment) => [
@@ -599,7 +617,7 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         original: constraint.text,
         severity,
         kind: 'class_no_double_subject_day',
-        params: pair,
+        params: { ...pair, maxPerDay: globalDailyLimit.maxPerDay },
       }) satisfies ConstraintSpec);
     }
 
@@ -717,7 +735,7 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       params: {
         naturalLanguage: constraint.text,
       },
-      notes: 'fallback_parser',
+      notes: severity === 'hard' ? 'fallback_parser:UNPARSED_HARD' : 'fallback_parser',
     } satisfies ConstraintSpec;
 
     return isAutoBaseConstraintText(constraint.text) ? markAutoBaseSpec(fallbackSpec) : fallbackSpec;

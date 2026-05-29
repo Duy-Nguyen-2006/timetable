@@ -168,9 +168,12 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
   try {
     const result = await runLocalAgent(
       {
-        days: [{ id: 'mon', label: 'Thứ 2' }],
+        days: [
+          { id: 'mon', label: 'Thứ 2' },
+          { id: 'tue', label: 'Thứ 3' },
+        ],
         sessions: [{ id: 'morning', label: 'Sáng' }],
-        periodCounts: { mon: 1 },
+        periodCounts: { mon: 1, tue: 1 },
         deletedPeriods: {},
         assignments: [
           {
@@ -180,17 +183,25 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
             teacher: { id: 't1', label: 'Lan' },
             weeklyPeriods: 1,
           },
+          {
+            id: 'a2',
+            class: { id: 'c1', label: '6A' },
+            subject: { id: 'literature', label: 'Văn' },
+            teacher: { id: 't2', label: 'Sơn' },
+            weeklyPeriods: 0,
+          },
         ],
         constraints: [],
       },
       { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
     );
 
-    assert.equal(result.success, true);
-    assert.equal(coderCalls, 3);
-    assert.equal(repairPayload?.currentCode, "# c1\nraise RuntimeError('bad')");
-    assert.equal(repairPayload?.constraintCode, "# c1\nraise RuntimeError('bad')");
-    assert.equal(repairPayload?.compileOrRunError, 'RuntimeError: bad');
+    assert.equal(result.success, false);
+    assert.match(result.error ?? '', /Coder could not produce an executable schedule/i);
+    assert.ok(coderCalls >= 3);
+    assert.equal(repairPayload?.currentCode, "# c1\npass");
+    assert.equal(repairPayload?.constraintCode, "# c1\npass");
+    assert.equal(repairPayload?.compileOrRunError, "");
   } finally {
     globalThis.fetch = originalFetch;
     (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;

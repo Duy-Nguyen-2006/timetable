@@ -277,4 +277,44 @@ describe('validator edge cases', () => {
     const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [autoBaseSpec]);
     assert.equal(report.violations.length, 0);
   });
+
+  it('class_no_double_subject_day honors custom maxPerDay parameter', () => {
+    const customDoubleSpec = spec('class_no_double_subject_day_custom', 'class_no_double_subject_day', {
+      class: '6A',
+      subject: 'Toán',
+      maxPerDay: 2,
+    });
+
+    const passSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+    ];
+    const passReport = validateSchedule(passSchedule, [customDoubleSpec]);
+    assert.equal(passReport.violations.length, 0);
+
+    const failSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+    ];
+    const failReport = validateSchedule(failSchedule, [customDoubleSpec]);
+    assert.equal(failReport.violations.length, 1);
+    assert.match(failReport.violations[0].message, /tối đa 2/);
+  });
+
+  it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
+    const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
+      naturalLanguage: 'custom hard constraint description',
+    }, 'hard');
+
+    const report = validateSchedule(
+      [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+      [uncheckedHardSpec]
+    );
+
+    assert.equal(report.ok, false);
+    assert.equal(report.hardConstraintPass, false);
+    assert.equal(report.hardCoverageComplete, false);
+    assert.deepEqual(report.hardUncheckedConstraintIds, ['unchecked_hard_spec']);
+  });
 });

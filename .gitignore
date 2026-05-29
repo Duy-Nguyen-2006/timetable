@@ -55,3 +55,18 @@ __pycache__/
 *.so
 .pytest_cache/
 .mypy_cache/
+
+# local agent/session state
+.omo/
+
+# generated prompt copies
+public/prompts/
+
+# generated solver template copy
+public/templates/solver_skeleton.py
+
+# local agent/session state
+.omo/
+
+# optional local tool state
+.orchids/

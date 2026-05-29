@@ -502,3 +502,234 @@ Không xếp Toán tiết 7
 Không xếp Văn tiết 7
 HĐTN nên buổi chiều
 Mỗi giáo viên không dạy quá 6 tiết liên tiếp
+
+DATASET 7
+Days: Mon-Fri
+Time: Morning
+Max periods: 4
+Teachers:
+An
+Bình
+Chi
+Duy
+Em
+Giang
+Hải
+Khánh
+Linh
+Mai
+Nam
+Oanh
+Phúc
+Quân
+Trang
+Uyên
+Vân
+Yến
+Bảo
+Cường
+Diệp
+Hà
+Kiên
+Loan
+Minh
+Nga
+Phú
+Quyên
+Tâm
+Vi
+Xuân
+Đạt
+Thảo
+Nhật
+Hoài
+Subjects:
+Toán
+Văn
+Tiếng Anh
+KHTN
+LS&ĐL
+GDTC
+CN
+GDCD
+Tin
+HĐTN
+Classes:
+6A
+6B
+6C
+7A
+7B
+7C
+8A
+8B
+8C
+9A
+9B
+9C
+Assignments:
+An-Toán-6A-4
+Bình-Toán-6B-4
+Chi-Toán-6C-4
+Duy-Toán-7A-4
+Em-Toán-7B-4
+Giang-Toán-7C-4
+An-Toán-8A-4
+Bình-Toán-8B-4
+Chi-Toán-8C-4
+Duy-Toán-9A-4
+Em-Toán-9B-4
+Giang-Toán-9C-4
+Hải-Văn-6A-3
+Khánh-Văn-6B-3
+Linh-Văn-6C-3
+Mai-Văn-7A-3
+Nam-Văn-7B-3
+Oanh-Văn-7C-3
+Hải-Văn-8A-3
+Khánh-Văn-8B-3
+Linh-Văn-8C-3
+Mai-Văn-9A-3
+Nam-Văn-9B-3
+Oanh-Văn-9C-3
+Phúc-Tiếng Anh-6A-3
+Quân-Tiếng Anh-6B-3
+Trang-Tiếng Anh-6C-3
+Uyên-Tiếng Anh-7A-3
+Vân-Tiếng Anh-7B-3
+Phúc-Tiếng Anh-7C-3
+Quân-Tiếng Anh-8A-3
+Trang-Tiếng Anh-8B-3
+Uyên-Tiếng Anh-8C-3
+Vân-Tiếng Anh-9A-3
+Phúc-Tiếng Anh-9B-3
+Quân-Tiếng Anh-9C-3
+Yến-KHTN-6A-3
+Bảo-KHTN-6B-3
+Cường-KHTN-6C-3
+Diệp-KHTN-7A-3
+Yến-KHTN-7B-3
+Bảo-KHTN-7C-3
+Cường-KHTN-8A-3
+Diệp-KHTN-8B-3
+Yến-KHTN-8C-3
+Bảo-KHTN-9A-3
+Cường-KHTN-9B-3
+Diệp-KHTN-9C-3
+Hà-LS&ĐL-6A-2
+Kiên-LS&ĐL-6B-2
+Loan-LS&ĐL-6C-2
+Hà-LS&ĐL-7A-2
+Kiên-LS&ĐL-7B-2
+Loan-LS&ĐL-7C-2
+Hà-LS&ĐL-8A-2
+Kiên-LS&ĐL-8B-2
+Loan-LS&ĐL-8C-2
+Hà-LS&ĐL-9A-2
+Kiên-LS&ĐL-9B-2
+Loan-LS&ĐL-9C-2
+Minh-GDTC-6A-1
+Nga-GDTC-6B-1
+Minh-GDTC-6C-1
+Nga-GDTC-7A-1
+Minh-GDTC-7B-1
+Nga-GDTC-7C-1
+Minh-GDTC-8A-1
+Nga-GDTC-8B-1
+Minh-GDTC-8C-1
+Nga-GDTC-9A-1
+Minh-GDTC-9B-1
+Nga-GDTC-9C-1
+Phú-CN-6A-1
+Quyên-CN-6B-1
+Phú-CN-6C-1
+Quyên-CN-7A-1
+Phú-CN-7B-1
+Quyên-CN-7C-1
+Phú-CN-8A-1
+Quyên-CN-8B-1
+Phú-CN-8C-1
+Quyên-CN-9A-1
+Phú-CN-9B-1
+Quyên-CN-9C-1
+Tâm-GDCD-6A-1
+Vi-GDCD-6B-1
+Tâm-GDCD-6C-1
+Vi-GDCD-7A-1
+Tâm-GDCD-7B-1
+Vi-GDCD-7C-1
+Tâm-GDCD-8A-1
+Vi-GDCD-8B-1
+Tâm-GDCD-8C-1
+Vi-GDCD-9A-1
+Tâm-GDCD-9B-1
+Vi-GDCD-9C-1
+Xuân-Tin-6A-1
+Đạt-Tin-6B-1
+Xuân-Tin-6C-1
+Đạt-Tin-7A-1
+Xuân-Tin-7B-1
+Đạt-Tin-7C-1
+Xuân-Tin-8A-1
+Đạt-Tin-8B-1
+Xuân-Tin-8C-1
+Đạt-Tin-9A-1
+Xuân-Tin-9B-1
+Đạt-Tin-9C-1
+Thảo-HĐTN-6A-1
+Nhật-HĐTN-6B-1
+Hoài-HĐTN-6C-1
+Thảo-HĐTN-7A-1
+Nhật-HĐTN-7B-1
+Hoài-HĐTN-7C-1
+Thảo-HĐTN-8A-1
+Nhật-HĐTN-8B-1
+Hoài-HĐTN-8C-1
+Thảo-HĐTN-9A-1
+Nhật-HĐTN-9B-1
+Hoài-HĐTN-9C-1
+Hard constraints:
+Mỗi lớp có đúng 1 môn trong mỗi slot
+Mỗi giáo viên không được dạy quá 1 lớp trong cùng 1 slot
+Mỗi assignment phải xếp đúng số tiết/tuần
+Mỗi lớp không được học cùng 1 môn quá 1 tiết trong cùng 1 ngày
+Toán chỉ được xếp tiết 1-3
+Văn chỉ được xếp tiết 1-3
+Tiếng Anh chỉ được xếp tiết 1-3
+KHTN chỉ được xếp tiết 1-3
+CN chỉ được xếp tiết 3-4
+GDCD chỉ được xếp tiết 3-4
+Tin chỉ được xếp tiết 3-4
+GDTC chỉ được xếp tiết 3-4
+HĐTN chỉ được xếp tiết 4
+Mỗi lớp không được có quá 3 môn lõi trong cùng 1 ngày
+Môn lõi gồm: Toán, Văn, Tiếng Anh, KHTN
+Mỗi giáo viên không dạy quá 3 tiết trong cùng 1 buổi sáng
+Phòng Tin tối đa 3 lớp cùng slot
+Sân GDTC tối đa 3 lớp cùng slot
+HĐTN tối đa 4 lớp cùng slot
+Linh không dạy thứ 4
+Nam không dạy thứ 2
+Hoài không dạy thứ 2
+Nhật không dạy thứ 4
+Thảo không dạy thứ 5
+Hải không dạy thứ 3 tiết 4
+Bình không dạy thứ 6 tiết 4
+Yến không dạy thứ 4 tiết 4
+Đạt không dạy thứ 3 tiết 4
+Minh không dạy thứ 3 tiết 1
+Nga không dạy thứ 2 tiết 1
+Soft constraints:
+weight = 8:
+Không nên xếp Toán tiết 3
+Không nên xếp Văn tiết 3
+Không nên xếp KHTN tiết 3
+Mỗi lớp không nên có 3 môn lõi trong cùng 1 ngày
+Mỗi giáo viên không nên dạy 3 tiết liên tiếp trong cùng 1 buổi sáng
+weight = 5:
+HĐTN nên xếp thứ 6 tiết 4
+GDTC nên xếp tiết 4
+Tin nên xếp tiết 3
+CN nên xếp tiết 4
+GDCD nên xếp tiết 4
+LS&ĐL không nên xếp tiết 3

@@ -212,13 +212,14 @@ def build_custom_constraints(model, slots, data):
         elif kind == "class_no_double_subject_day":
             cls = params.get("class")
             subj = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
             asgs = [
                 a for a in assignments
                 if a["class"] == cls and (subj is None or a["subject"] == subj)
             ]
             for d in days:
                 model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= 1
+                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
                 ).OnlyEnforceIf(guard)
 
         elif kind == "pair_not_same_slot":
@@ -327,13 +328,14 @@ def build_custom_constraints(model, slots, data):
         elif kind == "class_no_double_subject_day":
             cls = params.get("class")
             subj = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
             asgs = [
                 a for a in assignments
                 if a["class"] == cls and (subj is None or a["subject"] == subj)
             ]
             for d in days:
                 model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= 1
+                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
                 )
 
         elif kind == "pair_not_same_slot":
@@ -406,10 +408,15 @@ def build_custom_constraints(model, slots, data):
             group_name = params.get("groupName")
             max_per_day = int(params.get("maxPerDay", 1))
             target_class = params.get("class")
-            group_specs = [s for s in constraints if s.get("kind") == "subject_group" and s.get("name") == group_name]
+            group_specs = [
+                s for s in constraints
+                if s.get("kind") == "subject_group"
+                and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
+            ]
             group_subjects = set()
             for gs in group_specs:
-                for s in gs.get("subjects", []):
+                src = gs.get("params", {}) or {}
+                for s in (src.get("subjects") or gs.get("subjects", [])):
                     group_subjects.add(s)
             target_classes = [target_class] if target_class else classes
             for cls in target_classes:
@@ -438,9 +445,9 @@ def build_custom_constraints(model, slots, data):
             continue
 
         else:
-            # Skip thay vì raise để repair LLM có thể vẫn chạy. Validator sẽ
-            # ghi nhận violation và force repair.
-            continue
+            raise NotImplementedError(
+                f"Unsupported HARD constraint kind in solver skeleton: {kind} (id={spec.get('id')})"
+            )
 
     # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
     # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,

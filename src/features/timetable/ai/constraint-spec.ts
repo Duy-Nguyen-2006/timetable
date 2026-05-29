@@ -85,8 +85,12 @@ export type DeterministicValidationReport = {
   baseConstraintPass: boolean;
   hardConstraintPass: boolean;
   softConstraintPass: boolean;
+  /** True khi MỌI hard constraint đều có checker thực sự kiểm (fail-closed). */
+  hardCoverageComplete: boolean;
   violations: Violation[];
   hardViolations: Violation[];
   softViolations: Violation[];
   uncheckedConstraintIds: string[];
+  /** Các hard constraint không được deterministic check (custom_dsl/không có checker). */
+  hardUncheckedConstraintIds: string[];
 };

@@ -374,6 +374,10 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
 const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
   const klass = String(spec.params.class ?? '');
   const subjectFilter = spec.params.subject ? String(spec.params.subject) : null;
+  // maxPerDay: số tiết cùng môn tối đa/ngày. Mặc định 1 (giữ tương thích cũ),
+  // nhưng cho phép "≤ N" (vd ≤ 2). (fix bug #3)
+  const parsedMax = Number(spec.params.maxPerDay);
+  const maxPerDay = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
   const violations: Violation[] = [];
   const byDaySubject = new Map<string, ScheduleEntry[]>();
 
@@ -385,12 +389,12 @@ const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
   }
 
   for (const [key, entries] of byDaySubject.entries()) {
-    if (entries.length <= 1) continue;
+    if (entries.length <= maxPerDay) continue;
     const [day, subject] = key.split('::');
     violations.push({
       constraintId: spec.id,
       kind: spec.kind,
-      message: `Lớp ${klass} học môn ${subject} ${entries.length} lần trong ngày ${day}.`,
+      message: `Lớp ${klass} học môn ${subject} ${entries.length} lần trong ngày ${day} (tối đa ${maxPerDay}).`,
       offendingEntries: entries,
     });
   }
@@ -633,14 +637,23 @@ export function validateSchedule(
   );
   const softViolations = violations.filter((violation) => softConstraintIds.has(violation.constraintId));
 
+  // FAIL-CLOSED: một hard constraint không có checker (custom_dsl / kind lạ)
+  // KHÔNG được mặc nhiên coi là đạt. (fix bug #4)
+  const hardUncheckedConstraintIds = uncheckedConstraintIds.filter((id) =>
+    hardConstraintIds.has(id)
+  );
+  const hardCoverageComplete = hardUncheckedConstraintIds.length === 0;
+
   return {
-    ok: violations.length === 0,
+    ok: violations.length === 0 && hardCoverageComplete,
     baseConstraintPass: baseViolations.length === 0,
-    hardConstraintPass: hardViolations.length === 0,
+    hardConstraintPass: hardViolations.length === 0 && hardCoverageComplete,
     softConstraintPass: softViolations.length === 0,
+    hardCoverageComplete,
     violations,
     hardViolations,
     softViolations,
     uncheckedConstraintIds,
+    hardUncheckedConstraintIds,
   };
 }
