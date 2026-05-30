@@ -1,5 +1,0 @@
-{
-  "/api/ai/chat/route": "app/api/ai/chat/route.js",
-  "/api/ai/python-execute/route": "app/api/ai/python-execute/route.js",
-  "/api/ai/python-syntax-check/route": "app/api/ai/python-syntax-check/route.js"
-}

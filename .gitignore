@@ -22,6 +22,11 @@ venv/
 dist/
 build/
 target/
+.next/
+.ai_results/
+*.tsbuildinfo
+repomix-output.xml
+harness.db
 
 # Python specific
 *.pyc
