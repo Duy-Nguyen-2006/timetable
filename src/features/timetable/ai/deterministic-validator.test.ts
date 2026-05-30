@@ -335,6 +335,38 @@ describe('validator edge cases', () => {
     assert.match(failReport.violations[0].message, /tối đa 2/);
   });
 
+  it('subject_group_daily_limit is checked per class and resolves subject_group definitions', () => {
+    const groupSpec = spec('core_group', 'subject_group', {
+      name: 'lõi',
+      subjects: ['Toán', 'Văn', 'Tiếng Anh', 'KHTN'],
+    });
+    const limitSpec = spec('core_limit', 'subject_group_daily_limit', {
+      groupName: 'lõi',
+      maxPerDay: 3,
+    });
+
+    const passSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'An'),
+      entry('6A', 'mon', 2, 'Văn', 'Bình'),
+      entry('6A', 'mon', 3, 'KHTN', 'Chi'),
+      entry('6B', 'mon', 1, 'Toán', 'Duy'),
+      entry('6B', 'mon', 2, 'Văn', 'Em'),
+      entry('6B', 'mon', 3, 'KHTN', 'Giang'),
+      entry('6A', 'mon', 4, 'GDTC', 'Hải'),
+    ];
+    const passReport = validateSchedule(passSchedule, [limitSpec, groupSpec]);
+    assert.equal(passReport.violations.length, 0);
+    assert.equal(passReport.hardCoverageComplete, true);
+
+    const failSchedule = [
+      ...passSchedule,
+      entry('6A', 'mon', 5, 'Tiếng Anh', 'Khánh'),
+    ];
+    const failReport = validateSchedule(failSchedule, [limitSpec, groupSpec]);
+    assert.equal(failReport.violations.length, 1);
+    assert.match(failReport.violations[0].message, /Lớp 6A/);
+  });
+
   it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
     const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
       naturalLanguage: 'custom hard constraint description',

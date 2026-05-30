@@ -117,6 +117,88 @@ function shouldRepairExecutableFailure(
   );
 }
 
+function remainingDeadlineMs(deadlineAt: number): number {
+  return Math.max(0, deadlineAt - Date.now());
+}
+
+interface FeasibilityIssue {
+  kind: 'overloaded_class' | 'overloaded_teacher' | 'missing_assignment' | 'invalid_weekly_periods';
+  message: string;
+}
+
+function checkFeasibility(input: AgentInputPayload): FeasibilityIssue[] {
+  const issues: FeasibilityIssue[] = [];
+
+  // Tổng số slot khả dụng
+  const totalSlots = input.days.reduce((sum, day) => {
+    const count = Number(input.periodCounts[day.id] ?? 0);
+    return sum + (Number.isFinite(count) ? count : 0);
+  }, 0);
+
+  // Kiểm tra weeklyPeriods hợp lệ (< 0 hoặc không phải số — 0 được phép, solver tự bỏ qua)
+  for (const asg of input.assignments) {
+    if (!Number.isFinite(asg.weeklyPeriods) || asg.weeklyPeriods < 0) {
+      issues.push({
+        kind: 'invalid_weekly_periods',
+        message: `Phân công "${asg.teacher.label} - ${asg.subject.label} - ${asg.class.label}" có số tiết/tuần không hợp lệ (${asg.weeklyPeriods}).`,
+      });
+    }
+  }
+
+  // Kiểm tra tổng tiết mỗi lớp không vượt tổng slot
+  const periodsByClass = new Map<string, number>();
+  for (const asg of input.assignments) {
+    const prev = periodsByClass.get(asg.class.label) ?? 0;
+    periodsByClass.set(asg.class.label, prev + (asg.weeklyPeriods || 0));
+  }
+  for (const [className, total] of periodsByClass) {
+    if (totalSlots > 0 && total > totalSlots) {
+      issues.push({
+        kind: 'overloaded_class',
+        message: `Lớp ${className} cần ${total} tiết/tuần nhưng chỉ có ${totalSlots} ô trống (${input.days.length} ngày).`,
+      });
+    }
+  }
+
+  // Kiểm tra tổng tiết mỗi giáo viên không vượt tổng slot
+  const periodsByTeacher = new Map<string, number>();
+  for (const asg of input.assignments) {
+    const prev = periodsByTeacher.get(asg.teacher.label) ?? 0;
+    periodsByTeacher.set(asg.teacher.label, prev + (asg.weeklyPeriods || 0));
+  }
+  for (const [teacherName, total] of periodsByTeacher) {
+    if (totalSlots > 0 && total > totalSlots) {
+      issues.push({
+        kind: 'overloaded_teacher',
+        message: `Giáo viên ${teacherName} được phân công ${total} tiết/tuần nhưng chỉ có ${totalSlots} slot khả dụng.`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+function buildFeasibilityErrorMessage(issues: FeasibilityIssue[]): string {
+  const lines = [
+    'Chưa xếp được thời khóa biểu.',
+    '',
+    'Lý do phát hiện trước khi chạy solver:',
+    ...issues.map((issue) => `- ${issue.message}`),
+    '',
+    'Gợi ý sửa:',
+  ];
+
+  const hasOverloadedClass = issues.some((i) => i.kind === 'overloaded_class');
+  const hasOverloadedTeacher = issues.some((i) => i.kind === 'overloaded_teacher');
+  const hasInvalidPeriods = issues.some((i) => i.kind === 'invalid_weekly_periods');
+
+  if (hasOverloadedClass) lines.push('- Giảm số tiết/tuần của lớp bị quá tải, hoặc tăng số tiết/ngày.');
+  if (hasOverloadedTeacher) lines.push('- Giảm số tiết được phân công cho giáo viên bị quá tải.');
+  if (hasInvalidPeriods) lines.push('- Kiểm tra lại số tiết/tuần trong phân công chuyên môn.');
+
+  return lines.join('\n');
+}
+
 export async function runLocalAgent(
   input: AgentInputPayload,
   config: LocalAgentConfig
@@ -129,6 +211,13 @@ export async function runLocalAgent(
 
   let totalToolCalls = 0;
   try {
+    const feasibilityIssues = checkFeasibility(input);
+    if (feasibilityIssues.length > 0) {
+      const errorMessage = buildFeasibilityErrorMessage(feasibilityIssues);
+      emit(config, { type: 'error', message: errorMessage, fatal: true });
+      return { success: false, error: errorMessage };
+    }
+
     emit(config, { type: 'status', message: 'Khởi tạo pipeline v2...', iteration: 0, maxIterations: MAX_CODER_RETRIES });
     emit(config, { type: 'phase', phase: 'translator', message: 'Đang dịch constraints', iteration: 0 });
     emit(config, { type: 'stage_started', stage: 'translator', message: 'Translator started' });
@@ -312,7 +401,13 @@ export async function runLocalAgent(
 
         let execResult: Awaited<ReturnType<typeof executeGeneratedCode>>;
         try {
-          execResult = await executeGeneratedCode(injected.solverCode, executePayload, { timeoutMs });
+          const remainingMs = remainingDeadlineMs(deadlineAt);
+          if (remainingMs <= 1_000) {
+            throw new Error(`Agent timeout after ${Math.ceil((Date.now() - startedAt) / 1000)}s.`);
+          }
+          execResult = await executeGeneratedCode(injected.solverCode, executePayload, {
+            timeoutMs: Math.min(timeoutMs, remainingMs),
+          });
         } catch (error) {
           previousAttemptSummary = digestError(
             error instanceof Error ? error.message : 'Solver execution failed.'

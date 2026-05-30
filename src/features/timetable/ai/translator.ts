@@ -29,6 +29,17 @@ const constraintSpecSchema = z.object({
     'session_limit',
     'subject_group',
     'subject_group_daily_limit',
+    'class_subjects_not_same_day',
+    'teacher_max_working_days',
+    'subject_max_consecutive',
+    'subject_spread_evenly',
+    'teacher_max_consecutive_global',
+    'subject_not_at_period',
+    'teacher_prefer_compact',
+    'class_balanced_daily_load',
+    'teacher_fixed_slot',
+    'subject_not_consecutive_days',
+    'multi_school_availability',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -39,6 +50,8 @@ const constraintSpecSchema = z.object({
 const translatorResponseSchema = z.object({
   constraintSpecs: z.array(constraintSpecSchema),
 });
+
+const TRANSLATOR_CHAT_TIMEOUT_MS = 30_000;
 
 const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
 
@@ -159,6 +172,11 @@ function normalizeConstraintText(text: string): string {
     .replace(/đ/g, 'd')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function resolveLabelByNormalized(labels: string[], value: string): string {
+  const normalized = normalizeConstraintText(value);
+  return labels.find((label) => normalizeConstraintText(label) === normalized) ?? value;
 }
 
 function isAutoBaseConstraintText(text: string): boolean {
@@ -712,7 +730,10 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         original: constraint.text,
         severity,
         kind: 'subject_group',
-        params: subjectGroup,
+        params: {
+          ...subjectGroup,
+          subjects: subjectGroup.subjects.map((subject) => resolveLabelByNormalized(subjectLabels, subject)),
+        },
       } satisfies ConstraintSpec;
     }
 
@@ -725,6 +746,93 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         kind: 'subject_group_daily_limit',
         params: subjectGroupLimit,
       } satisfies ConstraintSpec;
+    }
+
+    // teacher_min_off_days → teacher_max_working_days
+    if (parsed.kind === 'teacher_min_off_days') {
+      const teachers = parsed.teacherLabels === '*' ? [] : parsed.teacherLabels;
+      const minOff = parsed.min;
+      if (teachers.length > 0) {
+        return teachers.map((teacher, i) => ({
+          id: teachers.length === 1 ? id : `${id}_${i + 1}`,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_max_working_days' as const,
+          params: { teacher, minDaysOff: minOff },
+        }) satisfies ConstraintSpec);
+      }
+      // wildcard '*' — áp dụng cho tất cả GV
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_max_working_days' as const,
+        params: { minDaysOff: minOff },
+      } satisfies ConstraintSpec;
+    }
+
+    // subject_prefer_periods → subject_pin_period (soft)
+    if (parsed.kind === 'subject_prefer_periods' && parsed.subjectLabels[0] && parsed.periods.length > 0) {
+      const classes = parsed.classFilter ?? classLabels.filter((label) => includesLabel(constraint.text, label));
+      return {
+        id,
+        original: constraint.text,
+        severity: 'soft',
+        kind: 'subject_pin_period' as const,
+        params: {
+          subject: parsed.subjectLabels[0],
+          periods: parsed.periods,
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    // subject_prefer_sessions → subject_pin_period (soft, map session → periods)
+    if (parsed.kind === 'subject_prefer_sessions' && parsed.subjectLabels[0] && parsed.sessionIds.length > 0) {
+      const allowedPeriods = parsed.sessionIds.flatMap((sessionId) => periodsForSession(input, sessionId));
+      if (allowedPeriods.length > 0) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return {
+          id,
+          original: constraint.text,
+          severity: 'soft',
+          kind: 'subject_pin_period' as const,
+          params: {
+            subject: parsed.subjectLabels[0],
+            periods: allowedPeriods,
+            ...(classes.length ? { classes } : {}),
+          },
+        } satisfies ConstraintSpec;
+      }
+    }
+
+    // class_daily_subject_any → class_subjects_not_same_day (đảm bảo mỗi ngày có ít nhất 1 trong nhóm môn)
+    if (parsed.kind === 'class_daily_subject_any' && parsed.subjectLabels.length > 0) {
+      const targetClasses = parsed.classLabels === '*'
+        ? classLabels
+        : parsed.classLabels.length > 0 ? parsed.classLabels : classLabels;
+      return targetClasses.map((klass, i) => ({
+        id: targetClasses.length === 1 ? id : `${id}_${i + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'class_subjects_not_same_day' as const,
+        params: {
+          class: klass,
+          subjects: parsed.subjectLabels,
+          maxSubjectsPerDay: 1,
+        },
+      }) satisfies ConstraintSpec);
+    }
+
+    // subjects_not_consecutive → subject_not_consecutive_days cho từng môn
+    if (parsed.kind === 'subjects_not_consecutive' && parsed.subjectLabels.length > 0) {
+      return parsed.subjectLabels.map((subject, i) => ({
+        id: parsed.subjectLabels.length === 1 ? id : `${id}_${i + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'subject_not_consecutive_days' as const,
+        params: { subject },
+      }) satisfies ConstraintSpec);
     }
 
     const fallbackSpec = {
@@ -741,6 +849,10 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
     return isAutoBaseConstraintText(constraint.text) ? markAutoBaseSpec(fallbackSpec) : fallbackSpec;
     });
   });
+}
+
+function hasHardCustomDsl(specs: ConstraintSpec[]): boolean {
+  return specs.some((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl');
 }
 
 function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): ConstraintSpec[] {
@@ -963,6 +1075,15 @@ export async function runTranslatorTurn(
   input: AgentInputPayload,
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<TranslatorTurnResult> {
+  const fallbackSpecs = fallbackFromRuleParser(input);
+  if (!hasHardCustomDsl(fallbackSpecs)) {
+    return {
+      constraintSpecs: fallbackSpecs,
+      rawResponse: '',
+      usageTokens: 0,
+    };
+  }
+
   const systemPrompt = await loadTranslatorSystemPrompt();
   const periods = buildTranslatorPeriods(input);
   const context = {
@@ -997,6 +1118,7 @@ export async function runTranslatorTurn(
     ],
     temperature: 0,
     max_tokens: 3500,
+    timeoutMs: TRANSLATOR_CHAT_TIMEOUT_MS,
     response_format: {
       type: 'json_schema',
       json_schema: {
@@ -1030,6 +1152,17 @@ export async function runTranslatorTurn(
                       'session_limit',
                       'subject_group',
                       'subject_group_daily_limit',
+                      'class_subjects_not_same_day',
+                      'teacher_max_working_days',
+                      'subject_max_consecutive',
+                      'subject_spread_evenly',
+                      'teacher_max_consecutive_global',
+                      'subject_not_at_period',
+                      'teacher_prefer_compact',
+                      'class_balanced_daily_load',
+                      'teacher_fixed_slot',
+                      'subject_not_consecutive_days',
+                      'multi_school_availability',
                       'custom_dsl',
                     ],
                   },
@@ -1067,7 +1200,7 @@ export async function runTranslatorTurn(
     };
   } catch {
     return {
-      constraintSpecs: fallbackFromRuleParser(input),
+      constraintSpecs: fallbackSpecs,
       rawResponse: '',
       usageTokens: 0,
     };
@@ -1080,4 +1213,5 @@ export const __translatorInternal = {
   buildTranslatorPeriodsByDay,
   splitFallbackConstraintText,
   fallbackFromRuleParser,
+  hasHardCustomDsl,
 };

@@ -14,6 +14,8 @@ const coderResponseSchema = z.object({
   assumptions: z.array(z.string()),
 });
 
+const CODER_CHAT_TIMEOUT_MS = 45_000;
+
 const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
 
 function isAiCodedSpec(spec: ConstraintSpec): boolean {
@@ -131,6 +133,7 @@ export async function runCoderTurn(
     ],
     temperature: 0.1,
     max_tokens: 30000,
+    timeoutMs: CODER_CHAT_TIMEOUT_MS,
     cache_control: { enable: true },
     response_format: {
       type: 'json_schema',

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { __translatorInternal } from './translator';
+import { __translatorInternal, runTranslatorTurn } from './translator';
 import type { AgentInputPayload } from './types';
 import type { ConstraintSpec } from './constraint-spec';
 
@@ -140,6 +140,22 @@ test('fallback parser returns at least one spec per constraint', () => {
   const result = __translatorInternal.fallbackFromRuleParser(sampleInput);
   assert.equal(result.length, 1);
   assert.equal(result[0].id, 'c1');
+});
+
+test('runTranslatorTurn skips model when fallback covers all hard constraints', async () => {
+  let called = false;
+  const result = await runTranslatorTurn(
+    { baseURL: '', apiKey: 'x', model: 'm' },
+    sampleInput,
+    async () => {
+      called = true;
+      return { content: '{}', usage: { total_tokens: 0 } };
+    }
+  );
+
+  assert.equal(called, false);
+  assert.equal(result.usageTokens, 0);
+  assert.equal(result.constraintSpecs[0].kind, 'teacher_block_day');
 });
 
 test('fallback parser covers remaining constraint kinds', () => {

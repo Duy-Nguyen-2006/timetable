@@ -20,6 +20,8 @@ const repairResponseSchema = z.object({
   assumptions: z.array(z.string()),
 });
 
+const REPAIR_CHAT_TIMEOUT_MS = 30_000;
+
 const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
 
 function loadRepairSystemPrompt(): Promise<string> {
@@ -69,6 +71,7 @@ export async function runRepairTurn(
     ],
     temperature: 0.1,
     max_tokens: 2200,
+    timeoutMs: REPAIR_CHAT_TIMEOUT_MS,
     cache_control: { enable: true },
     response_format: {
       type: 'json_schema',

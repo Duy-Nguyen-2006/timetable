@@ -71,9 +71,29 @@ def test_validator_checks_resource_capacity_session_limit_and_subject_group_dail
     specs = [
         _spec("capacity", "resource_capacity", {"subject": "Toán", "capacity": 1}),
         _spec("session", "session_limit", {"teacher": "Sơn", "maxPeriods": 2}),
-        _spec("group", "subject_group_daily_limit", {"class": "6A", "maxPerDay": 2}),
+        _spec("group_def", "subject_group", {"name": "core", "subjects": ["Văn", "Anh", "Sử"]}),
+        _spec("group", "subject_group_daily_limit", {"class": "6A", "groupName": "core", "maxPerDay": 2}),
     ]
 
     report = validate_schedule(schedule, specs)
 
     assert {violation["constraintId"] for violation in report["violations"]} == {"capacity", "session", "group"}
+
+
+def test_subject_group_daily_limit_is_per_class():
+    schedule = [
+        _entry("6A", "mon", 1, "Toán", "An"),
+        _entry("6A", "mon", 2, "Văn", "Bình"),
+        _entry("6A", "mon", 3, "KHTN", "Chi"),
+        _entry("6B", "mon", 1, "Toán", "Duy"),
+        _entry("6B", "mon", 2, "Văn", "Em"),
+        _entry("6B", "mon", 3, "KHTN", "Giang"),
+    ]
+    specs = [
+        _spec("core_group", "subject_group", {"name": "core", "subjects": ["Toán", "Văn", "KHTN"]}),
+        _spec("core_limit", "subject_group_daily_limit", {"groupName": "core", "maxPerDay": 3}),
+    ]
+
+    report = validate_schedule(schedule, specs)
+
+    assert report["violations"] == []

@@ -12,6 +12,7 @@ type ChatPayload = {
   messages?: ChatMessage[];
   temperature?: number;
   max_tokens?: number;
+  timeoutMs?: number;
   response_format?: Record<string, unknown>;
   cache_control?: Record<string, unknown>;
 };
@@ -179,23 +180,44 @@ export async function POST(request: Request) {
 
     const cacheEnabled = Boolean((body.cache_control as { enable?: boolean } | undefined)?.enable);
     const messagesWithCache = applyProviderSpecificCaching(model, messages, cacheEnabled);
-    const response = await fetch(`${baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        ...(providerHeaders(model, cacheEnabled) ?? {}),
-      },
-      cache: 'no-store',
-      body: JSON.stringify({
-        model,
-        messages: messagesWithCache,
-        temperature: body.temperature ?? 0.2,
-        max_tokens: body.max_tokens ?? 4000,
-        response_format: body.response_format,
-        stream: false,
-      }),
-    });
+    const requestedTimeoutMs = Number(body.timeoutMs ?? 45_000);
+    const timeoutMs = Math.max(
+      1_000,
+      Math.min(Number.isFinite(requestedTimeoutMs) ? requestedTimeoutMs : 45_000, 180_000)
+    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(`${baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...(providerHeaders(model, cacheEnabled) ?? {}),
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages: messagesWithCache,
+          temperature: body.temperature ?? 0.2,
+          max_tokens: body.max_tokens ?? 4000,
+          response_format: body.response_format,
+          stream: false,
+        }),
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return NextResponse.json(
+          { ok: false, error: `Provider request timed out after ${Math.ceil(timeoutMs / 1000)}s` },
+          { status: 504 }
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const raw = await response.text();
     if (!response.ok) {

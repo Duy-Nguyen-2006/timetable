@@ -70,3 +70,9 @@ public/templates/solver_skeleton.py
 
 # optional local tool state
 .orchids/
+
+# Harness durable layer
+harness.db
+harness.db-wal
+harness.db-shm
+scripts/bin/harness-cli

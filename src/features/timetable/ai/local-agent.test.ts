@@ -191,7 +191,7 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
             weeklyPeriods: 0,
           },
         ],
-        constraints: [],
+        constraints: [{ type: 'required', text: 'custom runtime guard' }],
       },
       { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
     );

@@ -26,6 +26,7 @@ const planSchema = z.object({
 });
 
 const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
+const PLANNER_CHAT_TIMEOUT_MS = 30_000;
 
 function loadPlannerSystemPrompt(): Promise<string> {
   return fetch('/prompts/planner.system.md')
@@ -66,6 +67,10 @@ function validatePlanCoverage(plan: Plan, constraints: ConstraintSpec[]): Plan {
   };
 }
 
+function hasHardCustomDsl(constraints: ConstraintSpec[]): boolean {
+  return constraints.some((constraint) => constraint.severity === 'hard' && constraint.kind === 'custom_dsl');
+}
+
 export async function runPlannerTurn(
   config: AIProviderConfig,
   input: {
@@ -75,6 +80,14 @@ export async function runPlannerTurn(
   },
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<PlannerTurnResult> {
+  if (!hasHardCustomDsl(input.constraintSpecs)) {
+    return {
+      plan: fallbackPlan(input.datasetDigest, input.constraintSpecs),
+      rawResponse: '',
+      usageTokens: 0,
+    };
+  }
+
   const systemPrompt = await loadPlannerSystemPrompt();
   const payload = {
     baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
@@ -86,6 +99,7 @@ export async function runPlannerTurn(
     ],
     temperature: 0,
     max_tokens: 2500,
+    timeoutMs: PLANNER_CHAT_TIMEOUT_MS,
     response_format: {
       type: 'json_schema',
       json_schema: {

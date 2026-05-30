@@ -17,6 +17,14 @@ export type ConstraintKind =
   | 'session_limit'
   | 'subject_group'
   | 'subject_group_daily_limit'
+  | 'subject_spread_evenly'
+  | 'teacher_max_consecutive_global'
+  | 'subject_not_at_period'
+  | 'teacher_prefer_compact'
+  | 'class_balanced_daily_load'
+  | 'teacher_fixed_slot'
+  | 'subject_not_consecutive_days'
+  | 'multi_school_availability'
   | 'custom_dsl';
 
 export type ConditionExpr =
@@ -83,6 +91,7 @@ export type DeterministicValidationContext = {
     teacher: string;
     weeklyPeriods: number;
   }>;
+  constraintSpecs?: ConstraintSpec[];
 };
 
 export type DeterministicValidationReport = {

@@ -28,6 +28,8 @@ import * as XLSX from 'xlsx'
 
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
+import { normalizeErrorMessage } from './ai/error-normalizer'
+import { useSolveHistory } from './hooks/useSolveHistory'
 import { SettingsModal } from './SettingsModal'
 import type {
   AIProviderConfig,
@@ -389,6 +391,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const { history: solveHistory, addEntry: addSolveHistory } = useSolveHistory()
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [agentStep, setAgentStep] = useState<AgentProgressStep>('idle')
   const [agentIteration, setAgentIteration] = useState(0)
@@ -1083,11 +1086,28 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           setAiResult(agentResult.finalResult as any);
           setAgentStatus("Hoàn thành!");
           setAgentStep("idle");
+          addSolveHistory({
+            inputText: requestConstraints.map((c) => c.text).join('\n'),
+            status: 'success',
+            result: agentResult.finalResult as any,
+          });
         } else if (agentResult?.error) {
-          setAiError(agentResult.error);
+          const normalizedError = normalizeErrorMessage(agentResult.error);
+          setAiError(normalizedError);
+          addSolveHistory({
+            inputText: requestConstraints.map((c) => c.text).join('\n'),
+            status: 'fail',
+            error: normalizedError,
+          });
         }
       } catch (err) {
-        setAiError(err instanceof Error ? err.message : "Lỗi khi chạy AI Agent");
+        const normalizedError = normalizeErrorMessage(err instanceof Error ? err.message : "Lỗi khi chạy AI Agent");
+        setAiError(normalizedError);
+        addSolveHistory({
+          inputText: requestConstraints.map((c) => c.text).join('\n'),
+          status: 'fail',
+          error: normalizedError,
+        });
       } finally {
         setAiLoading(false);
         if (agentTimerRef.current) {

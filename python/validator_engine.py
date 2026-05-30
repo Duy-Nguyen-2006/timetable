@@ -98,10 +98,31 @@ def _base_checks(schedule: list[dict[str, Any]], assignments: list[dict[str, Any
     return violations
 
 
-def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _resolve_group_subjects(group_name: str, constraint_specs: list[dict[str, Any]]) -> set[Any]:
+    subjects: set[Any] = set()
+    for spec in constraint_specs:
+        if spec.get("kind") != "subject_group":
+            continue
+        params = spec.get("params", {}) or {}
+        if str(params.get("name", "")) != group_name:
+            continue
+        for subject in params.get("subjects", []) or []:
+            subjects.add(subject)
+    return subjects
+
+
+def _check_single(
+    spec: dict[str, Any],
+    schedule: list[dict[str, Any]],
+    constraint_specs: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    constraint_specs = constraint_specs or []
     kind = spec.get("kind")
     params = spec.get("params", {})
     cid = spec.get("id", "unknown")
+
+    if kind == "subject_group":
+        return []
 
     if kind == "teacher_block_day":
         entries = [e for e in schedule if e.get("teacher") == params.get("teacher") and e.get("day") == params.get("day")]
@@ -284,7 +305,7 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
                 "kind": nested.get("kind", "custom_dsl"),
                 "params": nested.get("params", {}),
             }
-            for violation in _check_single(nested_spec, schedule):
+            for violation in _check_single(nested_spec, schedule, constraint_specs):
                 out.append(
                     _violation(
                         cid,
@@ -333,24 +354,28 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
         return out
 
     if kind == "subject_group_daily_limit":
+        group_name = str(params.get("groupName", ""))
+        group_subjects = _resolve_group_subjects(group_name, constraint_specs)
         target_class = params.get("class")
         try:
             max_per_day = int(params.get("maxPerDay", 1))
         except (TypeError, ValueError):
             max_per_day = 1
-        by_day_subjects: dict[str, set[Any]] = {}
-        by_day_entries: dict[str, list[dict[str, Any]]] = {}
+        by_class_day_subjects: dict[str, set[Any]] = {}
+        by_class_day_entries: dict[str, list[dict[str, Any]]] = {}
         for entry in schedule:
             if target_class and entry.get("class") != target_class:
                 continue
-            day_key = str(entry.get("day"))
-            by_day_subjects.setdefault(day_key, set()).add(entry.get("subject"))
-            by_day_entries.setdefault(day_key, []).append(entry)
+            if group_subjects and entry.get("subject") not in group_subjects:
+                continue
+            key = f"{entry.get('class')}::{entry.get('day')}"
+            by_class_day_subjects.setdefault(key, set()).add(entry.get("subject"))
+            by_class_day_entries.setdefault(key, []).append(entry)
         out: list[dict[str, Any]] = []
-        for day_key, subjects in by_day_subjects.items():
+        for key, subjects in by_class_day_subjects.items():
             if len(subjects) > max_per_day:
                 out.append(
-                    _violation(cid, kind, "subject_group_daily_limit violated.", by_day_entries.get(day_key, []))
+                    _violation(cid, kind, "subject_group_daily_limit violated.", by_class_day_entries.get(key, []))
                 )
         return out
 
@@ -371,7 +396,7 @@ def validate_schedule(
         if spec.get("kind") == "custom_dsl":
             unchecked.append(str(spec.get("id", "unknown")))
             continue
-        violations.extend(_check_single(spec, schedule))
+        violations.extend(_check_single(spec, schedule, constraint_specs))
 
     hard_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "hard"}
     soft_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "soft"}
