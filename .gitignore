@@ -1,72 +1,80 @@
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
+
 # Dependencies
 node_modules/
-.python-version
-.venv/
 venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Build artifacts
-.next/
-dist/
-build/
-target/
-release/
-*.tsbuildinfo
-
-# Runtime artifacts
-.ai_results/
-
-# Next.js generated files
-next-env.d.ts
-
-# Logs
-*.log
-
-# Environment
+.venv/
 .env
 .env.local
 *.env.*
+
+# Build directories
+dist/
+build/
+target/
+
+# Python specific
+*.pyc
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
 
 # Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-*.tmp
 
-# OS
+# System files
 .DS_Store
 Thumbs.db
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
+# Logs and temp files
+*.log
+*.tmp
 
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.pytest_cache/
-.mypy_cache/
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 
-# local agent/session state
-.omo/
+# Gradle
+.gradle/
 
-# generated prompt copies
-public/prompts/
+# Julia
+julia-*/
 
-# generated solver template copy
-public/templates/solver_skeleton.py
-
-# local agent/session state
-.omo/
-
-# optional local tool state
-.orchids/
+# Zig
+zig-out/
