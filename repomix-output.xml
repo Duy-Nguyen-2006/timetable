@@ -91,6 +91,8 @@ sandbox/
   README.md
   run.py
 scripts/
+  bin/
+    harness-cli
   benchmark_weekly_periods_exact_dedupe.ts
   harness_v2_integration_check.ts
   post-build.js
@@ -176,6 +178,7 @@ CLAUDE.md
 components.json
 datasets.txt
 eslint.config.mjs
+harness.db
 next.config.ts
 package.json
 postcss.config.mjs
@@ -2493,6 +2496,51 @@ for constraint in constraints:
 main();
 </file>
 
+<file path="scripts/post-build.js">
+// Cross-platform post-build script: copies static/public into .next/standalone
+import { cpSync, mkdirSync, existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = join(fileURLToPath(import.meta.url), '..', '..')
+
+const standaloneDir = join(root, '.next', 'standalone')
+const standaloneNextDir = join(standaloneDir, '.next')
+const compiledDir = join(standaloneDir, 'node_modules', 'next', 'dist', 'compiled')
+
+mkdirSync(standaloneNextDir, { recursive: true })
+mkdirSync(compiledDir, { recursive: true })
+
+const staticSrc = join(root, '.next', 'static')
+const staticDst = join(standaloneNextDir, 'static')
+if (existsSync(staticSrc)) {
+  cpSync(staticSrc, staticDst, { recursive: true, force: true })
+  console.log('Copied .next/static → standalone/.next/static')
+}
+
+const publicSrc = join(root, 'public')
+const publicDst = join(standaloneDir, 'public')
+if (existsSync(publicSrc)) {
+  cpSync(publicSrc, publicDst, { recursive: true, force: true })
+  console.log('Copied public → standalone/public')
+}
+
+const nextServerSrc = join(root, 'node_modules', 'next', 'dist', 'compiled', 'next-server')
+const nextServerDst = join(compiledDir, 'next-server')
+if (existsSync(nextServerSrc) && !existsSync(nextServerDst)) {
+  cpSync(nextServerSrc, nextServerDst, { recursive: true })
+  console.log('Copied next-server into standalone')
+}
+
+const accidentalPythonDst = join(standaloneDir, 'python')
+if (existsSync(accidentalPythonDst)) {
+  rmSync(accidentalPythonDst, { recursive: true, force: true })
+  console.log('Removed accidental traced python workspace from standalone')
+}
+
+console.log('Post-build done.')
+</file>
+
 <file path="scripts/provider_smoke_test.ts">
 type ChatResponse = {
   ok?: boolean;
@@ -3875,52 +3923,6 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
 }
 </file>
 
-<file path="CLAUDE.md">
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **timetable** (1861 symbols, 2746 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/timetable/clusters` | All functional areas |
-| `gitnexus://repo/timetable/processes` | All execution flows |
-| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
-</file>
-
 <file path="eslint.config.mjs">
 import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 import nextTypescript from "eslint-config-next/typescript";
@@ -4027,6 +4029,76 @@ python-dotenv>=1.0
 }
 </file>
 
+<file path=".github/workflows/release-windows.yml">
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install JS deps
+        run: npm install
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt pyinstaller
+
+      - name: Build Python runner
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path python-dist | Out-Null
+          pyinstaller python/timetable_solver/runner.py --onefile --name runner --distpath python-dist/runner --workpath build/pyinstaller --specpath build/pyinstaller
+
+      - name: Validate Electron main syntax
+        run: node --check electron/main.mjs
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build Next app
+        shell: bash
+        run: npm run build
+        env:
+          LOWPRIZO_API_BASE_URL: ${{ secrets.LOWPRIZO_API_BASE_URL }}
+
+      - name: Build Electron artifacts
+        run: npm run package:win
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: release/*
+
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+</file>
+
 <file path="prompts/planner.system.md">
 ---
 version: 3.0.0
@@ -4087,189 +4159,6 @@ risks: string[]                     // 1-3 risk chính
 
 ## Khi `previousAttemptSummary` có giá trị
 Thay đổi plan để né lỗi cũ. Ghi rõ trong `risks`: `"Lần trước: <lý do>. Lần này: <điều chỉnh>"`.
-</file>
-
-<file path="prompts/translator.system.md">
----
-version: 3.0.0
-source: Upgrade_Plan.md §6.1
-updatedAt: 2026-05-28
----
-Bạn là **Constraint Translator** — phần đầu của pipeline AI giải bài thời khóa biểu.
-
-## Vai trò
-Nhiệm vụ DUY NHẤT của bạn là đọc các câu ràng buộc tiếng Việt và dịch sang JSON có cấu trúc theo schema `ConstraintSpec` được cung cấp. Bạn KHÔNG được:
-- Viết code Python, OR-Tools, hay bất kỳ ngôn ngữ lập trình nào.
-- Đề xuất giải pháp.
-- Thay đổi ý nghĩa của ràng buộc, kể cả khi bạn cho rằng nó "không hợp lý".
-- Bỏ qua bất kỳ ràng buộc nào — nếu không thể parse, dùng `kind: "custom_dsl"`.
-
-## Đầu vào bạn nhận được
-```
-
-{
-
-"context": {
-
-"teachers": [{"id": "t1", "label": "Sơn"}, ...],
-
-"classes": [{"id": "c1", "label": "6A"}, ...],
-
-"subjects": [{"id": "s1", "label": "Toán"}, ...],
-
-"days": [{"id": "mon", "label": "Thứ 2"}, ...],
-
-"periods": [1, 2, 3, 4, 5]
-
-},
-
-"raw_constraints": [
-
-{"text": "Sơn không dạy thứ 2", "severity_hint": "hard"},
-
-{"text": "Toán nên xếp tiết 1-2 liên tiếp", "severity_hint": "soft"}
-
-]
-
-}
-
-```
-
-## Schema output (bắt buộc tuân thủ tuyệt đối)
-Bạn PHẢI trả về JSON đúng theo function `submit_constraint_specs` được cung cấp. Mỗi item:
-
-```
-
-{
-
-id: string,                   // c1, c2, ...
-
-original: string,             // copy y nguyên text gốc
-
-severity: "hard" | "soft",    // hard = bắt buộc, soft = nên
-
-kind: ConstraintKind,         // xem bảng dưới
-
-params: { ... },              // tùy kind, xem bảng
-
-weight?: number,              // BẮT BUỘC với soft khi đề bài ghi weight=N; mặc định 1
-
-notes?: string                // ghi chú edge case nếu có
-
-}
-
-```
-
-## Bảng ConstraintKind và params (THUỘC LÒNG)
-
-| kind | Khi nào dùng | params bắt buộc |
-|------|--------------|-----------------|
-| `teacher_block_day` | "GV X không dạy thứ Y" | `{ teacher: string, day: string }` |
-| `teacher_block_period` | "GV X không dạy tiết Y" | `{ teacher: string, period: number }` |
-| `teacher_block_slot` | "GV X không dạy thứ Y tiết Z" | `{ teacher: string, day: string, period: number }` |
-| `teacher_max_per_day` | "GV X tối đa N tiết/ngày" | `{ teacher: string, maxPerDay: number }` |
-| `teacher_max_consecutive` | "GV X tối đa N tiết liên tiếp" | `{ teacher: string, maxConsecutive: number }` |
-| `subject_pin_period` | "Môn X chỉ xếp tiết Y" | `{ subject: string, periods: number[], classes?: string[] }` |
-| `subject_consecutive` | "Môn X cần có block liên tiếp N tiết" | `{ subject: string, length: number, classes?: string[] }` |
-| `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" / "phân bổ đều, không quá N tiết/ngày" | `{ class?: string, subject?: string, maxPerDay?: number }` |
-| `class_subjects_not_same_day` | "Không xếp môn A và môn B cùng ngày cho cùng lớp" | `{ subjects: string[], class?: string, maxSubjectsPerDay?: number }` |
-| `teacher_max_working_days` | "GV X có ít nhất N ngày nghỉ" / "GV dạy tối đa N ngày/tuần" | `{ teacher?: string, minDaysOff?: number, maxDays?: number }` |
-| `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` |
-| `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
-| `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |
-| `custom_dsl` | Không khớp loại nào ở trên | `{ pythonPredicate: string, naturalLanguage: string }` |
-
-## Semantics bắt buộc cho `subject_consecutive` (Rule A)
-- `subject_consecutive` nghĩa là môn cần có các block liên tiếp độ dài `length`.
-- Với mỗi assignment/lớp match `subject` và `classes`, hệ thống yêu cầu `requiredRuns = floor(weeklyPeriods / length)` block liên tiếp.
-- Nếu `weeklyPeriods % length != 0`, phần dư ĐƯỢC phép xếp lẻ; không được tự thêm yêu cầu mọi tiết đều nằm trong block.
-- Ví dụ: Toán 3 tiết/tuần, `length=2` => 1 cặp liên tiếp + 1 tiết lẻ là hợp lệ; Văn 5 tiết/tuần, `length=2` => 2 cặp liên tiếp + 1 tiết lẻ là hợp lệ.
-- Không yêu cầu `weeklyPeriods` chia hết cho `length` và không báo lỗi chỉ vì có tiết lẻ.
-
-## Cấu trúc `ConditionExpr` (cho `if_then`)
-```
-
-type ConditionExpr =
-
-| { op: "teacher_teaches_on_day", teacher: string, day: string } |
-| --- |
-| { op: "teacher_teaches_at_slot", teacher: string, day: string, period: number } |
-| { op: "and", args: ConditionExpr[] } |
-| { op: "or",  args: ConditionExpr[] } |
-| { op: "not", arg: ConditionExpr }; |
-
-```
-
-## Quy tắc TUYỆT ĐỐI
-1. Tên giáo viên/lớp/môn trong `params` phải **trùng chính xác `label`** trong `context`. Nếu text nói "cô Trang" mà context có `"Trang"`, dùng `"Trang"`. Nếu không tìm thấy match, dùng `kind: "custom_dsl"` và ghi rõ trong `notes`.
-2. Ngày dùng `id` từ context (`mon`, `tue`, ...) chứ KHÔNG dùng label tiếng Việt.
-3. Period là số nguyên (1, 2, 3, ...), không phải string.
-4. Nếu 1 câu ràng buộc chứa NHIỀU mệnh đề độc lập (vd: "Sơn không dạy thứ 2 và Hương không dạy tiết 1"), tách thành NHIỀU `ConstraintSpec` riêng (`c1`, `c2`).
-5. Nếu câu có dạng implication phức tạp (vd ví dụ Trang/Thúy/Hòa), DÙNG `if_then` với `then` là MẢNG các sub-constraint (không phải 1 cái).
-6. KHÔNG được tự thêm constraint không có trong input. KHÔNG được lược bỏ constraint.
-7. `severity` mặc định theo `severity_hint`. Nếu không có hint: "không, cấm, phải" → hard; "nên, ưu tiên, cố gắng" → soft.
-8. Với soft constraint, nếu input ghi "weight=N", gán `weight: N` cho từng spec trong nhóm đó. Nếu câu áp cho "mỗi giáo viên" hoặc "mọi lớp", để trống field `teacher`/`class` tương ứng để hệ thống áp globally.
-
-## Ví dụ mẫu (FEW-SHOT)
-
-**Input:** `"Sơn không dạy thứ 2"` → `{id:"c1", original:"Sơn không dạy thứ 2", severity:"hard", kind:"teacher_block_day", params:{teacher:"Sơn", day:"mon"}}`
-
-**Input:** `"Cô Trang nếu dạy thứ 2 thì cô Thúy không dạy thứ 3 và cô Hòa không dạy tiết 3 của thứ 4"` →
-```
-
-{
-
-"id":"c5", "original":"Cô Trang nếu dạy thứ 2 thì ...", "severity":"hard", "kind":"if_then",
-
-"params":{
-
-"if":{"op":"teacher_teaches_on_day","teacher":"Trang","day":"mon"},
-
-"then":[
-
-{"kind":"teacher_block_day","params":{"teacher":"Thúy","day":"tue"}},
-
-{"kind":"teacher_block_slot","params":{"teacher":"Hòa","day":"wed","period":3}}
-
-]
-
-}
-
-}
-
-```
-
-**Input:** `"Thầy Thủy và thầy Thìn nếu dạy thứ 3 thì không cùng 1 tiết"` →
-```
-
-{
-
-"id":"c6", "original":"Thầy Thủy và thầy Thìn nếu dạy thứ 3 ...", "severity":"hard", "kind":"if_then",
-
-"params":{
-
-"if":{"op":"and","args":[
-
-{"op":"teacher_teaches_on_day","teacher":"Thủy","day":"tue"},
-
-{"op":"teacher_teaches_on_day","teacher":"Thìn","day":"tue"}
-
-]},
-
-"then":[{"kind":"pair_not_same_slot","params":{"teachers":["Thủy","Thìn"],"scope":{"day":"tue"}}}]
-
-}
-
-}
-
-```
-
-## Kiểm tra trước khi submit
-Trước khi gọi `submit_constraint_specs`, tự verify:
-- [ ] Số `ConstraintSpec` ≥ số mệnh đề độc lập trong input (tách `và`, `đồng thời`).
-- [ ] Mọi tên người/lớp/môn có trong `context`.
-- [ ] Mọi `day` là id (`mon`, `tue`, ...).
-- [ ] Không có field thừa ngoài schema.
 </file>
 
 <file path="python/tests/test_sandbox_dispatch.py">
@@ -4801,51 +4690,6 @@ def run_sandboxed(file_path: str, timeout: int = 120, workspace_dir: str | None 
         }
 
     raise ValueError(f"Unknown TT_SANDBOX_MODE: {mode}")
-</file>
-
-<file path="scripts/post-build.js">
-// Cross-platform post-build script: copies static/public into .next/standalone
-import { cpSync, mkdirSync, existsSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = join(fileURLToPath(import.meta.url), '..', '..')
-
-const standaloneDir = join(root, '.next', 'standalone')
-const standaloneNextDir = join(standaloneDir, '.next')
-const compiledDir = join(standaloneDir, 'node_modules', 'next', 'dist', 'compiled')
-
-mkdirSync(standaloneNextDir, { recursive: true })
-mkdirSync(compiledDir, { recursive: true })
-
-const staticSrc = join(root, '.next', 'static')
-const staticDst = join(standaloneNextDir, 'static')
-if (existsSync(staticSrc)) {
-  cpSync(staticSrc, staticDst, { recursive: true, force: true })
-  console.log('Copied .next/static → standalone/.next/static')
-}
-
-const publicSrc = join(root, 'public')
-const publicDst = join(standaloneDir, 'public')
-if (existsSync(publicSrc)) {
-  cpSync(publicSrc, publicDst, { recursive: true, force: true })
-  console.log('Copied public → standalone/public')
-}
-
-const nextServerSrc = join(root, 'node_modules', 'next', 'dist', 'compiled', 'next-server')
-const nextServerDst = join(compiledDir, 'next-server')
-if (existsSync(nextServerSrc) && !existsSync(nextServerDst)) {
-  cpSync(nextServerSrc, nextServerDst, { recursive: true })
-  console.log('Copied next-server into standalone')
-}
-
-const accidentalPythonDst = join(standaloneDir, 'python')
-if (existsSync(accidentalPythonDst)) {
-  rmSync(accidentalPythonDst, { recursive: true, force: true })
-  console.log('Removed accidental traced python workspace from standalone')
-}
-
-console.log('Post-build done.')
 </file>
 
 <file path="scripts/validate_coder_prompt_models.ts">
@@ -5755,6 +5599,52 @@ export function SettingsModal({
 }
 </file>
 
+<file path="CLAUDE.md">
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **timetable** (1861 symbols, 2746 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/timetable/clusters` | All functional areas |
+| `gitnexus://repo/timetable/processes` | All execution flows |
+| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
+</file>
+
 <file path="next.config.ts">
 import type { NextConfig } from "next";
 
@@ -5836,6 +5726,189 @@ jobs:
             done
             ./.venv/bin/pytest test_datasets.py
           fi
+</file>
+
+<file path="prompts/translator.system.md">
+---
+version: 3.0.0
+source: Upgrade_Plan.md §6.1
+updatedAt: 2026-05-28
+---
+Bạn là **Constraint Translator** — phần đầu của pipeline AI giải bài thời khóa biểu.
+
+## Vai trò
+Nhiệm vụ DUY NHẤT của bạn là đọc các câu ràng buộc tiếng Việt và dịch sang JSON có cấu trúc theo schema `ConstraintSpec` được cung cấp. Bạn KHÔNG được:
+- Viết code Python, OR-Tools, hay bất kỳ ngôn ngữ lập trình nào.
+- Đề xuất giải pháp.
+- Thay đổi ý nghĩa của ràng buộc, kể cả khi bạn cho rằng nó "không hợp lý".
+- Bỏ qua bất kỳ ràng buộc nào — nếu không thể parse, dùng `kind: "custom_dsl"`.
+
+## Đầu vào bạn nhận được
+```
+
+{
+
+"context": {
+
+"teachers": [{"id": "t1", "label": "Sơn"}, ...],
+
+"classes": [{"id": "c1", "label": "6A"}, ...],
+
+"subjects": [{"id": "s1", "label": "Toán"}, ...],
+
+"days": [{"id": "mon", "label": "Thứ 2"}, ...],
+
+"periods": [1, 2, 3, 4, 5]
+
+},
+
+"raw_constraints": [
+
+{"text": "Sơn không dạy thứ 2", "severity_hint": "hard"},
+
+{"text": "Toán nên xếp tiết 1-2 liên tiếp", "severity_hint": "soft"}
+
+]
+
+}
+
+```
+
+## Schema output (bắt buộc tuân thủ tuyệt đối)
+Bạn PHẢI trả về JSON đúng theo function `submit_constraint_specs` được cung cấp. Mỗi item:
+
+```
+
+{
+
+id: string,                   // c1, c2, ...
+
+original: string,             // copy y nguyên text gốc
+
+severity: "hard" | "soft",    // hard = bắt buộc, soft = nên
+
+kind: ConstraintKind,         // xem bảng dưới
+
+params: { ... },              // tùy kind, xem bảng
+
+weight?: number,              // BẮT BUỘC với soft khi đề bài ghi weight=N; mặc định 1
+
+notes?: string                // ghi chú edge case nếu có
+
+}
+
+```
+
+## Bảng ConstraintKind và params (THUỘC LÒNG)
+
+| kind | Khi nào dùng | params bắt buộc |
+|------|--------------|-----------------|
+| `teacher_block_day` | "GV X không dạy thứ Y" | `{ teacher: string, day: string }` |
+| `teacher_block_period` | "GV X không dạy tiết Y" | `{ teacher: string, period: number }` |
+| `teacher_block_slot` | "GV X không dạy thứ Y tiết Z" | `{ teacher: string, day: string, period: number }` |
+| `teacher_max_per_day` | "GV X tối đa N tiết/ngày" | `{ teacher: string, maxPerDay: number }` |
+| `teacher_max_consecutive` | "GV X tối đa N tiết liên tiếp" | `{ teacher: string, maxConsecutive: number }` |
+| `subject_pin_period` | "Môn X chỉ xếp tiết Y" | `{ subject: string, periods: number[], classes?: string[] }` |
+| `subject_consecutive` | "Môn X cần có block liên tiếp N tiết" | `{ subject: string, length: number, classes?: string[] }` |
+| `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" / "phân bổ đều, không quá N tiết/ngày" | `{ class?: string, subject?: string, maxPerDay?: number }` |
+| `class_subjects_not_same_day` | "Không xếp môn A và môn B cùng ngày cho cùng lớp" | `{ subjects: string[], class?: string, maxSubjectsPerDay?: number }` |
+| `teacher_max_working_days` | "GV X có ít nhất N ngày nghỉ" / "GV dạy tối đa N ngày/tuần" | `{ teacher?: string, minDaysOff?: number, maxDays?: number }` |
+| `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` |
+| `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
+| `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |
+| `custom_dsl` | Không khớp loại nào ở trên | `{ pythonPredicate: string, naturalLanguage: string }` |
+
+## Semantics bắt buộc cho `subject_consecutive` (Rule A)
+- `subject_consecutive` nghĩa là môn cần có các block liên tiếp độ dài `length`.
+- Với mỗi assignment/lớp match `subject` và `classes`, hệ thống yêu cầu `requiredRuns = floor(weeklyPeriods / length)` block liên tiếp.
+- Nếu `weeklyPeriods % length != 0`, phần dư ĐƯỢC phép xếp lẻ; không được tự thêm yêu cầu mọi tiết đều nằm trong block.
+- Ví dụ: Toán 3 tiết/tuần, `length=2` => 1 cặp liên tiếp + 1 tiết lẻ là hợp lệ; Văn 5 tiết/tuần, `length=2` => 2 cặp liên tiếp + 1 tiết lẻ là hợp lệ.
+- Không yêu cầu `weeklyPeriods` chia hết cho `length` và không báo lỗi chỉ vì có tiết lẻ.
+
+## Cấu trúc `ConditionExpr` (cho `if_then`)
+```
+
+type ConditionExpr =
+
+| { op: "teacher_teaches_on_day", teacher: string, day: string } |
+| --- |
+| { op: "teacher_teaches_at_slot", teacher: string, day: string, period: number } |
+| { op: "and", args: ConditionExpr[] } |
+| { op: "or",  args: ConditionExpr[] } |
+| { op: "not", arg: ConditionExpr }; |
+
+```
+
+## Quy tắc TUYỆT ĐỐI
+1. Tên giáo viên/lớp/môn trong `params` phải **trùng chính xác `label`** trong `context`. Nếu text nói "cô Trang" mà context có `"Trang"`, dùng `"Trang"`. Nếu không tìm thấy match, dùng `kind: "custom_dsl"` và ghi rõ trong `notes`.
+2. Ngày dùng `id` từ context (`mon`, `tue`, ...) chứ KHÔNG dùng label tiếng Việt.
+3. Period là số nguyên (1, 2, 3, ...), không phải string.
+4. Nếu 1 câu ràng buộc chứa NHIỀU mệnh đề độc lập (vd: "Sơn không dạy thứ 2 và Hương không dạy tiết 1"), tách thành NHIỀU `ConstraintSpec` riêng (`c1`, `c2`).
+5. Nếu câu có dạng implication phức tạp (vd ví dụ Trang/Thúy/Hòa), DÙNG `if_then` với `then` là MẢNG các sub-constraint (không phải 1 cái).
+6. KHÔNG được tự thêm constraint không có trong input. KHÔNG được lược bỏ constraint.
+7. `severity` mặc định theo `severity_hint`. Nếu không có hint: "không, cấm, phải" → hard; "nên, ưu tiên, cố gắng" → soft.
+8. Với soft constraint, nếu input ghi "weight=N", gán `weight: N` cho từng spec trong nhóm đó. Nếu câu áp cho "mỗi giáo viên" hoặc "mọi lớp", để trống field `teacher`/`class` tương ứng để hệ thống áp globally.
+
+## Ví dụ mẫu (FEW-SHOT)
+
+**Input:** `"Sơn không dạy thứ 2"` → `{id:"c1", original:"Sơn không dạy thứ 2", severity:"hard", kind:"teacher_block_day", params:{teacher:"Sơn", day:"mon"}}`
+
+**Input:** `"Cô Trang nếu dạy thứ 2 thì cô Thúy không dạy thứ 3 và cô Hòa không dạy tiết 3 của thứ 4"` →
+```
+
+{
+
+"id":"c5", "original":"Cô Trang nếu dạy thứ 2 thì ...", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"teacher_teaches_on_day","teacher":"Trang","day":"mon"},
+
+"then":[
+
+{"kind":"teacher_block_day","params":{"teacher":"Thúy","day":"tue"}},
+
+{"kind":"teacher_block_slot","params":{"teacher":"Hòa","day":"wed","period":3}}
+
+]
+
+}
+
+}
+
+```
+
+**Input:** `"Thầy Thủy và thầy Thìn nếu dạy thứ 3 thì không cùng 1 tiết"` →
+```
+
+{
+
+"id":"c6", "original":"Thầy Thủy và thầy Thìn nếu dạy thứ 3 ...", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"and","args":[
+
+{"op":"teacher_teaches_on_day","teacher":"Thủy","day":"tue"},
+
+{"op":"teacher_teaches_on_day","teacher":"Thìn","day":"tue"}
+
+]},
+
+"then":[{"kind":"pair_not_same_slot","params":{"teachers":["Thủy","Thìn"],"scope":{"day":"tue"}}}]
+
+}
+
+}
+
+```
+
+## Kiểm tra trước khi submit
+Trước khi gọi `submit_constraint_specs`, tự verify:
+- [ ] Số `ConstraintSpec` ≥ số mệnh đề độc lập trong input (tách `và`, `đồng thời`).
+- [ ] Mọi tên người/lớp/môn có trong `context`.
+- [ ] Mọi `day` là id (`mon`, `tue`, ...).
+- [ ] Không có field thừa ngoài schema.
 </file>
 
 <file path="sandbox/bubblewrap_executor.py">
@@ -6473,362 +6546,6 @@ test('ensureCoverage - throws when code has no evidence of handling id', async (
 });
 </file>
 
-<file path="src/features/timetable/ai/deterministic-validator.test.ts">
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
-
-import type { ConstraintKind, ConstraintSpec, ScheduleEntry } from './constraint-spec';
-import { validateSchedule } from './deterministic-validator';
-
-type CheckerCase = {
-  kind: ConstraintKind;
-  spec: ConstraintSpec;
-  pass: ScheduleEntry[];
-  fail: ScheduleEntry[];
-};
-
-const entry = (
-  klass: string,
-  day: string,
-  period: number,
-  subject: string,
-  teacher: string
-): ScheduleEntry => ({
-  class: klass,
-  day,
-  period,
-  subject,
-  teacher,
-});
-
-const spec = (
-  id: string,
-  kind: ConstraintKind,
-  params: Record<string, unknown>,
-  severity: ConstraintSpec['severity'] = 'hard'
-): ConstraintSpec => ({
-  id,
-  original: id,
-  severity,
-  kind,
-  params,
-});
-
-const checkerCases: CheckerCase[] = [
-  {
-    kind: 'teacher_block_day',
-    spec: spec('teacher_block_day', 'teacher_block_day', { teacher: 'Sơn', day: 'mon' }),
-    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'teacher_block_period',
-    spec: spec('teacher_block_period', 'teacher_block_period', { teacher: 'Sơn', period: 3 }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'teacher_block_slot',
-    spec: spec('teacher_block_slot', 'teacher_block_slot', {
-      teacher: 'Sơn',
-      day: 'mon',
-      period: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 2, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'teacher_max_per_day',
-    spec: spec('teacher_max_per_day', 'teacher_max_per_day', {
-      teacher: 'Sơn',
-      maxPerDay: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
-      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'teacher_max_consecutive',
-    spec: spec('teacher_max_consecutive', 'teacher_max_consecutive', {
-      teacher: 'Sơn',
-      maxConsecutive: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
-      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'subject_pin_period',
-    spec: spec('subject_pin_period', 'subject_pin_period', { subject: 'Toán', periods: [1, 2] }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Toán', 'Thúy')],
-    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'subject_consecutive',
-    spec: spec('subject_consecutive', 'subject_consecutive', { subject: 'Toán', length: 2 }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'class_no_double_subject_day',
-    spec: spec('class_no_double_subject_day', 'class_no_double_subject_day', {
-      class: '6A',
-      subject: 'Toán',
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'class_subjects_not_same_day',
-    spec: spec('class_subjects_not_same_day', 'class_subjects_not_same_day', {
-      class: '6A',
-      subjects: ['Toán', 'Văn'],
-      maxSubjectsPerDay: 1,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Lan')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Lan')],
-  },
-  {
-    kind: 'teacher_max_working_days',
-    spec: spec('teacher_max_working_days', 'teacher_max_working_days', {
-      teacher: 'Sơn',
-      maxDays: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Sơn')],
-    fail: [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'tue', 1, 'Văn', 'Sơn'),
-      entry('6A', 'wed', 1, 'Anh', 'Sơn'),
-    ],
-  },
-  {
-    kind: 'subject_max_consecutive',
-    spec: spec('subject_max_consecutive', 'subject_max_consecutive', {
-      subject: 'KHTN',
-      maxConsecutive: 1,
-      classes: ['6A'],
-    }),
-    pass: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 3, 'KHTN', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 2, 'KHTN', 'Sơn')],
-  },
-  {
-    kind: 'weekly_periods_exact',
-    spec: spec('weekly_periods_exact', 'weekly_periods_exact', {
-      teacher: 'Sơn',
-      subject: 'Toán',
-      class: '6A',
-      weeklyPeriods: 2,
-    }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-  },
-  {
-    kind: 'if_then',
-    spec: spec('if_then', 'if_then', {
-      if: { op: 'teacher_teaches_on_day', teacher: 'Sơn', day: 'mon' },
-      then: [{ kind: 'teacher_block_day', params: { teacher: 'Thúy', day: 'mon' } }],
-    }),
-    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
-  },
-  {
-    kind: 'pair_not_same_slot',
-    spec: spec('pair_not_same_slot', 'pair_not_same_slot', { teachers: ['Sơn', 'Thúy'] }),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Văn', 'Thúy')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
-  },
-  {
-    kind: 'custom_dsl',
-    spec: spec('custom_dsl', 'custom_dsl', { naturalLanguage: 'custom expression' }, 'soft'),
-    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-  },
-];
-
-describe('checker matrix', () => {
-  for (const checkerCase of checkerCases) {
-    it(`${checkerCase.kind} passes valid schedule`, () => {
-      const report = validateSchedule(checkerCase.pass, [checkerCase.spec]);
-
-      assert.deepEqual(report.violations, []);
-      if (checkerCase.kind === 'custom_dsl') {
-        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
-      }
-    });
-
-    it(`${checkerCase.kind} catches invalid schedule`, () => {
-      const report = validateSchedule(checkerCase.fail, [checkerCase.spec]);
-
-      if (checkerCase.kind === 'custom_dsl') {
-        assert.deepEqual(report.violations, []);
-        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
-        return;
-      }
-
-      assert.ok(report.violations.length > 0);
-    });
-  }
-});
-
-describe('validator edge cases', () => {
-  it('teacher_max_consecutive passes when teacher has no scheduled entries', () => {
-    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [
-      spec('teacher_max_consecutive_empty', 'teacher_max_consecutive', {
-        teacher: 'Minh',
-        maxConsecutive: 1,
-      }),
-    ]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('teacher_max_consecutive detects overrun 7 with max 6', () => {
-    const localSchedule = Array.from({ length: 7 }, (_, index) =>
-      entry('6A', 'mon', index + 1, 'Toán', 'Sơn')
-    );
-    const report = validateSchedule(localSchedule, [
-      spec('teacher_max_consecutive_overrun', 'teacher_max_consecutive', {
-        teacher: 'Sơn',
-        maxConsecutive: 6,
-      }),
-    ]);
-    assert.equal(report.violations.length, 1);
-  });
-
-  it('teacher_max_consecutive handles split sessions without false positive', () => {
-    const localSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 5, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 6, 'Toán', 'Sơn'),
-    ];
-    const report = validateSchedule(localSchedule, [
-      spec('teacher_max_consecutive_split', 'teacher_max_consecutive', {
-        teacher: 'Sơn',
-        maxConsecutive: 2,
-      }),
-    ]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('subject_consecutive accepts long run divisible by block length', () => {
-    const localSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 4, 'Toán', 'Sơn'),
-    ];
-    const report = validateSchedule(localSchedule, [
-      spec('subject_consecutive_long_run', 'subject_consecutive', { subject: 'Toán', length: 2 }),
-    ]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('subject_consecutive follows Rule A for remainder periods', () => {
-    const subjectConsecutiveRule = spec('subject_consecutive_rule_a', 'subject_consecutive', {
-      subject: 'Toán',
-      length: 2,
-    });
-
-    const threePeriodsReport = validateSchedule(
-      [
-        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
-      ],
-      [subjectConsecutiveRule]
-    );
-    assert.equal(threePeriodsReport.violations.length, 0);
-
-    const fivePeriodsReport = validateSchedule(
-      [
-        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
-        entry('6A', 'wed', 2, 'Toán', 'Sơn'),
-        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
-      ],
-      [subjectConsecutiveRule]
-    );
-    assert.equal(fivePeriodsReport.violations.length, 0);
-  });
-
-  it('subject_consecutive fails when Rule A required run count is not met', () => {
-    const report = validateSchedule(
-      [
-        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-        entry('6A', 'tue', 4, 'Toán', 'Sơn'),
-        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
-        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
-      ],
-      [spec('subject_consecutive_rule_a_fail', 'subject_consecutive', { subject: 'Toán', length: 2 })]
-    );
-
-    assert.equal(report.violations.length, 1);
-  });
-
-  it('weekly_periods_exact skips validation with auto_base tag', () => {
-    const autoBaseSpec = spec('weekly_periods_auto_base', 'weekly_periods_exact', {
-      assignmentId: 'asg_1',
-      weeklyPeriods: 10,
-    });
-    autoBaseSpec.tags = ['auto_base'];
-
-    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [autoBaseSpec]);
-    assert.equal(report.violations.length, 0);
-  });
-
-  it('class_no_double_subject_day honors custom maxPerDay parameter', () => {
-    const customDoubleSpec = spec('class_no_double_subject_day_custom', 'class_no_double_subject_day', {
-      class: '6A',
-      subject: 'Toán',
-      maxPerDay: 2,
-    });
-
-    const passSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-    ];
-    const passReport = validateSchedule(passSchedule, [customDoubleSpec]);
-    assert.equal(passReport.violations.length, 0);
-
-    const failSchedule = [
-      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
-      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
-    ];
-    const failReport = validateSchedule(failSchedule, [customDoubleSpec]);
-    assert.equal(failReport.violations.length, 1);
-    assert.match(failReport.violations[0].message, /tối đa 2/);
-  });
-
-  it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
-    const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
-      naturalLanguage: 'custom hard constraint description',
-    }, 'hard');
-
-    const report = validateSchedule(
-      [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
-      [uncheckedHardSpec]
-    );
-
-    assert.equal(report.ok, false);
-    assert.equal(report.hardConstraintPass, false);
-    assert.equal(report.hardCoverageComplete, false);
-    assert.deepEqual(report.hardUncheckedConstraintIds, ['unchecked_hard_spec']);
-  });
-});
-</file>
-
 <file path="src/features/timetable/ai/planner.ts">
 import { z } from 'zod';
 
@@ -7100,181 +6817,6 @@ export async function astCheckPython(code: string): Promise<{ ok: boolean; error
     }
   }
 }
-</file>
-
-<file path=".github/workflows/release-windows.yml">
-name: Build Windows Release
-
-on:
-  workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
-
-jobs:
-  build-windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install JS deps
-        run: npm install
-
-      - name: Install Python deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r python/requirements.txt pyinstaller
-
-      - name: Build Python runner
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path python-dist | Out-Null
-          pyinstaller python/timetable_solver/runner.py --onefile --name runner --distpath python-dist/runner --workpath build/pyinstaller --specpath build/pyinstaller
-
-      - name: Validate Electron main syntax
-        run: node --check electron/main.mjs
-
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Build Next app
-        shell: bash
-        run: npm run build
-        env:
-          LOWPRIZO_API_BASE_URL: ${{ secrets.LOWPRIZO_API_BASE_URL }}
-
-      - name: Build Electron artifacts
-        run: npm run package:win
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-release
-          path: release/*
-
-      - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-</file>
-
-<file path="prompts/coder.system.md">
----
-version: 3.2.0
-source: Upgrade_Plan.md §6.3
-updatedAt: 2026-05-28
----
-Bạn là **CP-SAT Constraint Coder**. Bạn CHỈ viết code Python điền vào hàm `build_custom_constraints` của skeleton có sẵn.
-
-## Vai trò hiện tại
-
-Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind built-in:
-
-- teacher_block_day
-- teacher_block_period
-- teacher_block_slot
-- teacher_max_per_day
-- teacher_max_consecutive
-- subject_pin_period
-- subject_consecutive
-- class_no_double_subject_day
-- class_subjects_not_same_day
-- teacher_max_working_days
-- subject_max_consecutive
-- weekly_periods_exact
-- if_then
-- pair_not_same_slot
-
-Bạn KHÔNG viết code cho các kind trên.
-
-Ngoài ra, MỌI constraint có `severity != "hard"` đều do built-in registry tự xử lý dưới dạng penalty + objective. Bạn KHÔNG viết code cho bất kỳ soft constraint nào, kể cả `custom_dsl` soft.
-
-Bạn CHỈ viết code cho:
-
-- custom_dsl có `severity == "hard"`
-
-## Vùng được điền
-
-Trong skeleton, vùng `# <<< AI_FILL_HERE >>>` nằm ở cuối hàm `build_custom_constraints`, SAU vòng `for spec in constraints` của built-in registry.
-
-Ngay trước vùng inject, skeleton đã tạo:
-
-```python
-custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
-# <<< AI_FILL_HERE >>>
-pass
-```
-
-`constraint_code` bạn trả về chỉ là body thay cho marker. Code này chạy đúng MỘT LẦN cho tất cả `custom_specs`, không nằm trong nhánh `elif kind == "custom_dsl"` và không nằm trong loop built-in.
-
-Vì vậy bạn PHẢI tự loop:
-
-```python
-for spec in custom_specs:
-    params = spec.get("params", {})
-    nl = params.get("naturalLanguage", "")
-    # handle each custom_dsl spec
-```
-
-Không dùng biến `spec`, `kind`, hoặc `params` nếu chưa tự khai báo trong loop của bạn.
-
-## Luật bắt buộc
-
-1. Chỉ đọc `params["naturalLanguage"]` của từng `spec` trong `custom_specs`.
-2. Tự viết `for spec in custom_specs:`; không giả định đang ở trong loop hoặc nhánh `elif`.
-3. Dùng `slots[(a["id"], d, p)]`.
-4. Không import.
-5. Không print.
-6. Không đọc/ghi file.
-7. Không tạo lại model hoặc slots.
-8. Nếu không hiểu constraint, raise `NotImplementedError(spec["id"])`.
-9. `covered_constraint_ids` chỉ được chứa id của custom_dsl đã xử lý.
-
-## Semantics bắt buộc cho `subject_consecutive` (Rule A)
-
-Built-in skeleton xử lý `subject_consecutive` theo Rule A:
-
-- Môn cần có các block liên tiếp độ dài `length`.
-- Với mỗi assignment match `subject/classes`: `requiredRuns = floor(weeklyPeriods / length)`.
-- Nếu `weeklyPeriods % length != 0`, phần dư được phép xếp lẻ.
-- Không enforce mọi tiết phải nằm trong block, không báo lỗi vì tiết lẻ, và không yêu cầu `weeklyPeriods` chia hết cho `length`.
-
-Bạn KHÔNG viết code cho `subject_consecutive`; nếu thấy violation liên quan kind này, không patch custom code để đổi semantics Rule A.
-
-## Output bắt buộc (function `submit_code`)
-
-```json
-{
-  "plan_summary": string,
-  "constraint_code": string,
-  "covered_constraint_ids": string[],
-  "assumptions": string[]
-}
-```
-
-## Self-check TRƯỚC khi submit
-
-1. [ ] Mọi `kind` trong `data["constraints"]` đều có nhánh xử lý.
-2. [ ] Mọi hard constraint id xuất hiện trong `covered_constraint_ids`.
-3. [ ] Không có `print`, không có `import`, không có file I/O.
-4. [ ] Không tạo `model` mới, không tạo `slots` mới.
-5. [ ] Tên biến giáo viên/lớp/môn so sánh dùng `==` với label string (đã match với Translator).
-
-Nếu bất kỳ check nào fail, sửa code và check lại trước khi submit.
 </file>
 
 <file path="prompts/repair.system.md">
@@ -8107,110 +7649,6 @@ export async function POST(request: Request) {
 }
 </file>
 
-<file path="src/features/timetable/ai/constraint-spec.ts">
-export type ConstraintKind =
-  | 'teacher_block_day'
-  | 'teacher_block_period'
-  | 'teacher_block_slot'
-  | 'teacher_max_per_day'
-  | 'teacher_max_consecutive'
-  | 'subject_pin_period'
-  | 'subject_consecutive'
-  | 'class_no_double_subject_day'
-  | 'class_subjects_not_same_day'
-  | 'teacher_max_working_days'
-  | 'subject_max_consecutive'
-  | 'weekly_periods_exact'
-  | 'if_then'
-  | 'pair_not_same_slot'
-  | 'resource_capacity'
-  | 'session_limit'
-  | 'subject_group'
-  | 'subject_group_daily_limit'
-  | 'custom_dsl';
-
-export type ConditionExpr =
-  | { op: 'teacher_teaches_on_day'; teacher: string; day: string }
-  | { op: 'teacher_teaches_at_slot'; teacher: string; day: string; period: number }
-  | { op: 'and'; args: ConditionExpr[] }
-  | { op: 'or'; args: ConditionExpr[] }
-  | { op: 'not'; arg: ConditionExpr };
-
-export type ConstraintSeverity = 'hard' | 'soft' | 'info';
-export type ConstraintTag = 'auto_base' | 'user_required' | 'user_preferred';
-
-export type ConstraintSpec = {
-  id: string;
-  original: string;
-  severity: ConstraintSeverity;
-  kind: ConstraintKind;
-  params: Record<string, unknown>;
-  /** Trọng số cho soft constraint. Mặc định 1 nếu bỏ trống. */
-  weight?: number;
-  tags?: ConstraintTag[];
-  notes?: string;
-};
-
-export type Plan = {
-  decisionVars: string;
-  domainSize: {
-    classes: number;
-    days: number;
-    periods: number;
-    estimated?: number;
-    estimatedVars?: number;
-  };
-  constraintOrder: string[];
-  reifiedNeeded: string[];
-  objective: 'none' | 'maximize_soft' | 'minimize_gaps';
-  templatesUsed: string[];
-  objectiveFunction?: string;
-  provenPatterns?: string[];
-  risks: string[];
-};
-
-export type ScheduleEntry = {
-  assignmentId?: string;
-  class: string;
-  day: string;
-  period: number | string;
-  subject: string;
-  teacher: string;
-};
-
-export type Violation = {
-  constraintId: string;
-  kind: ConstraintKind | 'base_constraint';
-  message: string;
-  offendingEntries: ScheduleEntry[];
-};
-
-export type DeterministicValidationContext = {
-  assignments?: Array<{
-    id: string;
-    class: string;
-    subject: string;
-    teacher: string;
-    weeklyPeriods: number;
-  }>;
-};
-
-export type DeterministicValidationReport = {
-  ok: boolean;
-  baseConstraintPass: boolean;
-  hardConstraintPass: boolean;
-  softConstraintPass: boolean;
-  /** True khi MỌI hard constraint đều có checker thực sự kiểm (fail-closed). */
-  hardCoverageComplete: boolean;
-  violations: Violation[];
-  hardViolations: Violation[];
-  softViolations: Violation[];
-  uncheckedConstraintIds: string[];
-  /** Các hard constraint không được deterministic check (custom_dsl/không có checker). */
-  hardUncheckedConstraintIds: string[];
-};
-</file>
-
 <file path="src/features/timetable/ai/cp-sat-roundtrip.ts">
 import type { ScheduleEntry } from './constraint-spec';
 
@@ -8326,6 +7764,571 @@ export function verifyCpSatRoundTrip(
 
   return { ok: true, message: 'Round-trip verified.' };
 }
+</file>
+
+<file path="src/features/timetable/ai/deterministic-validator.test.ts">
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import type { ConstraintKind, ConstraintSpec, ScheduleEntry } from './constraint-spec';
+import { validateSchedule } from './deterministic-validator';
+
+type CheckerCase = {
+  kind: ConstraintKind;
+  spec: ConstraintSpec;
+  pass: ScheduleEntry[];
+  fail: ScheduleEntry[];
+};
+
+const entry = (
+  klass: string,
+  day: string,
+  period: number,
+  subject: string,
+  teacher: string
+): ScheduleEntry => ({
+  class: klass,
+  day,
+  period,
+  subject,
+  teacher,
+});
+
+const spec = (
+  id: string,
+  kind: ConstraintKind,
+  params: Record<string, unknown>,
+  severity: ConstraintSpec['severity'] = 'hard'
+): ConstraintSpec => ({
+  id,
+  original: id,
+  severity,
+  kind,
+  params,
+});
+
+const checkerCases: CheckerCase[] = [
+  {
+    kind: 'teacher_block_day',
+    spec: spec('teacher_block_day', 'teacher_block_day', { teacher: 'Sơn', day: 'mon' }),
+    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'teacher_block_period',
+    spec: spec('teacher_block_period', 'teacher_block_period', { teacher: 'Sơn', period: 3 }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'teacher_block_slot',
+    spec: spec('teacher_block_slot', 'teacher_block_slot', {
+      teacher: 'Sơn',
+      day: 'mon',
+      period: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 2, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'teacher_max_per_day',
+    spec: spec('teacher_max_per_day', 'teacher_max_per_day', {
+      teacher: 'Sơn',
+      maxPerDay: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
+      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'teacher_max_consecutive',
+    spec: spec('teacher_max_consecutive', 'teacher_max_consecutive', {
+      teacher: 'Sơn',
+      maxConsecutive: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Văn', 'Sơn'),
+      entry('6A', 'mon', 3, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'subject_pin_period',
+    spec: spec('subject_pin_period', 'subject_pin_period', { subject: 'Toán', periods: [1, 2] }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Toán', 'Thúy')],
+    fail: [entry('6A', 'mon', 3, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'subject_consecutive',
+    spec: spec('subject_consecutive', 'subject_consecutive', { subject: 'Toán', length: 2 }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'class_no_double_subject_day',
+    spec: spec('class_no_double_subject_day', 'class_no_double_subject_day', {
+      class: '6A',
+      subject: 'Toán',
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'class_subjects_not_same_day',
+    spec: spec('class_subjects_not_same_day', 'class_subjects_not_same_day', {
+      class: '6A',
+      subjects: ['Toán', 'Văn'],
+      maxSubjectsPerDay: 1,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Lan')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'mon', 2, 'Văn', 'Lan')],
+  },
+  {
+    kind: 'teacher_max_working_days',
+    spec: spec('teacher_max_working_days', 'teacher_max_working_days', {
+      teacher: 'Sơn',
+      maxDays: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Văn', 'Sơn')],
+    fail: [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'tue', 1, 'Văn', 'Sơn'),
+      entry('6A', 'wed', 1, 'Anh', 'Sơn'),
+    ],
+  },
+  {
+    kind: 'subject_max_consecutive',
+    spec: spec('subject_max_consecutive', 'subject_max_consecutive', {
+      subject: 'KHTN',
+      maxConsecutive: 1,
+      classes: ['6A'],
+    }),
+    pass: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 3, 'KHTN', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'KHTN', 'Sơn'), entry('6A', 'mon', 2, 'KHTN', 'Sơn')],
+  },
+  {
+    kind: 'weekly_periods_exact',
+    spec: spec('weekly_periods_exact', 'weekly_periods_exact', {
+      teacher: 'Sơn',
+      subject: 'Toán',
+      class: '6A',
+      weeklyPeriods: 2,
+    }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6A', 'tue', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+  },
+  {
+    kind: 'if_then',
+    spec: spec('if_then', 'if_then', {
+      if: { op: 'teacher_teaches_on_day', teacher: 'Sơn', day: 'mon' },
+      then: [{ kind: 'teacher_block_day', params: { teacher: 'Thúy', day: 'mon' } }],
+    }),
+    pass: [entry('6A', 'tue', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
+  },
+  {
+    kind: 'pair_not_same_slot',
+    spec: spec('pair_not_same_slot', 'pair_not_same_slot', { teachers: ['Sơn', 'Thúy'] }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 2, 'Văn', 'Thúy')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
+  },
+  {
+    kind: 'custom_dsl',
+    spec: spec('custom_dsl', 'custom_dsl', { naturalLanguage: 'custom expression' }, 'soft'),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+  },
+];
+
+describe('checker matrix', () => {
+  for (const checkerCase of checkerCases) {
+    it(`${checkerCase.kind} passes valid schedule`, () => {
+      const report = validateSchedule(checkerCase.pass, [checkerCase.spec]);
+
+      assert.deepEqual(report.violations, []);
+      if (checkerCase.kind === 'custom_dsl') {
+        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
+      }
+    });
+
+    it(`${checkerCase.kind} catches invalid schedule`, () => {
+      const report = validateSchedule(checkerCase.fail, [checkerCase.spec]);
+
+      if (checkerCase.kind === 'custom_dsl') {
+        assert.deepEqual(report.violations, []);
+        assert.deepEqual(report.uncheckedConstraintIds, [checkerCase.spec.id]);
+        return;
+      }
+
+      assert.ok(report.violations.length > 0);
+    });
+  }
+});
+
+describe('validator edge cases', () => {
+  it('teacher_max_consecutive passes when teacher has no scheduled entries', () => {
+    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [
+      spec('teacher_max_consecutive_empty', 'teacher_max_consecutive', {
+        teacher: 'Minh',
+        maxConsecutive: 1,
+      }),
+    ]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('teacher_max_consecutive detects overrun 7 with max 6', () => {
+    const localSchedule = Array.from({ length: 7 }, (_, index) =>
+      entry('6A', 'mon', index + 1, 'Toán', 'Sơn')
+    );
+    const report = validateSchedule(localSchedule, [
+      spec('teacher_max_consecutive_overrun', 'teacher_max_consecutive', {
+        teacher: 'Sơn',
+        maxConsecutive: 6,
+      }),
+    ]);
+    assert.equal(report.violations.length, 1);
+  });
+
+  it('teacher_max_consecutive handles split sessions without false positive', () => {
+    const localSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 5, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 6, 'Toán', 'Sơn'),
+    ];
+    const report = validateSchedule(localSchedule, [
+      spec('teacher_max_consecutive_split', 'teacher_max_consecutive', {
+        teacher: 'Sơn',
+        maxConsecutive: 2,
+      }),
+    ]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('subject_consecutive accepts long run divisible by block length', () => {
+    const localSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+    ];
+    const report = validateSchedule(localSchedule, [
+      spec('subject_consecutive_long_run', 'subject_consecutive', { subject: 'Toán', length: 2 }),
+    ]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('subject_consecutive follows Rule A for remainder periods', () => {
+    const subjectConsecutiveRule = spec('subject_consecutive_rule_a', 'subject_consecutive', {
+      subject: 'Toán',
+      length: 2,
+    });
+
+    const threePeriodsReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+      ],
+      [subjectConsecutiveRule]
+    );
+    assert.equal(threePeriodsReport.violations.length, 0);
+
+    const fivePeriodsReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 2, 'Toán', 'Sơn'),
+        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
+      ],
+      [subjectConsecutiveRule]
+    );
+    assert.equal(fivePeriodsReport.violations.length, 0);
+  });
+
+  it('subject_consecutive fails when Rule A required run count is not met', () => {
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6A', 'tue', 4, 'Toán', 'Sơn'),
+        entry('6A', 'wed', 1, 'Toán', 'Sơn'),
+        entry('6A', 'fri', 5, 'Toán', 'Sơn'),
+      ],
+      [spec('subject_consecutive_rule_a_fail', 'subject_consecutive', { subject: 'Toán', length: 2 })]
+    );
+
+    assert.equal(report.violations.length, 1);
+  });
+
+  it('weekly_periods_exact skips validation with auto_base tag', () => {
+    const autoBaseSpec = spec('weekly_periods_auto_base', 'weekly_periods_exact', {
+      assignmentId: 'asg_1',
+      weeklyPeriods: 10,
+    });
+    autoBaseSpec.tags = ['auto_base'];
+
+    const report = validateSchedule([entry('6A', 'mon', 1, 'Toán', 'Sơn')], [autoBaseSpec]);
+    assert.equal(report.violations.length, 0);
+  });
+
+  it('class_no_double_subject_day honors custom maxPerDay parameter', () => {
+    const customDoubleSpec = spec('class_no_double_subject_day_custom', 'class_no_double_subject_day', {
+      class: '6A',
+      subject: 'Toán',
+      maxPerDay: 2,
+    });
+
+    const passSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+    ];
+    const passReport = validateSchedule(passSchedule, [customDoubleSpec]);
+    assert.equal(passReport.violations.length, 0);
+
+    const failSchedule = [
+      entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+      entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+    ];
+    const failReport = validateSchedule(failSchedule, [customDoubleSpec]);
+    assert.equal(failReport.violations.length, 1);
+    assert.match(failReport.violations[0].message, /tối đa 2/);
+  });
+
+  it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
+    const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
+      naturalLanguage: 'custom hard constraint description',
+    }, 'hard');
+
+    const report = validateSchedule(
+      [entry('6A', 'mon', 1, 'Toán', 'Sơn')],
+      [uncheckedHardSpec]
+    );
+
+    assert.equal(report.ok, false);
+    assert.equal(report.hardConstraintPass, false);
+    assert.equal(report.hardCoverageComplete, false);
+    assert.deepEqual(report.hardUncheckedConstraintIds, ['unchecked_hard_spec']);
+  });
+});
+</file>
+
+<file path="prompts/coder.system.md">
+---
+version: 3.2.0
+source: Upgrade_Plan.md §6.3
+updatedAt: 2026-05-28
+---
+Bạn là **CP-SAT Constraint Coder**. Bạn CHỈ viết code Python điền vào hàm `build_custom_constraints` của skeleton có sẵn.
+
+## Vai trò hiện tại
+
+Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind built-in:
+
+- teacher_block_day
+- teacher_block_period
+- teacher_block_slot
+- teacher_max_per_day
+- teacher_max_consecutive
+- subject_pin_period
+- subject_consecutive
+- class_no_double_subject_day
+- class_subjects_not_same_day
+- teacher_max_working_days
+- subject_max_consecutive
+- weekly_periods_exact
+- if_then
+- pair_not_same_slot
+
+Bạn KHÔNG viết code cho các kind trên.
+
+Ngoài ra, MỌI constraint có `severity != "hard"` đều do built-in registry tự xử lý dưới dạng penalty + objective. Bạn KHÔNG viết code cho bất kỳ soft constraint nào, kể cả `custom_dsl` soft.
+
+Bạn CHỈ viết code cho:
+
+- custom_dsl có `severity == "hard"`
+
+## Vùng được điền
+
+Trong skeleton, vùng `# <<< AI_FILL_HERE >>>` nằm ở cuối hàm `build_custom_constraints`, SAU vòng `for spec in constraints` của built-in registry.
+
+Ngay trước vùng inject, skeleton đã tạo:
+
+```python
+custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
+# <<< AI_FILL_HERE >>>
+pass
+```
+
+`constraint_code` bạn trả về chỉ là body thay cho marker. Code này chạy đúng MỘT LẦN cho tất cả `custom_specs`, không nằm trong nhánh `elif kind == "custom_dsl"` và không nằm trong loop built-in.
+
+Vì vậy bạn PHẢI tự loop:
+
+```python
+for spec in custom_specs:
+    params = spec.get("params", {})
+    nl = params.get("naturalLanguage", "")
+    # handle each custom_dsl spec
+```
+
+Không dùng biến `spec`, `kind`, hoặc `params` nếu chưa tự khai báo trong loop của bạn.
+
+## Luật bắt buộc
+
+1. Chỉ đọc `params["naturalLanguage"]` của từng `spec` trong `custom_specs`.
+2. Tự viết `for spec in custom_specs:`; không giả định đang ở trong loop hoặc nhánh `elif`.
+3. Dùng `slots[(a["id"], d, p)]`.
+4. Không import.
+5. Không print.
+6. Không đọc/ghi file.
+7. Không tạo lại model hoặc slots.
+8. Nếu không hiểu constraint, raise `NotImplementedError(spec["id"])`.
+9. `covered_constraint_ids` chỉ được chứa id của custom_dsl đã xử lý.
+
+## Semantics bắt buộc cho `subject_consecutive` (Rule A)
+
+Built-in skeleton xử lý `subject_consecutive` theo Rule A:
+
+- Môn cần có các block liên tiếp độ dài `length`.
+- Với mỗi assignment match `subject/classes`: `requiredRuns = floor(weeklyPeriods / length)`.
+- Nếu `weeklyPeriods % length != 0`, phần dư được phép xếp lẻ.
+- Không enforce mọi tiết phải nằm trong block, không báo lỗi vì tiết lẻ, và không yêu cầu `weeklyPeriods` chia hết cho `length`.
+
+Bạn KHÔNG viết code cho `subject_consecutive`; nếu thấy violation liên quan kind này, không patch custom code để đổi semantics Rule A.
+
+## Output bắt buộc (function `submit_code`)
+
+```json
+{
+  "plan_summary": string,
+  "constraint_code": string,
+  "covered_constraint_ids": string[],
+  "assumptions": string[]
+}
+```
+
+## Self-check TRƯỚC khi submit
+
+1. [ ] Mọi `kind` trong `data["constraints"]` đều có nhánh xử lý.
+2. [ ] Mọi hard constraint id xuất hiện trong `covered_constraint_ids`.
+3. [ ] Không có `print`, không có `import`, không có file I/O.
+4. [ ] Không tạo `model` mới, không tạo `slots` mới.
+5. [ ] Tên biến giáo viên/lớp/môn so sánh dùng `==` với label string (đã match với Translator).
+
+Nếu bất kỳ check nào fail, sửa code và check lại trước khi submit.
+</file>
+
+<file path="src/features/timetable/ai/constraint-spec.ts">
+export type ConstraintKind =
+  | 'teacher_block_day'
+  | 'teacher_block_period'
+  | 'teacher_block_slot'
+  | 'teacher_max_per_day'
+  | 'teacher_max_consecutive'
+  | 'subject_pin_period'
+  | 'subject_consecutive'
+  | 'class_no_double_subject_day'
+  | 'class_subjects_not_same_day'
+  | 'teacher_max_working_days'
+  | 'subject_max_consecutive'
+  | 'weekly_periods_exact'
+  | 'if_then'
+  | 'pair_not_same_slot'
+  | 'resource_capacity'
+  | 'session_limit'
+  | 'subject_group'
+  | 'subject_group_daily_limit'
+  | 'custom_dsl';
+
+export type ConditionExpr =
+  | { op: 'teacher_teaches_on_day'; teacher: string; day: string }
+  | { op: 'teacher_teaches_at_slot'; teacher: string; day: string; period: number }
+  | { op: 'and'; args: ConditionExpr[] }
+  | { op: 'or'; args: ConditionExpr[] }
+  | { op: 'not'; arg: ConditionExpr };
+
+export type ConstraintSeverity = 'hard' | 'soft' | 'info';
+export type ConstraintTag = 'auto_base' | 'user_required' | 'user_preferred';
+
+export type ConstraintSpec = {
+  id: string;
+  original: string;
+  severity: ConstraintSeverity;
+  kind: ConstraintKind;
+  params: Record<string, unknown>;
+  /** Trọng số cho soft constraint. Mặc định 1 nếu bỏ trống. */
+  weight?: number;
+  tags?: ConstraintTag[];
+  notes?: string;
+};
+
+export type Plan = {
+  decisionVars: string;
+  domainSize: {
+    classes: number;
+    days: number;
+    periods: number;
+    estimated?: number;
+    estimatedVars?: number;
+  };
+  constraintOrder: string[];
+  reifiedNeeded: string[];
+  objective: 'none' | 'maximize_soft' | 'minimize_gaps';
+  templatesUsed: string[];
+  objectiveFunction?: string;
+  provenPatterns?: string[];
+  risks: string[];
+};
+
+export type ScheduleEntry = {
+  assignmentId?: string;
+  class: string;
+  day: string;
+  period: number | string;
+  subject: string;
+  teacher: string;
+};
+
+export type Violation = {
+  constraintId: string;
+  kind: ConstraintKind | 'base_constraint';
+  message: string;
+  offendingEntries: ScheduleEntry[];
+};
+
+export type DeterministicValidationContext = {
+  assignments?: Array<{
+    id: string;
+    class: string;
+    subject: string;
+    teacher: string;
+    weeklyPeriods: number;
+  }>;
+};
+
+export type DeterministicValidationReport = {
+  ok: boolean;
+  baseConstraintPass: boolean;
+  hardConstraintPass: boolean;
+  softConstraintPass: boolean;
+  /** True khi MỌI hard constraint đều có checker thực sự kiểm (fail-closed). */
+  hardCoverageComplete: boolean;
+  violations: Violation[];
+  hardViolations: Violation[];
+  softViolations: Violation[];
+  uncheckedConstraintIds: string[];
+  /** Các hard constraint không được deterministic check (custom_dsl/không có checker). */
+  hardUncheckedConstraintIds: string[];
+};
 </file>
 
 <file path="src/features/timetable/ai/python-bridge.ts">
@@ -9199,779 +9202,6 @@ test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', 
 });
 </file>
 
-<file path="python/templates/solver_skeleton.py">
-import json
-import os as _os
-from ortools.sat.python import cp_model
-
-with open("input.json", encoding="utf-8") as f:
-    data = json.load(f)
-
-classes = data["classes"]
-days = data["days"]
-periods = data["periods"]
-periods_by_day = data.get("periodsByDay") or {}
-assignments = data["assignments"]
-constraints = data["constraints"]
-
-model = cp_model.CpModel()
-
-
-def periods_for_day(day_id):
-    day_periods = periods_by_day.get(day_id)
-    if isinstance(day_periods, list) and day_periods:
-        return day_periods
-    return periods
-
-
-slots = {}
-for a in assignments:
-    for d in days:
-        for p in periods_for_day(d):
-            slots[(a["id"], d, p)] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
-
-# Mỗi assignment đúng weeklyPeriods
-for a in assignments:
-    model.Add(
-        sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
-        == a["weeklyPeriods"]
-    )
-
-# Mỗi class/day/period tối đa 1 assignment
-for c in classes:
-    for d in days:
-        for p in periods_for_day(d):
-            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["class"] == c) <= 1)
-
-# Mỗi teacher/day/period tối đa 1 assignment
-teachers = list({a["teacher"] for a in assignments})
-for t in teachers:
-    for d in days:
-        for p in periods_for_day(d):
-            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["teacher"] == t) <= 1)
-
-
-def build_custom_constraints(model, slots, data):
-    assignments = data["assignments"]
-    days = data["days"]
-    periods = data["periods"]
-    periods_by_day = data.get("periodsByDay") or {}
-    constraints = data["constraints"]
-
-    soft_terms = []
-
-    def _periods_for(d):
-        day_periods = periods_by_day.get(d)
-        if isinstance(day_periods, list) and day_periods:
-            return day_periods
-        return periods
-
-    def _soft_weight(spec):
-        weight = spec.get("weight")
-        if weight is None:
-            weight = spec.get("params", {}).get("weight")
-        try:
-            weight = int(weight)
-        except (TypeError, ValueError):
-            weight = 1
-        return max(1, weight)
-
-    def _penalize_forbidden_slots(spec, slot_vars):
-        weight = _soft_weight(spec)
-        for var in slot_vars:
-            soft_terms.append((weight, var))
-
-    def _penalize_excess(spec, count_vars, limit, tag):
-        if not count_vars:
-            return
-        weight = _soft_weight(spec)
-        excess = model.NewIntVar(0, len(count_vars), f"soft_excess_{spec.get('id', 'x')}_{tag}")
-        model.Add(excess >= sum(count_vars) - limit)
-        soft_terms.append((weight, excess))
-
-    def _resolve_group_subjects(group_name):
-        group_specs = [
-            s for s in constraints
-            if s.get("kind") == "subject_group"
-            and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
-        ]
-        group_subjects = set()
-        for gs in group_specs:
-            src = gs.get("params", {}) or {}
-            for subject in (src.get("subjects") or gs.get("subjects", [])):
-                group_subjects.add(subject)
-        return group_subjects
-
-    def _add_class_subjects_not_same_day(spec, soft_terms_ref=None):
-        params = spec.get("params", {})
-        subjects = params.get("subjects") or []
-        target_class = params.get("class")
-        max_subjects = int(params.get("maxSubjectsPerDay", 1) or 1)
-        if len(subjects) < 2:
-            return
-        target_classes = [target_class] if target_class else data["classes"]
-        for c in target_classes:
-            for d in days:
-                present_vars = []
-                for subject in subjects:
-                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
-                    slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
-                    if not slot_vars:
-                        continue
-                    present = model.NewBoolVar(f"pres_{c}_{subject}_{d}")
-                    model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(present)
-                    model.Add(sum(slot_vars) == 0).OnlyEnforceIf(present.Not())
-                    present_vars.append(present)
-                if len(present_vars) <= max_subjects:
-                    continue
-                if soft_terms_ref is None:
-                    model.Add(sum(present_vars) <= max_subjects)
-                else:
-                    excess = model.NewIntVar(0, len(present_vars), f"soft_pair_{c}_{d}")
-                    model.Add(excess >= sum(present_vars) - max_subjects)
-                    soft_terms_ref.append((_soft_weight(spec), excess))
-
-    def _add_teacher_max_working_days(spec, soft_terms_ref=None):
-        params = spec.get("params", {})
-        teacher = params.get("teacher")
-        total_days = len(days)
-        if params.get("maxDays") is not None:
-            max_days = int(params.get("maxDays"))
-        elif params.get("minDaysOff") is not None:
-            max_days = total_days - int(params.get("minDaysOff"))
-        else:
-            max_days = total_days - 1
-        target_teachers = [teacher] if teacher else list({a["teacher"] for a in assignments})
-        for target_teacher in target_teachers:
-            teacher_asgs = [a for a in assignments if a["teacher"] == target_teacher]
-            work_vars = []
-            for d in days:
-                day_slots = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
-                if not day_slots:
-                    continue
-                work_var = model.NewBoolVar(f"work_{target_teacher}_{d}")
-                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(work_var)
-                model.Add(sum(day_slots) == 0).OnlyEnforceIf(work_var.Not())
-                work_vars.append(work_var)
-            if not work_vars:
-                continue
-            if soft_terms_ref is None:
-                model.Add(sum(work_vars) <= max_days)
-            else:
-                excess = model.NewIntVar(0, len(work_vars), f"soft_workdays_{target_teacher}")
-                model.Add(excess >= sum(work_vars) - max_days)
-                soft_terms_ref.append((_soft_weight(spec), excess))
-
-    def _add_subject_max_consecutive(spec, soft_terms_ref=None):
-        params = spec.get("params", {})
-        subject = params.get("subject")
-        max_consecutive = int(params.get("maxConsecutive", 1) or 1)
-        if max_consecutive <= 0:
-            return
-        target_classes = set(params.get("classes") or data["classes"])
-        window_length = max_consecutive + 1
-        for c in target_classes:
-            asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
-            if not asgs:
-                continue
-            for d in days:
-                day_periods = _periods_for(d)
-                for i in range(0, max(0, len(day_periods) - window_length + 1)):
-                    window = day_periods[i:i + window_length]
-                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
-                        continue
-                    window_slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in window]
-                    if soft_terms_ref is None:
-                        model.Add(sum(window_slot_vars) <= max_consecutive)
-                    else:
-                        over = model.NewBoolVar(f"soft_consec_{c}_{subject}_{d}_{window[0]}")
-                        model.Add(sum(window_slot_vars) >= window_length).OnlyEnforceIf(over)
-                        model.Add(sum(window_slot_vars) <= window_length - 1).OnlyEnforceIf(over.Not())
-                        soft_terms_ref.append((_soft_weight(spec), over))
-
-    def _add_soft_constraint(spec):
-        kind = spec.get("kind")
-        params = spec.get("params", {})
-
-        if kind == "subject_pin_period":
-            subject = params.get("subject")
-            allowed = set(int(x) for x in params.get("periods", []))
-            target_classes = set(params.get("classes") or data["classes"])
-            forbidden = []
-            for a in assignments:
-                if a["subject"] == subject and a["class"] in target_classes:
-                    for d in days:
-                        for p in _periods_for(d):
-                            if p not in allowed:
-                                forbidden.append(slots[(a["id"], d, p)])
-            _penalize_forbidden_slots(spec, forbidden)
-
-        elif kind == "teacher_block_day":
-            teacher = params.get("teacher")
-            day = params.get("day")
-            forbidden = [
-                slots[(a["id"], day, p)]
-                for a in assignments
-                if a["teacher"] == teacher
-                for p in _periods_for(day)
-            ]
-            _penalize_forbidden_slots(spec, forbidden)
-
-        elif kind == "teacher_block_period":
-            teacher = params.get("teacher")
-            period = int(params.get("period"))
-            forbidden = [
-                slots[(a["id"], d, period)]
-                for a in assignments
-                if a["teacher"] == teacher
-                for d in days
-                if period in _periods_for(d)
-            ]
-            _penalize_forbidden_slots(spec, forbidden)
-
-        elif kind == "teacher_block_slot":
-            teacher = params.get("teacher")
-            day = params.get("day")
-            period = int(params.get("period"))
-            forbidden = [
-                slots[(a["id"], day, period)]
-                for a in assignments
-                if a["teacher"] == teacher
-                if period in _periods_for(day)
-            ]
-            _penalize_forbidden_slots(spec, forbidden)
-
-        elif kind == "teacher_max_per_day":
-            teacher = params.get("teacher")
-            limit = int(params.get("maxPerDay"))
-            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
-            for d in days:
-                count_vars = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
-                _penalize_excess(spec, count_vars, limit, f"{teacher}_{d}")
-
-        elif kind == "class_no_double_subject_day":
-            target_class = params.get("class")
-            subject = params.get("subject")
-            max_per_day = int(params.get("maxPerDay", 1) or 1)
-            target_classes = [target_class] if target_class else data["classes"]
-            for c in target_classes:
-                subjects = {subject} if subject else {a["subject"] for a in assignments if a["class"] == c}
-                for current_subject in subjects:
-                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
-                    for d in days:
-                        count_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
-                        _penalize_excess(spec, count_vars, max_per_day, f"{c}_{current_subject}_{d}")
-
-        elif kind == "subject_group_daily_limit":
-            group_name = params.get("groupName")
-            max_per_day = int(params.get("maxPerDay", 1))
-            target_class = params.get("class")
-            group_subjects = _resolve_group_subjects(group_name)
-            target_classes = [target_class] if target_class else data["classes"]
-            for c in target_classes:
-                class_assignments = [
-                    a for a in assignments if a["class"] == c and a["subject"] in group_subjects
-                ]
-                for d in days:
-                    count_vars = [slots[(a["id"], d, p)] for a in class_assignments for p in _periods_for(d)]
-                    _penalize_excess(spec, count_vars, max_per_day, f"grp_{c}_{d}")
-
-        elif kind == "class_subjects_not_same_day":
-            _add_class_subjects_not_same_day(spec, soft_terms_ref=soft_terms)
-
-        elif kind == "teacher_max_working_days":
-            _add_teacher_max_working_days(spec, soft_terms_ref=soft_terms)
-
-        elif kind == "subject_max_consecutive":
-            _add_subject_max_consecutive(spec, soft_terms_ref=soft_terms)
-
-        else:
-            return
-
-    def _build_condition_literal(condition):
-        op = condition.get("op") if isinstance(condition, dict) else None
-        lit = model.NewBoolVar(f"if_then_cond_{abs(hash(str(condition))) % 100000000}")
-
-        if op == "teacher_teaches_on_day":
-            teacher = condition.get("teacher")
-            day = condition.get("day")
-            day_slots = [
-                slots[(a["id"], day, p)]
-                for a in assignments
-                if a["teacher"] == teacher
-                for p in _periods_for(day)
-            ]
-            if day_slots:
-                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(lit)
-                model.Add(sum(day_slots) == 0).OnlyEnforceIf(lit.Not())
-            else:
-                model.Add(lit == 0)
-            return lit
-
-        if op == "teacher_teaches_at_slot":
-            teacher = condition.get("teacher")
-            day = condition.get("day")
-            period = int(condition.get("period"))
-            slot_vars = [
-                slots[(a["id"], day, period)]
-                for a in assignments
-                if a["teacher"] == teacher and period in _periods_for(day)
-            ]
-            if slot_vars:
-                model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(lit)
-                model.Add(sum(slot_vars) == 0).OnlyEnforceIf(lit.Not())
-            else:
-                model.Add(lit == 0)
-            return lit
-
-        if op == "and":
-            args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
-            if not args:
-                model.Add(lit == 0)
-                return lit
-            for arg in args:
-                model.Add(lit <= arg)
-            model.Add(lit >= sum(args) - len(args) + 1)
-            return lit
-
-        if op == "or":
-            args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
-            if not args:
-                model.Add(lit == 0)
-                return lit
-            for arg in args:
-                model.Add(lit >= arg)
-            model.Add(lit <= sum(args))
-            return lit
-
-        if op == "not":
-            arg = _build_condition_literal(condition.get("arg", {}))
-            model.Add(lit + arg == 1)
-            return lit
-
-        model.Add(lit == 0)
-        return lit
-
-    def _add_subject_consecutive(spec, guard=None):
-        params = spec.get("params", {})
-        subj = params.get("subject")
-        length = int(params.get("length", 2) or 2)
-        if length <= 1:
-            return
-        target_classes = set(params.get("classes") or data["classes"])
-        for a in assignments:
-            if a["subject"] != subj or a["class"] not in target_classes:
-                continue
-            # Rule A: require only floor(weeklyPeriods / length) consecutive blocks.
-            # Any remainder (weeklyPeriods % length) may be scheduled as loose periods;
-            # do not require every subject period to belong to a consecutive block.
-            required_runs = int(a.get("weeklyPeriods", 0)) // length
-            if required_runs <= 0:
-                continue
-            run_vars = []
-            for d in days:
-                day_periods = _periods_for(d)
-                for i in range(0, max(0, len(day_periods) - length + 1)):
-                    window = day_periods[i:i + length]
-                    if len(window) != length or any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
-                        continue
-                    run = model.NewBoolVar(f"run_{a['id']}_{d}_{window[0]}_{length}")
-                    window_vars = [slots[(a["id"], d, p)] for p in window]
-                    for var in window_vars:
-                        model.Add(run <= var)
-                    model.Add(run >= sum(window_vars) - length + 1)
-                    run_vars.append(run)
-            if run_vars:
-                ct = model.Add(sum(run_vars) >= required_runs)
-                if guard is not None:
-                    ct.OnlyEnforceIf(guard)
-
-    def _apply_then_constraint(then_spec, guard):
-        kind = then_spec.get("kind")
-        params = then_spec.get("params", {})
-
-        if kind == "teacher_block_day":
-            t = params.get("teacher")
-            d = params.get("day")
-            for a in assignments:
-                if a["teacher"] == t:
-                    for p in _periods_for(d):
-                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
-
-        elif kind == "teacher_block_period":
-            t = params.get("teacher")
-            p = int(params.get("period"))
-            for a in assignments:
-                if a["teacher"] == t:
-                    for d in days:
-                        if p in _periods_for(d):
-                            model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
-
-        elif kind == "teacher_block_slot":
-            t = params.get("teacher")
-            d = params.get("day")
-            p = int(params.get("period"))
-            if p in _periods_for(d):
-                for a in assignments:
-                    if a["teacher"] == t:
-                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
-
-        elif kind == "teacher_max_per_day":
-            t = params.get("teacher")
-            n = int(params.get("maxPerDay"))
-            teacher_asgs = [a for a in assignments if a["teacher"] == t]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
-                ).OnlyEnforceIf(guard)
-
-        elif kind == "subject_pin_period":
-            subj = params.get("subject")
-            allowed = set(int(x) for x in params.get("periods", []))
-            target_classes = set(params.get("classes") or data["classes"])
-            for a in assignments:
-                if a["subject"] == subj and a["class"] in target_classes:
-                    for d in days:
-                        for p in _periods_for(d):
-                            if p not in allowed:
-                                model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
-
-        elif kind == "class_no_double_subject_day":
-            cls = params.get("class")
-            subj = params.get("subject")
-            max_per_day = int(params.get("maxPerDay", 1) or 1)
-            asgs = [
-                a for a in assignments
-                if a["class"] == cls and (subj is None or a["subject"] == subj)
-            ]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
-                ).OnlyEnforceIf(guard)
-
-        elif kind == "pair_not_same_slot":
-            teachers = params.get("teachers", [])
-            if len(teachers) != 2:
-                return
-            t1, t2 = teachers
-            scope_day = (params.get("scope") or {}).get("day")
-            days_to_check = [scope_day] if scope_day else days
-            asgs1 = [a for a in assignments if a["teacher"] == t1]
-            asgs2 = [a for a in assignments if a["teacher"] == t2]
-            for d in days_to_check:
-                for p in _periods_for(d):
-                    model.Add(
-                        sum(slots[(a["id"], d, p)] for a in asgs1) +
-                        sum(slots[(a["id"], d, p)] for a in asgs2)
-                        <= 1
-                    ).OnlyEnforceIf(guard)
-
-        elif kind == "subject_consecutive":
-            _add_subject_consecutive(then_spec, guard)
-
-        else:
-            raise NotImplementedError(f"Unsupported if_then then kind: {kind}")
-
-    for spec in constraints:
-        kind = spec.get("kind")
-        params = spec.get("params", {})
-        severity = spec.get("severity", "hard")
-
-        if severity != "hard":
-            _add_soft_constraint(spec)
-            continue
-
-        if kind == "weekly_periods_exact":
-            continue
-
-        elif kind == "teacher_block_day":
-            t = params.get("teacher")
-            d = params.get("day")
-            for a in assignments:
-                if a["teacher"] == t:
-                    for p in _periods_for(d):
-                        model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "teacher_block_period":
-            t = params.get("teacher")
-            p = int(params.get("period"))
-            for a in assignments:
-                if a["teacher"] == t:
-                    for d in days:
-                        if p in _periods_for(d):
-                            model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "teacher_block_slot":
-            t = params.get("teacher")
-            d = params.get("day")
-            p = int(params.get("period"))
-            if p in _periods_for(d):
-                for a in assignments:
-                    if a["teacher"] == t:
-                        model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "teacher_max_per_day":
-            t = params.get("teacher")
-            n = int(params.get("maxPerDay"))
-            teacher_asgs = [a for a in assignments if a["teacher"] == t]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
-                )
-
-        elif kind == "teacher_max_consecutive":
-            t = params.get("teacher")
-            n = int(params.get("maxConsecutive"))
-            if n <= 0:
-                # n=0 hoặc âm => teacher không được dạy 2 tiết liên tiếp nào;
-                # với n=0 đặc biệt, không có window length nào hợp lệ,
-                # bỏ qua để tránh tạo ràng buộc vô nghĩa. (fix bug #16)
-                continue
-            teacher_asgs = [a for a in assignments if a["teacher"] == t]
-            for d in days:
-                day_periods = _periods_for(d)
-                # window length = n + 1, slide trên day_periods. Cần
-                # range(len - n) >= 0; bảo vệ khi day_periods quá ngắn.
-                if len(day_periods) <= n:
-                    continue
-                for i in range(len(day_periods) - n):
-                    window = day_periods[i:i + n + 1]
-                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
-                        continue
-                    model.Add(
-                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in window) <= n
-                    )
-
-        elif kind == "subject_pin_period":
-            subj = params.get("subject")
-            allowed = set(int(x) for x in params.get("periods", []))
-            target_classes = set(params.get("classes") or data["classes"])
-            for a in assignments:
-                if a["subject"] == subj and a["class"] in target_classes:
-                    for d in days:
-                        for p in _periods_for(d):
-                            if p not in allowed:
-                                model.Add(slots[(a["id"], d, p)] == 0)
-
-        elif kind == "class_no_double_subject_day":
-            cls = params.get("class")
-            subj = params.get("subject")
-            max_per_day = int(params.get("maxPerDay", 1) or 1)
-            asgs = [
-                a for a in assignments
-                if a["class"] == cls and (subj is None or a["subject"] == subj)
-            ]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
-                )
-
-        elif kind == "pair_not_same_slot":
-            teachers = params.get("teachers", [])
-            if len(teachers) != 2:
-                raise NotImplementedError(f"Invalid pair_not_same_slot: {spec.get('id')}")
-            t1, t2 = teachers
-            scope_day = (params.get("scope") or {}).get("day")
-            days_to_check = [scope_day] if scope_day else days
-            asgs1 = [a for a in assignments if a["teacher"] == t1]
-            asgs2 = [a for a in assignments if a["teacher"] == t2]
-
-            for d in days_to_check:
-                for p in _periods_for(d):
-                    model.Add(
-                        sum(slots[(a["id"], d, p)] for a in asgs1) +
-                        sum(slots[(a["id"], d, p)] for a in asgs2)
-                        <= 1
-                    )
-
-        elif kind == "subject_consecutive":
-            _add_subject_consecutive(spec)
-
-        elif kind == "class_subjects_not_same_day":
-            _add_class_subjects_not_same_day(spec)
-
-        elif kind == "teacher_max_working_days":
-            _add_teacher_max_working_days(spec)
-
-        elif kind == "subject_max_consecutive":
-            _add_subject_max_consecutive(spec)
-
-        elif kind == "resource_capacity":
-            subj = params.get("subject")
-            capacity = int(params.get("capacity", 1))
-            for d in days:
-                for p in _periods_for(d):
-                    slot_vars = [
-                        slots[(a["id"], d, p)]
-                        for a in assignments
-                        if a["subject"] == subj
-                    ]
-                    if slot_vars:
-                        model.Add(sum(slot_vars) <= capacity)
-
-        elif kind == "session_limit":
-            teacher = params.get("teacher")
-            max_periods = int(params.get("maxPeriods", 1))
-            session_name = params.get("session")
-            session_days = params.get("days") or days
-            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
-            for d in session_days:
-                session_periods = _periods_for(d)
-                if session_name:
-                    day_sessions = data.get("sessions", [])
-                    session_obj = next((s for s in day_sessions if s.get("id") == session_name or s.get("label") == session_name), None)
-                    if session_obj:
-                        session_periods = [
-                            p for p in session_periods
-                            if any(
-                                p >= offset + 1 and p <= offset + int(data.get("periodCounts", {}).get(session_obj["id"], 0))
-                                for offset in [sum(int(data.get("periodCounts", {}).get(s2["id"], 0)) for s2 in day_sessions[:i])]
-                                for i, s2 in enumerate(day_sessions)
-                                if s2["id"] == session_obj["id"]
-                            )
-                        ]
-                slot_vars = [
-                    slots[(a["id"], d, p)]
-                    for a in teacher_asgs
-                    for p in session_periods
-                ]
-                if slot_vars:
-                    model.Add(sum(slot_vars) <= max_periods)
-
-        elif kind == "subject_group":
-            pass  # Definition only, resolved by subject_group_daily_limit
-
-        elif kind == "subject_group_daily_limit":
-            group_name = params.get("groupName")
-            max_per_day = int(params.get("maxPerDay", 1))
-            target_class = params.get("class")
-            group_specs = [
-                s for s in constraints
-                if s.get("kind") == "subject_group"
-                and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
-            ]
-            group_subjects = set()
-            for gs in group_specs:
-                src = gs.get("params", {}) or {}
-                for s in (src.get("subjects") or gs.get("subjects", [])):
-                    group_subjects.add(s)
-            target_classes = [target_class] if target_class else classes
-            for cls in target_classes:
-                cls_asgs = [a for a in assignments if a["class"] == cls and a["subject"] in group_subjects]
-                for d in days:
-                    slot_vars = [
-                        slots[(a["id"], d, p)]
-                        for a in cls_asgs
-                        for p in _periods_for(d)
-                    ]
-                    if slot_vars:
-                        model.Add(sum(slot_vars) <= max_per_day)
-
-        elif kind == "if_then":
-            condition = params.get("if")
-            then_specs = params.get("then", [])
-            if condition and isinstance(then_specs, list):
-                guard = _build_condition_literal(condition)
-                for then_spec in then_specs:
-                    if isinstance(then_spec, dict):
-                        _apply_then_constraint(then_spec, guard)
-
-        elif kind == "custom_dsl":
-            # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
-            # custom_dsl specs (không lặp lại per-spec). (fix bug #5)
-            continue
-
-        else:
-            raise NotImplementedError(
-                f"Unsupported HARD constraint kind in solver skeleton: {kind} (id={spec.get('id')})"
-            )
-
-    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
-    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
-    # nên để generated code tự quyết định no-op khi không có custom hard specs.
-    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
-    # <<< AI_FILL_HERE >>>
-    pass
-
-    return soft_terms
-
-
-soft_terms = build_custom_constraints(model, slots, data)
-
-solver = cp_model.CpSolver()
-# Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
-# timeoutMs phía Node (fix bug #29).
-try:
-    _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
-except Exception:
-    _max_seconds = 60.0
-try:
-    _workers = int(_os.environ.get("SOLVER_WORKERS", "") or 8)
-except Exception:
-    _workers = 8
-solver.parameters.num_search_workers = max(1, _workers)
-try:
-    solver.parameters.random_seed = int(_os.environ.get("SOLVER_RANDOM_SEED", "") or 42)
-except Exception:
-    solver.parameters.random_seed = 42
-
-best_values = None
-
-if soft_terms:
-    phase1 = max(5.0, _max_seconds * 0.4)
-    solver.parameters.max_time_in_seconds = phase1
-    status = solver.Solve(model)
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        best_values = {key: solver.Value(var) for key, var in slots.items()}
-        for key, var in slots.items():
-            model.AddHint(var, best_values[key])
-
-    model.Minimize(sum(int(weight) * var for (weight, var) in soft_terms))
-    phase2 = max(5.0, _max_seconds - phase1)
-    solver.parameters.max_time_in_seconds = phase2
-    status2 = solver.Solve(model)
-    if status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        best_values = {key: solver.Value(var) for key, var in slots.items()}
-        status = status2
-else:
-    solver.parameters.max_time_in_seconds = _max_seconds
-    status = solver.Solve(model)
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        best_values = {key: solver.Value(var) for key, var in slots.items()}
-
-result = {
-    "classes": classes,
-    "days": days,
-    "periods": periods,
-    "assignments": assignments,
-    "status": solver.StatusName(status).lower(),
-    "schedule": [],
-}
-
-if best_values is not None:
-    for a in assignments:
-        for d in days:
-            for p in periods_for_day(d):
-                if best_values.get((a["id"], d, p)) == 1:
-                    result["schedule"].append(
-                        {
-                            "assignmentId": a["id"],
-                            "class": a["class"],
-                            "day": d,
-                            "period": p,
-                            "subject": a["subject"],
-                            "teacher": a["teacher"],
-                        }
-                    )
-    with open("result.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
-    print("SOLUTION_FOUND")
-else:
-    with open("result.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
-    print(f"NO_SOLUTION:{solver.StatusName(status)}")
-</file>
-
 <file path="python/code_executor.py">
 #!/usr/bin/env python3
 
@@ -10243,6 +9473,394 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+</file>
+
+<file path="src/features/timetable/ai/local-agent.test.ts">
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { __localAgentInternal, runLocalAgent } from './local-agent';
+
+test('buildViolationSignature normalizes roundtrip dynamic assignment ids', () => {
+  const signatureA = __localAgentInternal.buildViolationSignature(
+    [],
+    false,
+    'Schedule entry không khớp assignment asg_12345'
+  );
+  const signatureB = __localAgentInternal.buildViolationSignature(
+    [],
+    false,
+    'Schedule entry không khớp assignment asg_67890'
+  );
+  assert.equal(signatureA, signatureB);
+  assert.match(signatureA, /rt:fail:/);
+});
+
+test('buildViolationSignature distinguishes pass/fail roundtrip states', () => {
+  const failSignature = __localAgentInternal.buildViolationSignature([], false, 'roundtrip failed');
+  const okSignature = __localAgentInternal.buildViolationSignature([], true, 'roundtrip failed');
+  assert.notEqual(failSignature, okSignature);
+  assert.match(okSignature, /rt:ok$/);
+});
+
+test('buildCoderExhaustedMessage includes the last actionable failure', () => {
+  assert.equal(
+    __localAgentInternal.buildCoderExhaustedMessage('RuntimeError: bad generated code'),
+    'Coder could not produce an executable schedule. Last failure: RuntimeError: bad generated code'
+  );
+});
+
+test('runLocalAgent repairs runtime failures before returning coder exhausted', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let coderCalls = 0;
+  let repairPayload: {
+    currentCode?: string;
+    constraintCode?: string;
+    compileOrRunError?: string;
+  } | null = null;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+
+    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
+    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
+    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
+    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+
+    if (url.endsWith('/api/ai/chat')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      const systemPrompt = body.messages?.[0]?.content;
+
+      if (systemPrompt === 'translator') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            constraintSpecs: [
+              { id: 'c1', original: 'custom runtime guard', severity: 'hard', kind: 'custom_dsl', params: {} },
+            ],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'planner') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            decisionVars: 'slots[(assignment_id, day, period)]',
+            domainSize: { classes: 1, days: 1, periods: 1 },
+            constraintOrder: [],
+            reifiedNeeded: [],
+            objective: 'none',
+            templatesUsed: [],
+            risks: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'coder') {
+        coderCalls += 1;
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            plan_summary: 'bad runtime code',
+            constraint_code: "# c1\nraise RuntimeError('bad')",
+            covered_constraint_ids: [],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'repair') {
+        repairPayload = JSON.parse(body.messages?.[1]?.content ?? '{}');
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            summary: 'remove runtime failure',
+            patches: [
+              {
+                oldStr: "raise RuntimeError('bad')",
+                newStr: 'pass',
+                reason: 'replace failing statement with no-op',
+              },
+            ],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+    }
+
+    if (url.endsWith('/api/ai/python-syntax-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-ast-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-execute')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { code?: string };
+      if (body.code?.includes("raise RuntimeError('bad')")) {
+        return Response.json({
+          ok: true,
+          result: {
+            phase: 'run',
+            ok: false,
+            status: 'crashed',
+            durationMs: 1,
+            errorDigest: 'RuntimeError: bad',
+          },
+        });
+      }
+
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['mon'],
+            periods: [1],
+            schedule: [{ class: '6A', day: 'mon', period: 1, subject: 'Math', teacher: 'Lan' }],
+          },
+        },
+      });
+    }
+
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [
+          { id: 'mon', label: 'Thứ 2' },
+          { id: 'tue', label: 'Thứ 3' },
+        ],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { mon: 1, tue: 1 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'a1',
+            class: { id: 'c1', label: '6A' },
+            subject: { id: 'math', label: 'Math' },
+            teacher: { id: 't1', label: 'Lan' },
+            weeklyPeriods: 1,
+          },
+          {
+            id: 'a2',
+            class: { id: 'c1', label: '6A' },
+            subject: { id: 'literature', label: 'Văn' },
+            teacher: { id: 't2', label: 'Sơn' },
+            weeklyPeriods: 0,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
+    );
+
+    assert.equal(result.success, false);
+    assert.match(result.error ?? '', /Coder could not produce an executable schedule/i);
+    assert.ok(coderCalls >= 3);
+    assert.equal(repairPayload?.currentCode, "# c1\npass");
+    assert.equal(repairPayload?.constraintCode, "# c1\npass");
+    assert.equal(repairPayload?.compileOrRunError, "");
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
+
+test('runLocalAgent returns a clear repeated-violation error instead of stopped early', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let repairCalls = 0;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+
+    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
+    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
+    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
+    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+
+    if (url.endsWith('/api/ai/chat')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      const systemPrompt = body.messages?.[0]?.content;
+
+      if (systemPrompt === 'translator') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({ constraintSpecs: [] }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'planner') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            decisionVars: 'slots[(assignment_id, day, period)]',
+            domainSize: { classes: 1, days: 1, periods: 1 },
+            constraintOrder: [],
+            reifiedNeeded: [],
+            objective: 'none',
+            templatesUsed: [],
+            risks: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'coder') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            plan_summary: 'valid code but invalid schedule',
+            constraint_code: 'pass',
+            covered_constraint_ids: [],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+
+      if (systemPrompt === 'repair') {
+        repairCalls += 1;
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            summary: 'no effective repair',
+            patches: [{ oldStr: 'pass', newStr: 'pass', reason: 'leave unchanged' }],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+    }
+
+    if (url.endsWith('/api/ai/python-syntax-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-ast-check')) {
+      return Response.json({ ok: true, result: { ok: true } });
+    }
+
+    if (url.endsWith('/api/ai/python-execute')) {
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['mon'],
+            periods: [1],
+            schedule: [],
+          },
+        },
+      });
+    }
+
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'mon', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { mon: 1 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'a1',
+            class: { id: 'c1', label: '6A' },
+            subject: { id: 'math', label: 'Math' },
+            teacher: { id: 't1', label: 'Lan' },
+            weeklyPeriods: 1,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(repairCalls, 2);
+    assert.match(result.error ?? '', /^Không tạo được thời khóa biểu/);
+    assert.doesNotMatch(result.error ?? '', /Stopped early/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
+</file>
+
+<file path="README.md">
+# Tack Timetable
+
+AI-assisted timetable generator built with Next.js + React + TypeScript, with local Coder/Reviewer loop and Python execution bridge.
+
+## Active app
+
+- App entry: [`src/app/page.tsx`](src/app/page.tsx)
+- Layout + global styles: [`src/app/layout.tsx`](src/app/layout.tsx), [`src/app/globals.css`](src/app/globals.css)
+- Main feature UI: [`src/features/timetable/TimetableApp.tsx`](src/features/timetable/TimetableApp.tsx)
+
+## Current API routes
+
+- Provider connectivity test: [`POST /api/provider/test`](src/app/api/provider/test/route.ts:9)
+- Server-side LLM chat proxy: [`POST /api/ai/chat`](src/app/api/ai/chat/route.ts:19)
+
+## AI execution flow (current)
+
+1. User configures provider in UI ([`SettingsModal`](src/features/timetable/SettingsModal.tsx:21)).
+2. Orchestrator runs in browser ([`runLocalAgent`](src/features/timetable/ai/local-agent.ts:18)).
+3. Coder and Reviewer call LLM through server route ([`/api/ai/chat`](src/app/api/ai/chat/route.ts:19)).
+4. Generated Python is executed through bridge ([`executeGeneratedCode`](src/features/timetable/ai/python-bridge.ts:20)).
+5. Result is rendered as timetable table and exported to Excel in UI ([`handleDownloadExcel`](src/features/timetable/TimetableApp.tsx:1135)).
+
+## Important behavior notes
+
+- Reviewer reject is enforced and retried with bounded rounds in [`runLocalAgent`](src/features/timetable/ai/local-agent.ts:18).
+- Browser-side fake execution stub has been removed; if IPC is missing, bridge throws explicit error in [`python-bridge.ts`](src/features/timetable/ai/python-bridge.ts:20).
+
+## Run locally
+
+- Install: `npm install`
+- Dev: `npm run dev`
+- Build: `npm run build`
+- Lint: `npm run lint`
+
+## Security
+
+- Do not commit real secrets from `.env*`.
+- Keep provider/API keys out of source files and docs.
 </file>
 
 <file path="src/features/timetable/ai/deterministic-validator.ts">
@@ -11019,392 +10637,788 @@ export function validateSchedule(
 }
 </file>
 
-<file path="src/features/timetable/ai/local-agent.test.ts">
-import assert from 'node:assert/strict';
-import test from 'node:test';
+<file path="python/templates/solver_skeleton.py">
+import json
+import os as _os
+from ortools.sat.python import cp_model
 
-import { __localAgentInternal, runLocalAgent } from './local-agent';
+with open("input.json", encoding="utf-8") as f:
+    data = json.load(f)
 
-test('buildViolationSignature normalizes roundtrip dynamic assignment ids', () => {
-  const signatureA = __localAgentInternal.buildViolationSignature(
-    [],
-    false,
-    'Schedule entry không khớp assignment asg_12345'
-  );
-  const signatureB = __localAgentInternal.buildViolationSignature(
-    [],
-    false,
-    'Schedule entry không khớp assignment asg_67890'
-  );
-  assert.equal(signatureA, signatureB);
-  assert.match(signatureA, /rt:fail:/);
-});
+classes = data["classes"]
+days = data["days"]
+periods = data["periods"]
+periods_by_day = data.get("periodsByDay") or {}
+assignments = data["assignments"]
+constraints = data["constraints"]
 
-test('buildViolationSignature distinguishes pass/fail roundtrip states', () => {
-  const failSignature = __localAgentInternal.buildViolationSignature([], false, 'roundtrip failed');
-  const okSignature = __localAgentInternal.buildViolationSignature([], true, 'roundtrip failed');
-  assert.notEqual(failSignature, okSignature);
-  assert.match(okSignature, /rt:ok$/);
-});
+model = cp_model.CpModel()
 
-test('buildCoderExhaustedMessage includes the last actionable failure', () => {
-  assert.equal(
-    __localAgentInternal.buildCoderExhaustedMessage('RuntimeError: bad generated code'),
-    'Coder could not produce an executable schedule. Last failure: RuntimeError: bad generated code'
-  );
-});
 
-test('runLocalAgent repairs runtime failures before returning coder exhausted', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-  let coderCalls = 0;
-  let repairPayload: {
-    currentCode?: string;
-    constraintCode?: string;
-    compileOrRunError?: string;
-  } | null = null;
+def periods_for_day(day_id):
+    day_periods = periods_by_day.get(day_id)
+    if isinstance(day_periods, list) and day_periods:
+        return day_periods
+    return periods
 
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
 
-    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
-    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
-    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
-    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
-    if (url.endsWith('/templates/solver_skeleton.py')) {
-      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
-    }
+slots = {}
+for a in assignments:
+    for d in days:
+        for p in periods_for_day(d):
+            slots[(a["id"], d, p)] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
 
-    if (url.endsWith('/api/ai/chat')) {
-      const body = JSON.parse(String(init?.body ?? '{}')) as {
-        messages?: Array<{ role: string; content: string }>;
-      };
-      const systemPrompt = body.messages?.[0]?.content;
+# Mỗi assignment đúng weeklyPeriods
+for a in assignments:
+    model.Add(
+        sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
+        == a["weeklyPeriods"]
+    )
 
-      if (systemPrompt === 'translator') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            constraintSpecs: [
-              { id: 'c1', original: 'custom runtime guard', severity: 'hard', kind: 'custom_dsl', params: {} },
-            ],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
+# Mỗi class/day/period tối đa 1 assignment
+for c in classes:
+    for d in days:
+        for p in periods_for_day(d):
+            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["class"] == c) <= 1)
 
-      if (systemPrompt === 'planner') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            decisionVars: 'slots[(assignment_id, day, period)]',
-            domainSize: { classes: 1, days: 1, periods: 1 },
-            constraintOrder: [],
-            reifiedNeeded: [],
-            objective: 'none',
-            templatesUsed: [],
-            risks: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
+# Mỗi teacher/day/period tối đa 1 assignment
+teachers = list({a["teacher"] for a in assignments})
+for t in teachers:
+    for d in days:
+        for p in periods_for_day(d):
+            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["teacher"] == t) <= 1)
 
-      if (systemPrompt === 'coder') {
-        coderCalls += 1;
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            plan_summary: 'bad runtime code',
-            constraint_code: "# c1\nraise RuntimeError('bad')",
-            covered_constraint_ids: [],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
 
-      if (systemPrompt === 'repair') {
-        repairPayload = JSON.parse(body.messages?.[1]?.content ?? '{}');
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            summary: 'remove runtime failure',
-            patches: [
-              {
-                oldStr: "raise RuntimeError('bad')",
-                newStr: 'pass',
-                reason: 'replace failing statement with no-op',
-              },
-            ],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-    }
+def build_custom_constraints(model, slots, data):
+    assignments = data["assignments"]
+    days = data["days"]
+    periods = data["periods"]
+    periods_by_day = data.get("periodsByDay") or {}
+    constraints = data["constraints"]
 
-    if (url.endsWith('/api/ai/python-syntax-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
+    soft_terms = []
 
-    if (url.endsWith('/api/ai/python-ast-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
+    def _periods_for(d):
+        day_periods = periods_by_day.get(d)
+        if isinstance(day_periods, list) and day_periods:
+            return day_periods
+        return periods
 
-    if (url.endsWith('/api/ai/python-execute')) {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { code?: string };
-      if (body.code?.includes("raise RuntimeError('bad')")) {
-        return Response.json({
-          ok: true,
-          result: {
-            phase: 'run',
-            ok: false,
-            status: 'crashed',
-            durationMs: 1,
-            errorDigest: 'RuntimeError: bad',
-          },
-        });
-      }
+    def _soft_weight(spec):
+        weight = spec.get("weight")
+        if weight is None:
+            weight = spec.get("params", {}).get("weight")
+        try:
+            weight = int(weight)
+        except (TypeError, ValueError):
+            weight = 1
+        return max(1, weight)
 
-      return Response.json({
-        ok: true,
-        result: {
-          phase: 'run',
-          ok: true,
-          status: 'optimal',
-          durationMs: 1,
-          resultData: {
-            classes: ['6A'],
-            days: ['mon'],
-            periods: [1],
-            schedule: [{ class: '6A', day: 'mon', period: 1, subject: 'Math', teacher: 'Lan' }],
-          },
-        },
-      });
-    }
+    def _penalize_forbidden_slots(spec, slot_vars):
+        weight = _soft_weight(spec)
+        for var in slot_vars:
+            soft_terms.append((weight, var))
 
-    return new Response('not found', { status: 404 });
-  }) as typeof fetch;
+    def _penalize_excess(spec, count_vars, limit, tag):
+        if not count_vars:
+            return
+        weight = _soft_weight(spec)
+        excess = model.NewIntVar(0, len(count_vars), f"soft_excess_{spec.get('id', 'x')}_{tag}")
+        model.Add(excess >= sum(count_vars) - limit)
+        soft_terms.append((weight, excess))
 
-  try {
-    const result = await runLocalAgent(
-      {
-        days: [
-          { id: 'mon', label: 'Thứ 2' },
-          { id: 'tue', label: 'Thứ 3' },
-        ],
-        sessions: [{ id: 'morning', label: 'Sáng' }],
-        periodCounts: { mon: 1, tue: 1 },
-        deletedPeriods: {},
-        assignments: [
-          {
-            id: 'a1',
-            class: { id: 'c1', label: '6A' },
-            subject: { id: 'math', label: 'Math' },
-            teacher: { id: 't1', label: 'Lan' },
-            weeklyPeriods: 1,
-          },
-          {
-            id: 'a2',
-            class: { id: 'c1', label: '6A' },
-            subject: { id: 'literature', label: 'Văn' },
-            teacher: { id: 't2', label: 'Sơn' },
-            weeklyPeriods: 0,
-          },
-        ],
-        constraints: [],
-      },
-      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
-    );
+    def _resolve_group_subjects(group_name):
+        group_specs = [
+            s for s in constraints
+            if s.get("kind") == "subject_group"
+            and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
+        ]
+        group_subjects = set()
+        for gs in group_specs:
+            src = gs.get("params", {}) or {}
+            for subject in (src.get("subjects") or gs.get("subjects", [])):
+                group_subjects.add(subject)
+        return group_subjects
 
-    assert.equal(result.success, false);
-    assert.match(result.error ?? '', /Coder could not produce an executable schedule/i);
-    assert.ok(coderCalls >= 3);
-    assert.equal(repairPayload?.currentCode, "# c1\npass");
-    assert.equal(repairPayload?.constraintCode, "# c1\npass");
-    assert.equal(repairPayload?.compileOrRunError, "");
-  } finally {
-    globalThis.fetch = originalFetch;
-    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
-  }
-});
+    def _add_class_subjects_not_same_day(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        subjects = params.get("subjects") or []
+        target_class = params.get("class")
+        max_subjects = int(params.get("maxSubjectsPerDay", 1) or 1)
+        if len(subjects) < 2:
+            return
+        target_classes = [target_class] if target_class else data["classes"]
+        for c in target_classes:
+            for d in days:
+                present_vars = []
+                for subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+                    slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                    if not slot_vars:
+                        continue
+                    present = model.NewBoolVar(f"pres_{c}_{subject}_{d}")
+                    model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(present)
+                    model.Add(sum(slot_vars) == 0).OnlyEnforceIf(present.Not())
+                    present_vars.append(present)
+                if len(present_vars) <= max_subjects:
+                    continue
+                if soft_terms_ref is None:
+                    model.Add(sum(present_vars) <= max_subjects)
+                else:
+                    excess = model.NewIntVar(0, len(present_vars), f"soft_pair_{c}_{d}")
+                    model.Add(excess >= sum(present_vars) - max_subjects)
+                    soft_terms_ref.append((_soft_weight(spec), excess))
 
-test('runLocalAgent returns a clear repeated-violation error instead of stopped early', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-  let repairCalls = 0;
+    def _add_teacher_max_working_days(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        teacher = params.get("teacher")
+        total_days = len(days)
+        if params.get("maxDays") is not None:
+            max_days = int(params.get("maxDays"))
+        elif params.get("minDaysOff") is not None:
+            max_days = total_days - int(params.get("minDaysOff"))
+        else:
+            max_days = total_days - 1
+        target_teachers = [teacher] if teacher else list({a["teacher"] for a in assignments})
+        for target_teacher in target_teachers:
+            teacher_asgs = [a for a in assignments if a["teacher"] == target_teacher]
+            work_vars = []
+            for d in days:
+                day_slots = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                if not day_slots:
+                    continue
+                work_var = model.NewBoolVar(f"work_{target_teacher}_{d}")
+                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(work_var)
+                model.Add(sum(day_slots) == 0).OnlyEnforceIf(work_var.Not())
+                work_vars.append(work_var)
+            if not work_vars:
+                continue
+            if soft_terms_ref is None:
+                model.Add(sum(work_vars) <= max_days)
+            else:
+                excess = model.NewIntVar(0, len(work_vars), f"soft_workdays_{target_teacher}")
+                model.Add(excess >= sum(work_vars) - max_days)
+                soft_terms_ref.append((_soft_weight(spec), excess))
 
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
+    def _add_subject_max_consecutive(spec, soft_terms_ref=None):
+        params = spec.get("params", {})
+        subject = params.get("subject")
+        max_consecutive = int(params.get("maxConsecutive", 1) or 1)
+        if max_consecutive <= 0:
+            return
+        target_classes = set(params.get("classes") or data["classes"])
+        window_length = max_consecutive + 1
+        for c in target_classes:
+            asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+            if not asgs:
+                continue
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(0, max(0, len(day_periods) - window_length + 1)):
+                    window = day_periods[i:i + window_length]
+                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    window_slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in window]
+                    if soft_terms_ref is None:
+                        model.Add(sum(window_slot_vars) <= max_consecutive)
+                    else:
+                        over = model.NewBoolVar(f"soft_consec_{c}_{subject}_{d}_{window[0]}")
+                        model.Add(sum(window_slot_vars) >= window_length).OnlyEnforceIf(over)
+                        model.Add(sum(window_slot_vars) <= window_length - 1).OnlyEnforceIf(over.Not())
+                        soft_terms_ref.append((_soft_weight(spec), over))
 
-    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
-    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
-    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
-    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
-    if (url.endsWith('/templates/solver_skeleton.py')) {
-      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
-    }
+    def _add_soft_constraint(spec):
+        kind = spec.get("kind")
+        params = spec.get("params", {})
 
-    if (url.endsWith('/api/ai/chat')) {
-      const body = JSON.parse(String(init?.body ?? '{}')) as {
-        messages?: Array<{ role: string; content: string }>;
-      };
-      const systemPrompt = body.messages?.[0]?.content;
+        if kind == "subject_pin_period":
+            subject = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            forbidden = []
+            for a in assignments:
+                if a["subject"] == subject and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                forbidden.append(slots[(a["id"], d, p)])
+            _penalize_forbidden_slots(spec, forbidden)
 
-      if (systemPrompt === 'translator') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({ constraintSpecs: [] }),
-          usage: { total_tokens: 1 },
-        });
-      }
+        elif kind == "teacher_block_day":
+            teacher = params.get("teacher")
+            day = params.get("day")
+            forbidden = [
+                slots[(a["id"], day, p)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for p in _periods_for(day)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
 
-      if (systemPrompt === 'planner') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            decisionVars: 'slots[(assignment_id, day, period)]',
-            domainSize: { classes: 1, days: 1, periods: 1 },
-            constraintOrder: [],
-            reifiedNeeded: [],
-            objective: 'none',
-            templatesUsed: [],
-            risks: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
+        elif kind == "teacher_block_period":
+            teacher = params.get("teacher")
+            period = int(params.get("period"))
+            forbidden = [
+                slots[(a["id"], d, period)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for d in days
+                if period in _periods_for(d)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
 
-      if (systemPrompt === 'coder') {
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            plan_summary: 'valid code but invalid schedule',
-            constraint_code: 'pass',
-            covered_constraint_ids: [],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
+        elif kind == "teacher_block_slot":
+            teacher = params.get("teacher")
+            day = params.get("day")
+            period = int(params.get("period"))
+            forbidden = [
+                slots[(a["id"], day, period)]
+                for a in assignments
+                if a["teacher"] == teacher
+                if period in _periods_for(day)
+            ]
+            _penalize_forbidden_slots(spec, forbidden)
 
-      if (systemPrompt === 'repair') {
-        repairCalls += 1;
-        return Response.json({
-          ok: true,
-          content: JSON.stringify({
-            summary: 'no effective repair',
-            patches: [{ oldStr: 'pass', newStr: 'pass', reason: 'leave unchanged' }],
-            assumptions: [],
-          }),
-          usage: { total_tokens: 1 },
-        });
-      }
-    }
+        elif kind == "teacher_max_per_day":
+            teacher = params.get("teacher")
+            if teacher is None or params.get("maxPerDay") is None:
+                return
+            limit = int(params.get("maxPerDay"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in days:
+                count_vars = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                _penalize_excess(spec, count_vars, limit, f"{teacher}_{d}")
 
-    if (url.endsWith('/api/ai/python-syntax-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
+        elif kind == "class_no_double_subject_day":
+            target_class = params.get("class")
+            subject = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                subjects = {subject} if subject else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        count_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                        _penalize_excess(spec, count_vars, max_per_day, f"{c}_{current_subject}_{d}")
 
-    if (url.endsWith('/api/ai/python-ast-check')) {
-      return Response.json({ ok: true, result: { ok: true } });
-    }
+        elif kind == "subject_group_daily_limit":
+            group_name = params.get("groupName")
+            max_per_day = int(params.get("maxPerDay", 1))
+            target_class = params.get("class")
+            group_subjects = _resolve_group_subjects(group_name)
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                class_assignments = [
+                    a for a in assignments if a["class"] == c and a["subject"] in group_subjects
+                ]
+                for d in days:
+                    count_vars = [slots[(a["id"], d, p)] for a in class_assignments for p in _periods_for(d)]
+                    _penalize_excess(spec, count_vars, max_per_day, f"grp_{c}_{d}")
 
-    if (url.endsWith('/api/ai/python-execute')) {
-      return Response.json({
-        ok: true,
-        result: {
-          phase: 'run',
-          ok: true,
-          status: 'optimal',
-          durationMs: 1,
-          resultData: {
-            classes: ['6A'],
-            days: ['mon'],
-            periods: [1],
-            schedule: [],
-          },
-        },
-      });
-    }
+        elif kind == "class_subjects_not_same_day":
+            _add_class_subjects_not_same_day(spec, soft_terms_ref=soft_terms)
 
-    return new Response('not found', { status: 404 });
-  }) as typeof fetch;
+        elif kind == "teacher_max_working_days":
+            _add_teacher_max_working_days(spec, soft_terms_ref=soft_terms)
 
-  try {
-    const result = await runLocalAgent(
-      {
-        days: [{ id: 'mon', label: 'Thứ 2' }],
-        sessions: [{ id: 'morning', label: 'Sáng' }],
-        periodCounts: { mon: 1 },
-        deletedPeriods: {},
-        assignments: [
-          {
-            id: 'a1',
-            class: { id: 'c1', label: '6A' },
-            subject: { id: 'math', label: 'Math' },
-            teacher: { id: 't1', label: 'Lan' },
-            weeklyPeriods: 1,
-          },
-        ],
-        constraints: [],
-      },
-      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
-    );
+        elif kind == "subject_max_consecutive":
+            _add_subject_max_consecutive(spec, soft_terms_ref=soft_terms)
 
-    assert.equal(result.success, false);
-    assert.equal(repairCalls, 2);
-    assert.match(result.error ?? '', /^Không tạo được thời khóa biểu/);
-    assert.doesNotMatch(result.error ?? '', /Stopped early/i);
-  } finally {
-    globalThis.fetch = originalFetch;
-    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
-  }
-});
-</file>
+        else:
+            return
 
-<file path="README.md">
-# Tack Timetable
+    def _build_condition_literal(condition):
+        op = condition.get("op") if isinstance(condition, dict) else None
+        lit = model.NewBoolVar(f"if_then_cond_{abs(hash(str(condition))) % 100000000}")
 
-AI-assisted timetable generator built with Next.js + React + TypeScript, with local Coder/Reviewer loop and Python execution bridge.
+        if op == "teacher_teaches_on_day":
+            teacher = condition.get("teacher")
+            day = condition.get("day")
+            day_slots = [
+                slots[(a["id"], day, p)]
+                for a in assignments
+                if a["teacher"] == teacher
+                for p in _periods_for(day)
+            ]
+            if day_slots:
+                model.Add(sum(day_slots) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(day_slots) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
 
-## Active app
+        if op == "teacher_teaches_at_slot":
+            teacher = condition.get("teacher")
+            day = condition.get("day")
+            period = int(condition.get("period"))
+            slot_vars = [
+                slots[(a["id"], day, period)]
+                for a in assignments
+                if a["teacher"] == teacher and period in _periods_for(day)
+            ]
+            if slot_vars:
+                model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(slot_vars) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
 
-- App entry: [`src/app/page.tsx`](src/app/page.tsx)
-- Layout + global styles: [`src/app/layout.tsx`](src/app/layout.tsx), [`src/app/globals.css`](src/app/globals.css)
-- Main feature UI: [`src/features/timetable/TimetableApp.tsx`](src/features/timetable/TimetableApp.tsx)
+        if op == "and":
+            args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
+            if not args:
+                model.Add(lit == 0)
+                return lit
+            for arg in args:
+                model.Add(lit <= arg)
+            model.Add(lit >= sum(args) - len(args) + 1)
+            return lit
 
-## Current API routes
+        if op == "or":
+            args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
+            if not args:
+                model.Add(lit == 0)
+                return lit
+            for arg in args:
+                model.Add(lit >= arg)
+            model.Add(lit <= sum(args))
+            return lit
 
-- Provider connectivity test: [`POST /api/provider/test`](src/app/api/provider/test/route.ts:9)
-- Server-side LLM chat proxy: [`POST /api/ai/chat`](src/app/api/ai/chat/route.ts:19)
+        if op == "not":
+            arg = _build_condition_literal(condition.get("arg", {}))
+            model.Add(lit + arg == 1)
+            return lit
 
-## AI execution flow (current)
+        model.Add(lit == 0)
+        return lit
 
-1. User configures provider in UI ([`SettingsModal`](src/features/timetable/SettingsModal.tsx:21)).
-2. Orchestrator runs in browser ([`runLocalAgent`](src/features/timetable/ai/local-agent.ts:18)).
-3. Coder and Reviewer call LLM through server route ([`/api/ai/chat`](src/app/api/ai/chat/route.ts:19)).
-4. Generated Python is executed through bridge ([`executeGeneratedCode`](src/features/timetable/ai/python-bridge.ts:20)).
-5. Result is rendered as timetable table and exported to Excel in UI ([`handleDownloadExcel`](src/features/timetable/TimetableApp.tsx:1135)).
+    def _add_subject_consecutive(spec, guard=None):
+        params = spec.get("params", {})
+        subj = params.get("subject")
+        length = int(params.get("length", 2) or 2)
+        if length <= 1:
+            return
+        target_classes = set(params.get("classes") or data["classes"])
+        for a in assignments:
+            if a["subject"] != subj or a["class"] not in target_classes:
+                continue
+            # Rule A: require only floor(weeklyPeriods / length) consecutive blocks.
+            # Any remainder (weeklyPeriods % length) may be scheduled as loose periods;
+            # do not require every subject period to belong to a consecutive block.
+            required_runs = int(a.get("weeklyPeriods", 0)) // length
+            if required_runs <= 0:
+                continue
+            run_vars = []
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(0, max(0, len(day_periods) - length + 1)):
+                    window = day_periods[i:i + length]
+                    if len(window) != length or any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    run = model.NewBoolVar(f"run_{a['id']}_{d}_{window[0]}_{length}")
+                    window_vars = [slots[(a["id"], d, p)] for p in window]
+                    for var in window_vars:
+                        model.Add(run <= var)
+                    model.Add(run >= sum(window_vars) - length + 1)
+                    run_vars.append(run)
+            if run_vars:
+                ct = model.Add(sum(run_vars) >= required_runs)
+                if guard is not None:
+                    ct.OnlyEnforceIf(guard)
 
-## Important behavior notes
+    def _apply_then_constraint(then_spec, guard):
+        kind = then_spec.get("kind")
+        params = then_spec.get("params", {})
 
-- Reviewer reject is enforced and retried with bounded rounds in [`runLocalAgent`](src/features/timetable/ai/local-agent.ts:18).
-- Browser-side fake execution stub has been removed; if IPC is missing, bridge throws explicit error in [`python-bridge.ts`](src/features/timetable/ai/python-bridge.ts:20).
+        if kind == "teacher_block_day":
+            t = params.get("teacher")
+            d = params.get("day")
+            for a in assignments:
+                if a["teacher"] == t:
+                    for p in _periods_for(d):
+                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
 
-## Run locally
+        elif kind == "teacher_block_period":
+            t = params.get("teacher")
+            p = int(params.get("period"))
+            for a in assignments:
+                if a["teacher"] == t:
+                    for d in days:
+                        if p in _periods_for(d):
+                            model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
 
-- Install: `npm install`
-- Dev: `npm run dev`
-- Build: `npm run build`
-- Lint: `npm run lint`
+        elif kind == "teacher_block_slot":
+            t = params.get("teacher")
+            d = params.get("day")
+            p = int(params.get("period"))
+            if p in _periods_for(d):
+                for a in assignments:
+                    if a["teacher"] == t:
+                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
 
-## Security
+        elif kind == "teacher_max_per_day":
+            t = params.get("teacher")
+            if t is None or params.get("maxPerDay") is None:
+                pass
+            else:
+                n = int(params.get("maxPerDay"))
+                teacher_asgs = [a for a in assignments if a["teacher"] == t]
+                for d in days:
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                    ).OnlyEnforceIf(guard)
 
-- Do not commit real secrets from `.env*`.
-- Keep provider/API keys out of source files and docs.
+        elif kind == "subject_pin_period":
+            subj = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            for a in assignments:
+                if a["subject"] == subj and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+
+        elif kind == "class_no_double_subject_day":
+            cls = params.get("class")
+            subj = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
+            target_classes = [cls] if cls else data["classes"]
+            for c in target_classes:
+                subjects = {subj} if subj else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        model.Add(
+                            sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
+                        ).OnlyEnforceIf(guard)
+
+        elif kind == "pair_not_same_slot":
+            teachers = params.get("teachers", [])
+            if len(teachers) != 2:
+                return
+            t1, t2 = teachers
+            scope_day = (params.get("scope") or {}).get("day")
+            days_to_check = [scope_day] if scope_day else days
+            asgs1 = [a for a in assignments if a["teacher"] == t1]
+            asgs2 = [a for a in assignments if a["teacher"] == t2]
+            for d in days_to_check:
+                for p in _periods_for(d):
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in asgs1) +
+                        sum(slots[(a["id"], d, p)] for a in asgs2)
+                        <= 1
+                    ).OnlyEnforceIf(guard)
+
+        elif kind == "subject_consecutive":
+            _add_subject_consecutive(then_spec, guard)
+
+        else:
+            raise NotImplementedError(f"Unsupported if_then then kind: {kind}")
+
+    for spec in constraints:
+        kind = spec.get("kind")
+        params = spec.get("params", {})
+        severity = spec.get("severity", "hard")
+
+        if severity != "hard":
+            _add_soft_constraint(spec)
+            continue
+
+        if kind == "weekly_periods_exact":
+            continue
+
+        elif kind == "teacher_block_day":
+            t = params.get("teacher")
+            d = params.get("day")
+            for a in assignments:
+                if a["teacher"] == t:
+                    for p in _periods_for(d):
+                        model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "teacher_block_period":
+            t = params.get("teacher")
+            p = int(params.get("period"))
+            for a in assignments:
+                if a["teacher"] == t:
+                    for d in days:
+                        if p in _periods_for(d):
+                            model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "teacher_block_slot":
+            t = params.get("teacher")
+            d = params.get("day")
+            p = int(params.get("period"))
+            if p in _periods_for(d):
+                for a in assignments:
+                    if a["teacher"] == t:
+                        model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "teacher_max_per_day":
+            t = params.get("teacher")
+            if t is None or params.get("maxPerDay") is None:
+                continue
+            n = int(params.get("maxPerDay"))
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            for d in days:
+                model.Add(
+                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                )
+
+        elif kind == "teacher_max_consecutive":
+            t = params.get("teacher")
+            if t is None or params.get("maxConsecutive") is None:
+                continue
+            n = int(params.get("maxConsecutive"))
+            if n <= 0:
+                # n=0 hoặc âm => teacher không được dạy 2 tiết liên tiếp nào;
+                # với n=0 đặc biệt, không có window length nào hợp lệ,
+                # bỏ qua để tránh tạo ràng buộc vô nghĩa. (fix bug #16)
+                continue
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            for d in days:
+                day_periods = _periods_for(d)
+                # window length = n + 1, slide trên day_periods. Cần
+                # range(len - n) >= 0; bảo vệ khi day_periods quá ngắn.
+                if len(day_periods) <= n:
+                    continue
+                for i in range(len(day_periods) - n):
+                    window = day_periods[i:i + n + 1]
+                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                        continue
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in window) <= n
+                    )
+
+        elif kind == "subject_pin_period":
+            subj = params.get("subject")
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            for a in assignments:
+                if a["subject"] == subj and a["class"] in target_classes:
+                    for d in days:
+                        for p in _periods_for(d):
+                            if p not in allowed:
+                                model.Add(slots[(a["id"], d, p)] == 0)
+
+        elif kind == "class_no_double_subject_day":
+            cls = params.get("class")
+            subj = params.get("subject")
+            max_per_day = int(params.get("maxPerDay", 1) or 1)
+            target_classes = [cls] if cls else data["classes"]
+            for c in target_classes:
+                subjects = {subj} if subj else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        model.Add(
+                            sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
+                        )
+
+        elif kind == "pair_not_same_slot":
+            teachers = params.get("teachers", [])
+            if len(teachers) != 2:
+                raise NotImplementedError(f"Invalid pair_not_same_slot: {spec.get('id')}")
+            t1, t2 = teachers
+            scope_day = (params.get("scope") or {}).get("day")
+            days_to_check = [scope_day] if scope_day else days
+            asgs1 = [a for a in assignments if a["teacher"] == t1]
+            asgs2 = [a for a in assignments if a["teacher"] == t2]
+
+            for d in days_to_check:
+                for p in _periods_for(d):
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in asgs1) +
+                        sum(slots[(a["id"], d, p)] for a in asgs2)
+                        <= 1
+                    )
+
+        elif kind == "subject_consecutive":
+            _add_subject_consecutive(spec)
+
+        elif kind == "class_subjects_not_same_day":
+            _add_class_subjects_not_same_day(spec)
+
+        elif kind == "teacher_max_working_days":
+            _add_teacher_max_working_days(spec)
+
+        elif kind == "subject_max_consecutive":
+            _add_subject_max_consecutive(spec)
+
+        elif kind == "resource_capacity":
+            subj = params.get("subject")
+            capacity = int(params.get("capacity", 1))
+            for d in days:
+                for p in _periods_for(d):
+                    slot_vars = [
+                        slots[(a["id"], d, p)]
+                        for a in assignments
+                        if a["subject"] == subj
+                    ]
+                    if slot_vars:
+                        model.Add(sum(slot_vars) <= capacity)
+
+        elif kind == "session_limit":
+            teacher = params.get("teacher")
+            max_periods = int(params.get("maxPeriods", 1))
+            session_name = params.get("session")
+            session_days = params.get("days") or days
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in session_days:
+                session_periods = _periods_for(d)
+                if session_name:
+                    day_sessions = data.get("sessions", [])
+                    session_obj = next((s for s in day_sessions if s.get("id") == session_name or s.get("label") == session_name), None)
+                    if session_obj:
+                        session_periods = [
+                            p for p in session_periods
+                            if any(
+                                p >= offset + 1 and p <= offset + int(data.get("periodCounts", {}).get(session_obj["id"], 0))
+                                for offset in [sum(int(data.get("periodCounts", {}).get(s2["id"], 0)) for s2 in day_sessions[:i])]
+                                for i, s2 in enumerate(day_sessions)
+                                if s2["id"] == session_obj["id"]
+                            )
+                        ]
+                slot_vars = [
+                    slots[(a["id"], d, p)]
+                    for a in teacher_asgs
+                    for p in session_periods
+                ]
+                if slot_vars:
+                    model.Add(sum(slot_vars) <= max_periods)
+
+        elif kind == "subject_group":
+            pass  # Definition only, resolved by subject_group_daily_limit
+
+        elif kind == "subject_group_daily_limit":
+            group_name = params.get("groupName")
+            max_per_day = int(params.get("maxPerDay", 1))
+            target_class = params.get("class")
+            group_specs = [
+                s for s in constraints
+                if s.get("kind") == "subject_group"
+                and (s.get("params", {}).get("name") == group_name or s.get("name") == group_name)
+            ]
+            group_subjects = set()
+            for gs in group_specs:
+                src = gs.get("params", {}) or {}
+                for s in (src.get("subjects") or gs.get("subjects", [])):
+                    group_subjects.add(s)
+            target_classes = [target_class] if target_class else classes
+            for cls in target_classes:
+                cls_asgs = [a for a in assignments if a["class"] == cls and a["subject"] in group_subjects]
+                for d in days:
+                    slot_vars = [
+                        slots[(a["id"], d, p)]
+                        for a in cls_asgs
+                        for p in _periods_for(d)
+                    ]
+                    if slot_vars:
+                        model.Add(sum(slot_vars) <= max_per_day)
+
+        elif kind == "if_then":
+            condition = params.get("if")
+            then_specs = params.get("then", [])
+            if condition and isinstance(then_specs, list):
+                guard = _build_condition_literal(condition)
+                for then_spec in then_specs:
+                    if isinstance(then_spec, dict):
+                        _apply_then_constraint(then_spec, guard)
+
+        elif kind == "custom_dsl":
+            # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
+            # custom_dsl specs (không lặp lại per-spec). (fix bug #5)
+            continue
+
+        else:
+            raise NotImplementedError(
+                f"Unsupported HARD constraint kind in solver skeleton: {kind} (id={spec.get('id')})"
+            )
+
+    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
+    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
+    # nên để generated code tự quyết định no-op khi không có custom hard specs.
+    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
+    # <<< AI_FILL_HERE >>>
+    pass
+
+    return soft_terms
+
+
+soft_terms = build_custom_constraints(model, slots, data)
+
+solver = cp_model.CpSolver()
+# Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
+# timeoutMs phía Node (fix bug #29).
+try:
+    _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
+except Exception:
+    _max_seconds = 60.0
+try:
+    _workers = int(_os.environ.get("SOLVER_WORKERS", "") or 8)
+except Exception:
+    _workers = 8
+solver.parameters.num_search_workers = max(1, _workers)
+try:
+    solver.parameters.random_seed = int(_os.environ.get("SOLVER_RANDOM_SEED", "") or 42)
+except Exception:
+    solver.parameters.random_seed = 42
+
+best_values = None
+
+if soft_terms:
+    phase1 = max(5.0, _max_seconds * 0.4)
+    solver.parameters.max_time_in_seconds = phase1
+    status = solver.Solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        for key, var in slots.items():
+            model.AddHint(var, best_values[key])
+
+    model.Minimize(sum(int(weight) * var for (weight, var) in soft_terms))
+    phase2 = max(5.0, _max_seconds - phase1)
+    solver.parameters.max_time_in_seconds = phase2
+    status2 = solver.Solve(model)
+    if status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        status = status2
+else:
+    solver.parameters.max_time_in_seconds = _max_seconds
+    status = solver.Solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+
+result = {
+    "classes": classes,
+    "days": days,
+    "periods": periods,
+    "assignments": assignments,
+    "status": solver.StatusName(status).lower(),
+    "schedule": [],
+}
+
+if best_values is not None:
+    for a in assignments:
+        for d in days:
+            for p in periods_for_day(d):
+                if best_values.get((a["id"], d, p)) == 1:
+                    result["schedule"].append(
+                        {
+                            "assignmentId": a["id"],
+                            "class": a["class"],
+                            "day": d,
+                            "period": p,
+                            "subject": a["subject"],
+                            "teacher": a["teacher"],
+                        }
+                    )
+    with open("result.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+    print("SOLUTION_FOUND")
+else:
+    with open("result.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+    print(f"NO_SOLUTION:{solver.StatusName(status)}")
 </file>
 
 <file path=".gitignore">
@@ -14172,100 +14186,6 @@ export const __localAgentInternal = {
 };
 </file>
 
-<file path="AGENTS.md">
-# AGENTS.md - Tack Timetable
-
-## Context
-Dự án là ứng dụng điện tử (Electron + Next.js) kết hợp AI để xếp thời khóa biểu bằng OR-Tools.
-Luồng chính: UI nhập liệu -> AI Local Agent (TS) sinh code Python -> Thực thi an toàn trong Sandbox -> Validate -> Trả kết quả.
-
-## Workflow Rules (BẮT BUỘC)
-1. **Impact Analysis**: TRƯỚC KHI SỬA BẤT KỲ FILE NÀO, PHẢI DÙNG `gitnexus_impact` hoặc `gitnexus_context` để xem hàm nào đang gọi nó. Không được phép sửa mù quáng.
-2. **Refactor**: Nếu đổi tên hàm/class, dùng `gitnexus_rename`, cấm find-and-replace thủ công.
-3. **Scope**: Chỉ sửa đúng phần được yêu cầu. Không tự ý refactor toàn bộ hệ thống nếu không được bảo.
-4. **Verify**: Mọi thay đổi logic solver phải đi kèm test case.
-
-## Tech Stack
-- **Frontend**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn/ui.
-- **Desktop**: Electron 37 (Main process quản lý Python executor).
-- **Backend/AI**: Python 3.11+ (OR-Tools), OpenAI SDK (proxy qua Next.js routes).
-- **Testing**: Jest/Vitest (TS), Pytest (Python).
-
-## Critical Architecture
-1. **AI Pipeline** (`src/features/timetable/ai/`):
-   - Chạy hoàn toàn phía client/browser thông qua `runLocalAgent`.
-   - Gồm 6 stage: Translator -> Planner -> Coder -> Sandbox -> Validator -> Repair.
-
-2. **Python Execution**:
-   - Code Python được sinh ra chạy qua `python/code_executor.py`.
-   - Cơ chế Sandbox (Docker/Bubblewrap) là bắt buộc để bảo mật.
-
-3. **Data Flow**:
-   - Dữ liệu đầu vào chuẩn hóa qua `AgentInputPayload`.
-   - Kết quả trả về dưới dạng JSON (`result.json`), không parse từ stdout hỗn độn.
-
-## Security & Safety
-- **Security**: Tuyệt đối không commit `.env`, API keys, hay secrets. Không hardcode credentials.
-- **Sandbox**: Không được phép chạy code AI trực tiếp trên host mà không qua isolation.
-- **Typing**: Dùng TypeScript strict. Tránh `any` trừ khi giao tiếp với Python raw JSON.
-
-## Key Files
-- **Entry**: `src/app/page.tsx` -> `src/features/timetable/TimetableApp.tsx`
-- **AI Core**: `src/features/timetable/ai/local-agent.ts` (Orchestrator chính)
-- **Python Bridge**: `src/features/timetable/ai/python-bridge.ts` & `python/code_executor.py`
-- **Prompts**: `prompts/*.md` (Source of truth cho behavior AI)
-- **Tools**: Dùng GitNexus MCP để phân tích dependency (`gitnexus_impact`, `gitnexus_context`).
-
-## Workflows
-1. **Dev**: `npm run dev` (Next.js) + `npm run electron` (nếu cần test native).
-2. **Build**: `npm run build` (tạo standalone) -> `electron-builder`.
-3. **Verify**: Chạy `npm run lint` và `npm test` trước khi commit.
-
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **timetable** (1861 symbols, 2746 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/timetable/clusters` | All functional areas |
-| `gitnexus://repo/timetable/processes` | All execution flows |
-| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
-</file>
-
 <file path="src/features/timetable/ai/types.ts">
 import type {
   ConstraintSpec,
@@ -14437,6 +14357,100 @@ export type SolveArtifact = {
   report: DeterministicValidationReport;
   violations: Violation[];
 };
+</file>
+
+<file path="AGENTS.md">
+# AGENTS.md - Tack Timetable
+
+## Context
+Dự án là ứng dụng điện tử (Electron + Next.js) kết hợp AI để xếp thời khóa biểu bằng OR-Tools.
+Luồng chính: UI nhập liệu -> AI Local Agent (TS) sinh code Python -> Thực thi an toàn trong Sandbox -> Validate -> Trả kết quả.
+
+## Workflow Rules (BẮT BUỘC)
+1. **Impact Analysis**: TRƯỚC KHI SỬA BẤT KỲ FILE NÀO, PHẢI DÙNG `gitnexus_impact` hoặc `gitnexus_context` để xem hàm nào đang gọi nó. Không được phép sửa mù quáng.
+2. **Refactor**: Nếu đổi tên hàm/class, dùng `gitnexus_rename`, cấm find-and-replace thủ công.
+3. **Scope**: Chỉ sửa đúng phần được yêu cầu. Không tự ý refactor toàn bộ hệ thống nếu không được bảo.
+4. **Verify**: Mọi thay đổi logic solver phải đi kèm test case.
+
+## Tech Stack
+- **Frontend**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn/ui.
+- **Desktop**: Electron 37 (Main process quản lý Python executor).
+- **Backend/AI**: Python 3.11+ (OR-Tools), OpenAI SDK (proxy qua Next.js routes).
+- **Testing**: Jest/Vitest (TS), Pytest (Python).
+
+## Critical Architecture
+1. **AI Pipeline** (`src/features/timetable/ai/`):
+   - Chạy hoàn toàn phía client/browser thông qua `runLocalAgent`.
+   - Gồm 6 stage: Translator -> Planner -> Coder -> Sandbox -> Validator -> Repair.
+
+2. **Python Execution**:
+   - Code Python được sinh ra chạy qua `python/code_executor.py`.
+   - Cơ chế Sandbox (Docker/Bubblewrap) là bắt buộc để bảo mật.
+
+3. **Data Flow**:
+   - Dữ liệu đầu vào chuẩn hóa qua `AgentInputPayload`.
+   - Kết quả trả về dưới dạng JSON (`result.json`), không parse từ stdout hỗn độn.
+
+## Security & Safety
+- **Security**: Tuyệt đối không commit `.env`, API keys, hay secrets. Không hardcode credentials.
+- **Sandbox**: Không được phép chạy code AI trực tiếp trên host mà không qua isolation.
+- **Typing**: Dùng TypeScript strict. Tránh `any` trừ khi giao tiếp với Python raw JSON.
+
+## Key Files
+- **Entry**: `src/app/page.tsx` -> `src/features/timetable/TimetableApp.tsx`
+- **AI Core**: `src/features/timetable/ai/local-agent.ts` (Orchestrator chính)
+- **Python Bridge**: `src/features/timetable/ai/python-bridge.ts` & `python/code_executor.py`
+- **Prompts**: `prompts/*.md` (Source of truth cho behavior AI)
+- **Tools**: Dùng GitNexus MCP để phân tích dependency (`gitnexus_impact`, `gitnexus_context`).
+
+## Workflows
+1. **Dev**: `npm run dev` (Next.js) + `npm run electron` (nếu cần test native).
+2. **Build**: `npm run build` (tạo standalone) -> `electron-builder`.
+3. **Verify**: Chạy `npm run lint` và `npm test` trước khi commit.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **timetable** (1861 symbols, 2746 relationships, 62 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/timetable/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/timetable/clusters` | All functional areas |
+| `gitnexus://repo/timetable/processes` | All execution flows |
+| `gitnexus://repo/timetable/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
 </file>
 
 <file path="package.json">
