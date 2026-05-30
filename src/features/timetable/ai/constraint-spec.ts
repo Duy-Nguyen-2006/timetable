@@ -39,6 +39,8 @@ export type ConstraintSpec = {
   weight?: number;
   tags?: ConstraintTag[];
   notes?: string;
+  /** Chỉ dùng cho kind='custom_dsl': mã Python nhận schedule và trả true/false hoặc list violation */
+  pythonPredicate?: string;
 };
 
 export type Plan = {
