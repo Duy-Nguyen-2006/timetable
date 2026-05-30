@@ -1,31 +1,34 @@
-export type ConstraintKind =
-  | 'teacher_block_day'
-  | 'teacher_block_period'
-  | 'teacher_block_slot'
-  | 'teacher_max_per_day'
-  | 'teacher_max_consecutive'
-  | 'subject_pin_period'
-  | 'subject_consecutive'
-  | 'class_no_double_subject_day'
-  | 'class_subjects_not_same_day'
-  | 'teacher_max_working_days'
-  | 'subject_max_consecutive'
-  | 'weekly_periods_exact'
-  | 'if_then'
-  | 'pair_not_same_slot'
-  | 'resource_capacity'
-  | 'session_limit'
-  | 'subject_group'
-  | 'subject_group_daily_limit'
-  | 'subject_spread_evenly'
-  | 'teacher_max_consecutive_global'
-  | 'subject_not_at_period'
-  | 'teacher_prefer_compact'
-  | 'class_balanced_daily_load'
-  | 'teacher_fixed_slot'
-  | 'subject_not_consecutive_days'
-  | 'multi_school_availability'
-  | 'custom_dsl';
+export const CONSTRAINT_KINDS = [
+  'teacher_block_day',
+  'teacher_block_period',
+  'teacher_block_slot',
+  'teacher_max_per_day',
+  'teacher_max_consecutive',
+  'subject_pin_period',
+  'subject_consecutive',
+  'class_no_double_subject_day',
+  'class_subjects_not_same_day',
+  'teacher_max_working_days',
+  'subject_max_consecutive',
+  'weekly_periods_exact',
+  'if_then',
+  'pair_not_same_slot',
+  'resource_capacity',
+  'session_limit',
+  'subject_group',
+  'subject_group_daily_limit',
+  'subject_spread_evenly',
+  'teacher_max_consecutive_global',
+  'subject_not_at_period',
+  'teacher_prefer_compact',
+  'class_balanced_daily_load',
+  'teacher_fixed_slot',
+  'subject_not_consecutive_days',
+  'multi_school_availability',
+  'custom_dsl',
+] as const;
+
+export type ConstraintKind = (typeof CONSTRAINT_KINDS)[number];
 
 export type ConditionExpr =
   | { op: 'teacher_teaches_on_day'; teacher: string; day: string }

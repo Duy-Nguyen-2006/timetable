@@ -110,12 +110,25 @@ for a in assignments:
             else:
                 slots[key] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
 
-# Mỗi assignment đúng weeklyPeriods
+# Relaxation: unscheduled[a] absorbs any periods that cannot be placed.
+# This guarantees a solution always exists (partial schedule instead of INFEASIBLE).
+_ALLOW_PARTIAL = True
+_UNSCHEDULED_PENALTY = 10_000
+unscheduled = {}
 for a in assignments:
-    model.Add(
-        sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
-        == a["weeklyPeriods"]
-    )
+    wp = max(0, int(a.get("weeklyPeriods", 0)))
+    if _ALLOW_PARTIAL and wp > 0:
+        uv = model.NewIntVar(0, wp, f"unscheduled_{a['id']}")
+        unscheduled[a["id"]] = uv
+        model.Add(
+            sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d)) + uv
+            == wp
+        )
+    else:
+        model.Add(
+            sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
+            == wp
+        )
 
 # Mỗi class/day/period tối đa 1 assignment
 for c in classes:
@@ -1082,13 +1095,15 @@ def build_custom_constraints(model, slots, data):
 
 soft_terms = build_custom_constraints(model, slots, data)
 
+# Add unscheduled penalty terms (highest priority — must be minimized before soft constraints)
+_unscheduled_terms = [(_UNSCHEDULED_PENALTY, uv) for uv in unscheduled.values()]
+
 solver = cp_model.CpSolver()
 try:
     _max_seconds = float(_os.environ.get("SOLVER_MAX_SECONDS", "") or 60.0)
 except Exception:
     _max_seconds = 60.0
 
-# Adaptive workers: use CPU count but cap at 8
 import multiprocessing as _mp
 try:
     _workers = int(_os.environ.get("SOLVER_WORKERS", "") or 0)
@@ -1103,37 +1118,47 @@ try:
 except Exception:
     solver.parameters.random_seed = 42
 
-# Linearization level 2 helps models with many reified constraints
 solver.parameters.linearization_level = 2
 
 best_values = None
+best_unscheduled_values = {}
 
-# Filter out constant-zero entries for hint/value extraction
 _real_slots = {k: v for k, v in slots.items() if v is not _ZERO}
 
-if soft_terms:
+_all_terms = _unscheduled_terms + soft_terms
+if _all_terms:
     # Phase 1: find any feasible solution quickly
     phase1 = max(5.0, _max_seconds * 0.35)
     solver.parameters.max_time_in_seconds = phase1
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         best_values = {key: solver.Value(var) for key, var in _real_slots.items()}
+        best_unscheduled_values = {aid: solver.Value(uv) for aid, uv in unscheduled.items()}
         for key, var in _real_slots.items():
             model.AddHint(var, best_values[key])
 
-    # Phase 2: optimize soft constraints
-    model.Minimize(sum(int(weight) * var for (weight, var) in soft_terms))
+    # Phase 2: optimize (unscheduled penalty + soft constraints)
+    model.Minimize(sum(int(w) * v for (w, v) in _all_terms))
     phase2 = max(5.0, _max_seconds - phase1)
     solver.parameters.max_time_in_seconds = phase2
     status2 = solver.Solve(model)
     if status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         best_values = {key: solver.Value(var) for key, var in _real_slots.items()}
+        best_unscheduled_values = {aid: solver.Value(uv) for aid, uv in unscheduled.items()}
         status = status2
 else:
     solver.parameters.max_time_in_seconds = _max_seconds
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         best_values = {key: solver.Value(var) for key, var in _real_slots.items()}
+        best_unscheduled_values = {aid: solver.Value(uv) for aid, uv in unscheduled.items()}
+
+# Collect assignments that could not be fully scheduled
+_partial_assignments = [
+    {"assignmentId": aid, "missing": cnt}
+    for aid, cnt in best_unscheduled_values.items()
+    if cnt > 0
+]
 
 result = {
     "classes": classes,
@@ -1142,6 +1167,7 @@ result = {
     "assignments": assignments,
     "status": solver.StatusName(status).lower(),
     "schedule": [],
+    "partialAssignments": _partial_assignments,
 }
 
 if best_values is not None:
@@ -1164,7 +1190,10 @@ if best_values is not None:
                     )
     with open("result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
-    print("SOLUTION_FOUND")
+    if _partial_assignments:
+        print(f"PARTIAL_SOLUTION:{len(_partial_assignments)}")
+    else:
+        print("SOLUTION_FOUND")
 else:
     with open("result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)

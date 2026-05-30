@@ -138,17 +138,15 @@ def run_user_code(code: str, timeout: int) -> dict[str, Any]:
             }
 
         upper_stdout = stdout.upper()
-        marker_count = upper_stdout.count("SOLUTION_FOUND")
+        marker_count = upper_stdout.count("SOLUTION_FOUND") + upper_stdout.count("PARTIAL_SOLUTION")
 
-        # Early return if SOLUTION_FOUND appears more than once, as this indicates multiple
-        # distinct solver solutions were outputted, which violates parsing guarantees.
         if marker_count > 1:
             return {
                 "phase": "parse",
                 "ok": False,
                 "status": "crashed",
                 "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": "Invalid marker count: SOLUTION_FOUND appears more than once.",
+                "errorDigest": "Invalid marker count: solution marker appears more than once.",
                 "stdout": _truncate_output(stdout),
                 "stderr": _truncate_output(stderr),
             }
@@ -198,7 +196,12 @@ def run_user_code(code: str, timeout: int) -> dict[str, Any]:
                 if isinstance(item, dict) and str(item.get("id")) not in scheduled_ids
             ]
 
-        ok = return_code == 0 and status in {"optimal", "feasible"}
+        partial_assignments = []
+        if isinstance(result_json, dict) and isinstance(result_json.get("partialAssignments"), list):
+            partial_assignments = result_json["partialAssignments"]
+
+        is_partial = bool(partial_assignments)
+        ok = return_code == 0 and (status in {"optimal", "feasible"} or (is_partial and schedule))
         digest_source = stderr if stderr.strip() else stdout
 
         artifact_dir = Path.cwd() / ".ai_results"
@@ -225,6 +228,7 @@ def run_user_code(code: str, timeout: int) -> dict[str, Any]:
             "resultSummary": {
                 "scheduledCount": len(schedule) if isinstance(schedule, list) else 0,
                 "unscheduledAssignments": unscheduled,
+                "partialAssignments": partial_assignments,
             },
             "errorDigest": _digest_error(digest_source) if not ok else "",
             "stdout": _truncate_output(stdout),

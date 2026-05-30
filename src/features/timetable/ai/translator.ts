@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { parseConstraint } from '@/lib/constraint-parser';
 
+import { CONSTRAINT_KINDS } from './constraint-spec';
 import type { ConstraintSpec } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
@@ -13,35 +14,7 @@ const constraintSpecSchema = z.object({
   id: z.string(),
   original: z.string(),
   severity: z.enum(['hard', 'soft', 'info']),
-  kind: z.enum([
-    'teacher_block_day',
-    'teacher_block_period',
-    'teacher_block_slot',
-    'teacher_max_per_day',
-    'teacher_max_consecutive',
-    'subject_pin_period',
-    'subject_consecutive',
-    'class_no_double_subject_day',
-    'weekly_periods_exact',
-    'if_then',
-    'pair_not_same_slot',
-    'resource_capacity',
-    'session_limit',
-    'subject_group',
-    'subject_group_daily_limit',
-    'class_subjects_not_same_day',
-    'teacher_max_working_days',
-    'subject_max_consecutive',
-    'subject_spread_evenly',
-    'teacher_max_consecutive_global',
-    'subject_not_at_period',
-    'teacher_prefer_compact',
-    'class_balanced_daily_load',
-    'teacher_fixed_slot',
-    'subject_not_consecutive_days',
-    'multi_school_availability',
-    'custom_dsl',
-  ]),
+  kind: z.enum(CONSTRAINT_KINDS),
   params: z.record(z.string(), z.unknown()),
   tags: z.array(z.enum(['auto_base', 'user_required', 'user_preferred'])).optional(),
   notes: z.string().optional(),
@@ -851,6 +824,73 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   });
 }
 
+function fuzzyMatchLabel(value: string, validLabels: Set<string>): string | null {
+  if (validLabels.has(value)) return value;
+  const norm = normalizeConstraintText(value);
+  for (const label of validLabels) {
+    if (normalizeConstraintText(label) === norm) return label;
+  }
+  // substring match: value is contained in label or vice versa
+  for (const label of validLabels) {
+    const normLabel = normalizeConstraintText(label);
+    if (normLabel.includes(norm) || norm.includes(normLabel)) return label;
+  }
+  return null;
+}
+
+function fuzzyFixParams(
+  params: Record<string, unknown>,
+  validTeachers: Set<string>,
+  validClasses: Set<string>,
+  validSubjects: Set<string>,
+  validDays: Set<string>
+): { params: Record<string, unknown>; fixed: boolean } {
+  let fixed = false;
+  const result = { ...params };
+  if (typeof result.teacher === 'string') {
+    const match = fuzzyMatchLabel(result.teacher, validTeachers);
+    if (match && match !== result.teacher) { result.teacher = match; fixed = true; }
+  }
+  if (typeof result.class === 'string') {
+    const match = fuzzyMatchLabel(result.class, validClasses);
+    if (match && match !== result.class) { result.class = match; fixed = true; }
+  }
+  if (typeof result.subject === 'string') {
+    const match = fuzzyMatchLabel(result.subject, validSubjects);
+    if (match && match !== result.subject) { result.subject = match; fixed = true; }
+  }
+  if (typeof result.day === 'string') {
+    const match = fuzzyMatchLabel(result.day, validDays);
+    if (match && match !== result.day) { result.day = match; fixed = true; }
+  }
+  if (Array.isArray(result.classes)) {
+    const newClasses = result.classes.map((c) =>
+      typeof c === 'string' ? (fuzzyMatchLabel(c, validClasses) ?? c) : c
+    );
+    if (newClasses.some((c, i) => c !== (result.classes as unknown[])[i])) {
+      result.classes = newClasses; fixed = true;
+    }
+  }
+  if (Array.isArray(result.subjects)) {
+    const newSubjects = result.subjects.map((s) =>
+      typeof s === 'string' ? (fuzzyMatchLabel(s, validSubjects) ?? s) : s
+    );
+    if (newSubjects.some((s, i) => s !== (result.subjects as unknown[])[i])) {
+      result.subjects = newSubjects; fixed = true;
+    }
+  }
+  if (Array.isArray(result.teachers)) {
+    const newTeachers = result.teachers.map((t) =>
+      typeof t === 'string' ? (fuzzyMatchLabel(t, validTeachers) ?? t) : t
+    );
+    if (newTeachers.some((t, i) => t !== (result.teachers as unknown[])[i])) {
+      result.teachers = newTeachers; fixed = true;
+    }
+  }
+  return { params: result, fixed };
+}
+
+
 function hasHardCustomDsl(specs: ConstraintSpec[]): boolean {
   return specs.some((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl');
 }
@@ -956,6 +996,10 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
     }
 
     if (teacher && !validTeachers.has(teacher)) {
+      const matched = fuzzyMatchLabel(teacher, validTeachers);
+      if (matched) {
+        return { ...base, params: { ...base.params, teacher: matched } };
+      }
       return {
         ...base,
         kind: 'custom_dsl',
@@ -964,6 +1008,10 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
       };
     }
     if (klass && !validClasses.has(klass)) {
+      const matched = fuzzyMatchLabel(klass, validClasses);
+      if (matched) {
+        return { ...base, params: { ...base.params, class: matched } };
+      }
       return {
         ...base,
         kind: 'custom_dsl',
@@ -972,6 +1020,10 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
       };
     }
     if (subject && !validSubjects.has(subject)) {
+      const matched = fuzzyMatchLabel(subject, validSubjects);
+      if (matched) {
+        return { ...base, params: { ...base.params, subject: matched } };
+      }
       return {
         ...base,
         kind: 'custom_dsl',
@@ -980,12 +1032,22 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
       };
     }
     if (day && !validDays.has(day)) {
+      const matched = fuzzyMatchLabel(day, validDays);
+      if (matched) {
+        return { ...base, params: { ...base.params, day: matched } };
+      }
       return {
         ...base,
         kind: 'custom_dsl',
         params: { naturalLanguage: base.original },
         notes: `unknown_day:${day}`,
       };
+    }
+
+    // Fuzzy-fix array params (classes, subjects, teachers) and other scalar entities
+    const { params: fixedParams, fixed } = fuzzyFixParams(base.params, validTeachers, validClasses, validSubjects, validDays);
+    if (fixed) {
+      return { ...base, params: fixedParams };
     }
 
     let weeklySpec = base;
@@ -1136,35 +1198,7 @@ export async function runTranslatorTurn(
                   severity: { type: 'string', enum: ['hard', 'soft', 'info'] },
                   kind: {
                     type: 'string',
-                    enum: [
-                      'teacher_block_day',
-                      'teacher_block_period',
-                      'teacher_block_slot',
-                      'teacher_max_per_day',
-                      'teacher_max_consecutive',
-                      'subject_pin_period',
-                      'subject_consecutive',
-                      'class_no_double_subject_day',
-                      'weekly_periods_exact',
-                      'if_then',
-                      'pair_not_same_slot',
-                      'resource_capacity',
-                      'session_limit',
-                      'subject_group',
-                      'subject_group_daily_limit',
-                      'class_subjects_not_same_day',
-                      'teacher_max_working_days',
-                      'subject_max_consecutive',
-                      'subject_spread_evenly',
-                      'teacher_max_consecutive_global',
-                      'subject_not_at_period',
-                      'teacher_prefer_compact',
-                      'class_balanced_daily_load',
-                      'teacher_fixed_slot',
-                      'subject_not_consecutive_days',
-                      'multi_school_availability',
-                      'custom_dsl',
-                    ],
+                    enum: CONSTRAINT_KINDS,
                   },
                   params: { type: 'object', additionalProperties: true },
                   tags: {
@@ -1214,4 +1248,6 @@ export const __translatorInternal = {
   splitFallbackConstraintText,
   fallbackFromRuleParser,
   hasHardCustomDsl,
+  fuzzyMatchLabel,
+  fuzzyFixParams,
 };

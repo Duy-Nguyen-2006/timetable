@@ -469,6 +469,9 @@ export async function runLocalAgent(
         // (fix bug #1) Coverage do coder TỰ KHAI không còn là điều kiện duyệt.
         // Chỉ duyệt khi mọi hard constraint đều được deterministic check thực sự
         // (hardUncheckedIds rỗng). Self-claim chỉ dùng để gợi ý repair bên dưới.
+        const partialAssignments = (execResult.resultData as any)?.partialAssignments as Array<{ assignmentId: string; missing: number }> | undefined;
+        const isPartial = Array.isArray(partialAssignments) && partialAssignments.length > 0;
+
         if (
           report.hardConstraintPass &&
           report.baseConstraintPass &&
@@ -476,19 +479,27 @@ export async function runLocalAgent(
           roundTrip.ok &&
           hardUncheckedIds.length === 0
         ) {
+          const iisConstraintIds = report.hardViolations.map((v) => v.constraintId).filter((id, i, arr) => arr.indexOf(id) === i);
+          const conflictingConstraints = iisConstraintIds.map((id) => {
+            const spec = translator.constraintSpecs.find((s) => s.id === id);
+            return { id, text: spec?.original ?? '' };
+          });
+          const message = isPartial
+            ? `Thời khóa biểu được tạo một phần: ${partialAssignments!.length} phân công chưa xếp được do ràng buộc xung đột.`
+            : 'Đã tạo thời khóa biểu thành công.';
           const finalResult = {
             ...execResult.resultData,
             schedule: scheduleWithAssignmentIds,
             status: 'solved' as const,
-            message: 'Đã tạo thời khóa biểu thành công.',
+            message,
             deterministicReport: report,
             checkerReport: report,
             violations: [],
-            diagnostics: [],
+            diagnostics: isPartial ? partialAssignments!.map((p) => `Phân công ${p.assignmentId} thiếu ${p.missing} tiết.`) : [],
             executionErrors: [],
             validationErrors: [],
-            iisConstraintIds: [],
-            conflictingConstraints: [],
+            iisConstraintIds,
+            conflictingConstraints,
             attemptHistorySummary: board.snapshot().attempts,
           };
           emit(config, { type: 'final_result', result: finalResult });
