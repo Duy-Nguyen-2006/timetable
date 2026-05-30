@@ -714,10 +714,10 @@ def build_custom_constraints(model, slots, data):
     # <<< AI_FILL_HERE >>>
     pass
 
-    return soft_terms
+    return soft_terms, unsupported_soft_kinds
 
 
-soft_terms = build_custom_constraints(model, slots, data)
+soft_terms, unsupported_soft_kinds = build_custom_constraints(model, slots, data)
 
 solver = cp_model.CpSolver()
 # Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
