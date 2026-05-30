@@ -241,6 +241,8 @@ def build_custom_constraints(model, slots, data):
 
         elif kind == "teacher_max_per_day":
             teacher = params.get("teacher")
+            if teacher is None or params.get("maxPerDay") is None:
+                return
             limit = int(params.get("maxPerDay"))
             teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
             for d in days:
@@ -416,12 +418,15 @@ def build_custom_constraints(model, slots, data):
 
         elif kind == "teacher_max_per_day":
             t = params.get("teacher")
-            n = int(params.get("maxPerDay"))
-            teacher_asgs = [a for a in assignments if a["teacher"] == t]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
-                ).OnlyEnforceIf(guard)
+            if t is None or params.get("maxPerDay") is None:
+                pass
+            else:
+                n = int(params.get("maxPerDay"))
+                teacher_asgs = [a for a in assignments if a["teacher"] == t]
+                for d in days:
+                    model.Add(
+                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                    ).OnlyEnforceIf(guard)
 
         elif kind == "subject_pin_period":
             subj = params.get("subject")
@@ -438,14 +443,15 @@ def build_custom_constraints(model, slots, data):
             cls = params.get("class")
             subj = params.get("subject")
             max_per_day = int(params.get("maxPerDay", 1) or 1)
-            asgs = [
-                a for a in assignments
-                if a["class"] == cls and (subj is None or a["subject"] == subj)
-            ]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
-                ).OnlyEnforceIf(guard)
+            target_classes = [cls] if cls else data["classes"]
+            for c in target_classes:
+                subjects = {subj} if subj else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        model.Add(
+                            sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
+                        ).OnlyEnforceIf(guard)
 
         elif kind == "pair_not_same_slot":
             teachers = params.get("teachers", [])
@@ -510,6 +516,8 @@ def build_custom_constraints(model, slots, data):
 
         elif kind == "teacher_max_per_day":
             t = params.get("teacher")
+            if t is None or params.get("maxPerDay") is None:
+                continue
             n = int(params.get("maxPerDay"))
             teacher_asgs = [a for a in assignments if a["teacher"] == t]
             for d in days:
@@ -519,6 +527,8 @@ def build_custom_constraints(model, slots, data):
 
         elif kind == "teacher_max_consecutive":
             t = params.get("teacher")
+            if t is None or params.get("maxConsecutive") is None:
+                continue
             n = int(params.get("maxConsecutive"))
             if n <= 0:
                 # n=0 hoặc âm => teacher không được dạy 2 tiết liên tiếp nào;
@@ -555,14 +565,15 @@ def build_custom_constraints(model, slots, data):
             cls = params.get("class")
             subj = params.get("subject")
             max_per_day = int(params.get("maxPerDay", 1) or 1)
-            asgs = [
-                a for a in assignments
-                if a["class"] == cls and (subj is None or a["subject"] == subj)
-            ]
-            for d in days:
-                model.Add(
-                    sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
-                )
+            target_classes = [cls] if cls else data["classes"]
+            for c in target_classes:
+                subjects = {subj} if subj else {a["subject"] for a in assignments if a["class"] == c}
+                for current_subject in subjects:
+                    asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                    for d in days:
+                        model.Add(
+                            sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
+                        )
 
         elif kind == "pair_not_same_slot":
             teachers = params.get("teachers", [])
