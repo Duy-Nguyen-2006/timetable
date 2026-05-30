@@ -53,6 +53,7 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
       env: {
         ...process.env,
         PYTHONUNBUFFERED: '1',
+        PYTHONHASHSEED: '0',
         // fix bug #6 — chuyển timeout xuống Python qua env nữa cho chắc.
         EXECUTOR_TIMEOUT_SECONDS: String(timeoutSeconds),
         // fix bug #29 — đồng bộ max time của CP-SAT solver với timeoutMs.

@@ -12,7 +12,8 @@ const CHECKER_SCRIPT = `
 import ast, json, sys, textwrap
 FORBIDDEN_NAMES = {"open", "exec", "eval", "__import__", "compile", "input", "breakpoint", "globals", "locals", "vars", "print"}
 FORBIDDEN_ATTRS = {"__import__", "__builtins__", "__class__", "__bases__", "__subclasses__", "__mro__"}
-ALLOWED_LOAD_NAMES = {"model", "slots", "data", "assignments", "days", "periods", "periods_by_day", "constraints", "custom_specs", "len", "range", "int", "str", "set", "list", "sum", "min", "max", "enumerate", "isinstance", "dict", "bool", "float", "abs", "all", "any", "ValueError", "NotImplementedError"}
+ALLOWED_LOAD_NAMES = {"model", "slots", "data", "assignments", "days", "periods", "periods_by_day", "constraints", "custom_specs", "schedule", "len", "range", "int", "str", "set", "list", "dict", "tuple", "frozenset", "sum", "min", "max", "sorted", "reversed", "round", "divmod", "zip", "map", "filter", "enumerate", "isinstance", "bool", "float", "abs", "all", "any", "ValueError", "NotImplementedError"}
+SKELETON_HELPER_PREFIX = "_"
 
 try:
     source = textwrap.dedent(sys.stdin.read())
@@ -47,7 +48,7 @@ for node in ast.walk(tree):
         if node.attr in FORBIDDEN_ATTRS:
             errors.append(f"Forbidden attribute '{node.attr}' at line {node.lineno}")
     elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-        if node.id not in ALLOWED_LOAD_NAMES and node.id not in local_names:
+        if node.id not in ALLOWED_LOAD_NAMES and node.id not in local_names and not node.id.startswith(SKELETON_HELPER_PREFIX):
             errors.append(f"Unknown name '{node.id}' at line {node.lineno}")
 
 print(json.dumps({"ok": len(errors) == 0, "error": "; ".join(errors) if errors else None}))

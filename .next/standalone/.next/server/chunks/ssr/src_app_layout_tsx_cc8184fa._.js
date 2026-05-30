@@ -1,0 +1,3 @@
+module.exports=[27572,a=>{"use strict";var b=a.i(7997);function c({children:a}){return(0,b.jsx)("html",{lang:"vi",suppressHydrationWarning:!0,children:(0,b.jsx)("body",{suppressHydrationWarning:!0,className:"antialiased dark",children:a})})}a.s(["default",()=>c,"metadata",0,{title:"Timetable - Thời khóa biểu điện tử",description:"Thiết lập giảng dạy điện tử - Nhập dữ liệu và xem màn hình xếp lịch"}])}];
+
+//# sourceMappingURL=src_app_layout_tsx_cc8184fa._.js.map

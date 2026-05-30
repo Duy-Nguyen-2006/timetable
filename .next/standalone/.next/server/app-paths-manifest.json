@@ -1,0 +1,11 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/ai/chat/route": "app/api/ai/chat/route.js",
+  "/api/ai/python-ast-check/route": "app/api/ai/python-ast-check/route.js",
+  "/api/ai/python-execute/route": "app/api/ai/python-execute/route.js",
+  "/api/ai/python-syntax-check/route": "app/api/ai/python-syntax-check/route.js",
+  "/api/ai/solver-skeleton/route": "app/api/ai/solver-skeleton/route.js",
+  "/api/provider/test/route": "app/api/provider/test/route.js",
+  "/page": "app/page.js"
+}

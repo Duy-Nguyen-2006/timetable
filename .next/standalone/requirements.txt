@@ -1,0 +1,4 @@
+# Minimal requirements for OR-Tools Agent
+ortools>=9.10
+openai>=1.50
+python-dotenv>=1.0

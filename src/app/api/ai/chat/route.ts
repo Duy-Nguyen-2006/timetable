@@ -162,6 +162,21 @@ function parseProviderResponse(raw: string): { content: string; usage: Record<st
   }
 }
 
+async function fetchWithRetry(url: string, init: RequestInit, tries = 3): Promise<Response> {
+  let last: Response | null = null;
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 && res.status < 500) return res;
+    last = res;
+    const retryAfter = Number(res.headers.get('retry-after'));
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : Math.min(8000, 500 * 2 ** i) + Math.random() * 300;
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  return last as Response;
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChatPayload;
@@ -179,7 +194,7 @@ export async function POST(request: Request) {
 
     const cacheEnabled = Boolean((body.cache_control as { enable?: boolean } | undefined)?.enable);
     const messagesWithCache = applyProviderSpecificCaching(model, messages, cacheEnabled);
-    const response = await fetch(`${baseURL}/chat/completions`, {
+    const response = await fetchWithRetry(`${baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -216,6 +231,13 @@ export async function POST(request: Request) {
     }
 
     const parsed = parseProviderResponse(raw);
+
+    if (!parsed.content.trim()) {
+      return NextResponse.json(
+        { ok: false, error: 'EMPTY_CONTENT', finishReason: 'length', usage: parsed.usage },
+        { status: 502 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,

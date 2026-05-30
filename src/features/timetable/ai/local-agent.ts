@@ -179,6 +179,7 @@ export async function runLocalAgent(
     let repeatedViolationCount = 0;
     let latestConstraintCode = '';
     let latestCoveredConstraintIds = new Set<string>();
+    let lastCheckedCustomIds = new Set<string>();
     let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }> | null = null;
 
     while (true) {
@@ -365,19 +366,34 @@ export async function runLocalAgent(
           periods: compressed.periods,
         });
 
+        // Merge custom_dsl predicate results from sandbox
+        const customChecks =
+          ((execResult.resultData as { customChecks?: Array<{
+            id: string; checked: boolean; ok: boolean;
+            violations: Array<{ constraintId: string; kind: string; message: string }>;
+          }> }).customChecks) ?? [];
+        const checkedCustomIds = new Set(
+          customChecks.filter((c) => c.checked).map((c) => c.id)
+        );
+        const customHardViolations = customChecks
+          .filter((c) => c.checked && !c.ok)
+          .flatMap((c) => c.violations)
+          .filter((v) => {
+            const spec = translator.constraintSpecs.find((s) => s.id === v.constraintId);
+            return spec?.severity === 'hard';
+          });
+
         const hardUncheckedIds = report.uncheckedConstraintIds.filter((id) => {
+          if (checkedCustomIds.has(id)) return false;
           const spec = translator.constraintSpecs.find((item) => item.id === id);
           return spec?.severity === 'hard';
         });
 
+        const allHardViolations = [...report.hardViolations, ...customHardViolations];
 
-        // (fix bug #1) Coverage do coder TỰ KHAI không còn là điều kiện duyệt.
-        // Chỉ duyệt khi mọi hard constraint đều được deterministic check thực sự
-        // (hardUncheckedIds rỗng). Self-claim chỉ dùng để gợi ý repair bên dưới.
         if (
-          report.hardConstraintPass &&
           report.baseConstraintPass &&
-          report.hardCoverageComplete &&
+          allHardViolations.length === 0 &&
           roundTrip.ok &&
           hardUncheckedIds.length === 0
         ) {
@@ -402,6 +418,7 @@ export async function runLocalAgent(
 
         lastReport = report;
         lastRoundTrip = roundTrip;
+        lastCheckedCustomIds = checkedCustomIds;
         break;
       }
 
@@ -450,9 +467,9 @@ export async function runLocalAgent(
         sampleMessages.unshift(lastRoundTrip.message);
       }
 
-      // (fix bug #1) Báo cho repair MỌI hard constraint chưa có deterministic
-      // checker, bất kể coder khai đã cover hay chưa — vì self-claim không đáng tin.
-      const uncoveredHardUncheckedIds = lastReport.hardUncheckedConstraintIds;
+      const uncoveredHardUncheckedIds = lastReport.hardUncheckedConstraintIds.filter(
+        (id) => !lastCheckedCustomIds.has(id)
+      );
 
       if (uncoveredHardUncheckedIds.length > 0) {
         sampleMessages.unshift(

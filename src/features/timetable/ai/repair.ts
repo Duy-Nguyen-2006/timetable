@@ -68,7 +68,7 @@ export async function runRepairTurn(
       },
     ],
     temperature: 0.1,
-    max_tokens: 2200,
+    max_tokens: 6000,
     cache_control: { enable: true },
     response_format: {
       type: 'json_schema',
