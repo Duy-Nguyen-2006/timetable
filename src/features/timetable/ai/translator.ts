@@ -19,9 +19,29 @@ const constraintSpecSchema = z.object({
     'teacher_block_slot',
     'teacher_max_per_day',
     'teacher_max_consecutive',
+    'teacher_max_working_days',
+    'teacher_min_per_day',
+    'teacher_no_gaps',
+    'teacher_allowed_days',
+    'teacher_allowed_periods',
     'subject_pin_period',
     'subject_consecutive',
+    'subject_max_consecutive',
+    'subject_allowed_days',
+    'subject_min_gap_days',
+    'subject_daily_max_periods',
+    'class_block_day',
+    'class_block_period',
+    'class_block_slot',
+    'class_max_per_day',
+    'class_min_per_day',
+    'class_no_gaps',
     'class_no_double_subject_day',
+    'class_subjects_not_same_day',
+    'assignment_pin_slot',
+    'assignment_block_slot',
+    'assignment_allowed_slots',
+    'assignment_spread_days',
     'weekly_periods_exact',
     'if_then',
     'pair_not_same_slot',
@@ -727,6 +747,160 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       } satisfies ConstraintSpec;
     }
 
+    // class_block_day: "lớp 10A không học thứ 2"
+    if (/(không\s*học|khong\s*hoc)/u.test(constraint.text) && !/(môn|mon|tiết|tiet)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const day = extractDayId(constraint.text, input.days);
+      if (klass && day) {
+        return { id, original: constraint.text, severity, kind: 'class_block_day', params: { class: klass, day } } satisfies ConstraintSpec;
+      }
+    }
+
+    // class_block_period: "lớp 10A không học tiết 1"
+    if (/(không\s*học|khong\s*hoc).*(tiết|tiet)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const period = extractPeriodNumber(constraint.text) ?? extractFirstNumber(constraint.text);
+      const day = extractDayId(constraint.text, input.days);
+      if (klass && period !== null) {
+        if (day) {
+          return { id, original: constraint.text, severity, kind: 'class_block_slot', params: { class: klass, day, period } } satisfies ConstraintSpec;
+        }
+        return { id, original: constraint.text, severity, kind: 'class_block_period', params: { class: klass, period } } satisfies ConstraintSpec;
+      }
+    }
+
+    // class_max_per_day / subject_daily_max_periods: "lớp 10A học tối đa 6 tiết/ngày" | "môn Toán tối đa 2 tiết/ngày"
+    if (/(tối\s*đa|toi\s*da|max).*(tiết|tiet).*(ngày|ngay)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const maxPerDay = extractFirstNumber(constraint.text);
+      if (maxPerDay !== null) {
+        if (klass && !subject) {
+          return { id, original: constraint.text, severity, kind: 'class_max_per_day', params: { class: klass, maxPerDay } } satisfies ConstraintSpec;
+        }
+        if (subject) {
+          const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+          return { id, original: constraint.text, severity, kind: 'subject_daily_max_periods', params: { subject, maxPerDay, ...(classes.length ? { classes } : {}) } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // class_min_per_day / teacher_min_per_day: "lớp 10A học ít nhất 4 tiết/ngày" | "giáo viên A dạy ít nhất 2 tiết/ngày"
+    if (/(ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|min).*(tiết|tiet).*(ngày|ngay)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      const minPerDay = extractFirstNumber(constraint.text);
+      if (minPerDay !== null) {
+        if (klass) {
+          return { id, original: constraint.text, severity, kind: 'class_min_per_day', params: { class: klass, minPerDay } } satisfies ConstraintSpec;
+        }
+        if (teacher) {
+          return { id, original: constraint.text, severity, kind: 'teacher_min_per_day', params: { teacher, minPerDay } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // class_no_gaps / teacher_no_gaps: "lớp 10A không có tiết trống" | "giáo viên A không có tiết trống"
+    if (/(không\s*có|khong\s*co).*(tiết\s*trống|tiet\s*trong|trống|trong)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      if (klass) {
+        return { id, original: constraint.text, severity, kind: 'class_no_gaps', params: { class: klass } } satisfies ConstraintSpec;
+      }
+      if (teacher) {
+        return { id, original: constraint.text, severity, kind: 'teacher_no_gaps', params: { teacher } } satisfies ConstraintSpec;
+      }
+    }
+
+    // teacher_allowed_days: "giáo viên A chỉ dạy thứ 2, thứ 4"
+    if (/(chỉ\s*dạy|chi\s*day).*(thứ|thu)/u.test(constraint.text)) {
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      if (teacher) {
+        const days = input.days.map((d) => d.id).filter((dayId) => includesLabel(constraint.text, dayId) || new RegExp(`thứ\\s*${dayId}|thu\\s*${dayId}`, 'iu').test(constraint.text));
+        const extractedDay = extractDayId(constraint.text, input.days);
+        const allDays = extractedDay ? [extractedDay] : days;
+        if (allDays.length > 0) {
+          return { id, original: constraint.text, severity, kind: 'teacher_allowed_days', params: { teacher, days: allDays } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // teacher_allowed_periods: "giáo viên A chỉ dạy tiết 1-4"
+    if (/(chỉ\s*dạy|chi\s*day).*(tiết|tiet)/u.test(constraint.text)) {
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      if (teacher) {
+        const rangeMatch = constraint.text.match(/tiết\s*(\d+)\s*[-–]\s*(\d+)/iu);
+        if (rangeMatch) {
+          const from = Number(rangeMatch[1]);
+          const to = Number(rangeMatch[2]);
+          const periods = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+          return { id, original: constraint.text, severity, kind: 'teacher_allowed_periods', params: { teacher, periods } } satisfies ConstraintSpec;
+        }
+        const period = extractPeriodNumber(constraint.text);
+        if (period !== null) {
+          return { id, original: constraint.text, severity, kind: 'teacher_allowed_periods', params: { teacher, periods: [period] } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // subject_allowed_days: "môn Thể dục chỉ học thứ 3 hoặc thứ 5"
+    if (/(chỉ\s*học|chi\s*hoc|chỉ\s*xếp|chi\s*xep).*(thứ|thu)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      if (subject) {
+        const extractedDay = extractDayId(constraint.text, input.days);
+        if (extractedDay) {
+          return { id, original: constraint.text, severity, kind: 'subject_allowed_days', params: { subject, days: [extractedDay] } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // subject_min_gap_days: "hai buổi học cùng môn cách nhau ít nhất 1 ngày"
+    if (/(cách\s*nhau|cach\s*nhau).*(ngày|ngay)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const minGapDays = extractFirstNumber(constraint.text) ?? 1;
+      if (subject) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return { id, original: constraint.text, severity, kind: 'subject_min_gap_days', params: { subject, minGapDays, ...(classes.length ? { classes } : {}) } } satisfies ConstraintSpec;
+      }
+    }
+
+    // assignment_pin_slot: "Toán lớp 10A phải xếp thứ 2 tiết 1"
+    if (/(phải\s*xếp|phai\s*xep|cố\s*định|co\s*dinh|pin)/u.test(constraint.text)) {
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const day = extractDayId(constraint.text, input.days);
+      const period = extractPeriodNumber(constraint.text);
+      if ((teacher || subject || klass) && day && period !== null) {
+        const matchedAssignment = input.assignments.find((a) => {
+          if (teacher && a.teacher.label !== teacher) return false;
+          if (subject && a.subject.label !== subject) return false;
+          if (klass && a.class.label !== klass) return false;
+          return true;
+        });
+        if (matchedAssignment) {
+          return { id, original: constraint.text, severity, kind: 'assignment_pin_slot', params: { assignmentId: matchedAssignment.id, day, period } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // assignment_spread_days: "4 tiết Toán phải rải ra ít nhất 3 ngày"
+    if (/(rải|rai|trải|trai).*(ngày|ngay)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const minDays = extractFirstNumber(constraint.text);
+      if ((subject || klass) && minDays !== null) {
+        const matchedAssignment = input.assignments.find((a) => {
+          if (subject && a.subject.label !== subject) return false;
+          if (klass && a.class.label !== klass) return false;
+          return true;
+        });
+        if (matchedAssignment) {
+          return { id, original: constraint.text, severity, kind: 'assignment_spread_days', params: { assignmentId: matchedAssignment.id, minDays } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
     const fallbackSpec = {
       id,
       original: constraint.text,
@@ -1020,9 +1194,29 @@ export async function runTranslatorTurn(
                       'teacher_block_slot',
                       'teacher_max_per_day',
                       'teacher_max_consecutive',
+                      'teacher_max_working_days',
+                      'teacher_min_per_day',
+                      'teacher_no_gaps',
+                      'teacher_allowed_days',
+                      'teacher_allowed_periods',
                       'subject_pin_period',
                       'subject_consecutive',
+                      'subject_max_consecutive',
+                      'subject_allowed_days',
+                      'subject_min_gap_days',
+                      'subject_daily_max_periods',
+                      'class_block_day',
+                      'class_block_period',
+                      'class_block_slot',
+                      'class_max_per_day',
+                      'class_min_per_day',
+                      'class_no_gaps',
                       'class_no_double_subject_day',
+                      'class_subjects_not_same_day',
+                      'assignment_pin_slot',
+                      'assignment_block_slot',
+                      'assignment_allowed_slots',
+                      'assignment_spread_days',
                       'weekly_periods_exact',
                       'if_then',
                       'pair_not_same_slot',

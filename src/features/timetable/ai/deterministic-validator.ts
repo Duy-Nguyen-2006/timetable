@@ -693,18 +693,284 @@ const checkSubjectGroupDailyLimit: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+const checkClassBlockDay: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const day = String(spec.params.day ?? '');
+  const offending = schedule.filter((e) => e.class === klass && e.day === day);
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} không được học ${day} nhưng có ${offending.length} entry.`, offendingEntries: offending }];
+};
+
+const checkClassBlockPeriod: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const period = Number(spec.params.period ?? NaN);
+  const offending = schedule.filter((e) => e.class === klass && toPeriod(e.period) === period);
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} không được học tiết ${period}.`, offendingEntries: offending }];
+};
+
+const checkClassBlockSlot: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const day = String(spec.params.day ?? '');
+  const period = Number(spec.params.period ?? NaN);
+  const offending = schedule.filter((e) => e.class === klass && e.day === day && toPeriod(e.period) === period);
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} không được học ${day} tiết ${period}.`, offendingEntries: offending }];
+};
+
+const checkClassMaxPerDay: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const maxPerDay = Number(spec.params.maxPerDay ?? NaN);
+  const violations: Violation[] = [];
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.class !== klass) continue;
+    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  }
+  for (const [day, entries] of byDay) {
+    if (entries.length > maxPerDay) {
+      violations.push({ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} có ${entries.length} tiết ngày ${day} (tối đa ${maxPerDay}).`, offendingEntries: entries });
+    }
+  }
+  return violations;
+};
+
+const checkClassMinPerDay: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const minPerDay = Number(spec.params.minPerDay ?? NaN);
+  const violations: Violation[] = [];
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.class !== klass) continue;
+    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  }
+  for (const [day, entries] of byDay) {
+    if (entries.length < minPerDay) {
+      violations.push({ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} chỉ có ${entries.length} tiết ngày ${day} (tối thiểu ${minPerDay}).`, offendingEntries: entries });
+    }
+  }
+  return violations;
+};
+
+const checkClassNoGaps: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const violations: Violation[] = [];
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.class !== klass) continue;
+    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  }
+  for (const [day, entries] of byDay) {
+    const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
+    for (let i = 1; i < periods.length; i++) {
+      if (periods[i] > periods[i - 1] + 1) {
+        violations.push({ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} có tiết trống giữa tiết ${periods[i - 1]} và ${periods[i]} ngày ${day}.`, offendingEntries: entries });
+        break;
+      }
+    }
+  }
+  return violations;
+};
+
+const checkTeacherMinPerDay: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const minPerDay = Number(spec.params.minPerDay ?? NaN);
+  const violations: Violation[] = [];
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.teacher !== teacher) continue;
+    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  }
+  for (const [day, entries] of byDay) {
+    if (entries.length < minPerDay) {
+      violations.push({ constraintId: spec.id, kind: spec.kind, message: `${teacher} chỉ dạy ${entries.length} tiết ngày ${day} (tối thiểu ${minPerDay}).`, offendingEntries: entries });
+    }
+  }
+  return violations;
+};
+
+const checkTeacherNoGaps: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const violations: Violation[] = [];
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.teacher !== teacher) continue;
+    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  }
+  for (const [day, entries] of byDay) {
+    const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
+    for (let i = 1; i < periods.length; i++) {
+      if (periods[i] > periods[i - 1] + 1) {
+        violations.push({ constraintId: spec.id, kind: spec.kind, message: `${teacher} có tiết trống giữa tiết ${periods[i - 1]} và ${periods[i]} ngày ${day}.`, offendingEntries: entries });
+        break;
+      }
+    }
+  }
+  return violations;
+};
+
+const checkTeacherAllowedDays: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const allowedDays = new Set((Array.isArray(spec.params.days) ? spec.params.days : []).map(String));
+  const offending = schedule.filter((e) => e.teacher === teacher && !allowedDays.has(e.day));
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `${teacher} chỉ được dạy các ngày ${[...allowedDays].join(', ')} nhưng có entry ngoài danh sách.`, offendingEntries: offending }];
+};
+
+const checkTeacherAllowedPeriods: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const allowedPeriods = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
+  const offending = schedule.filter((e) => {
+    if (e.teacher !== teacher) return false;
+    const p = toPeriod(e.period);
+    return p === null || !allowedPeriods.has(p);
+  });
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `${teacher} chỉ được dạy các tiết ${[...allowedPeriods].join(', ')} nhưng có entry ngoài danh sách.`, offendingEntries: offending }];
+};
+
+const checkSubjectAllowedDays: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const allowedDays = new Set((Array.isArray(spec.params.days) ? spec.params.days : []).map(String));
+  const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
+  const offending = schedule.filter((e) => {
+    if (e.subject !== subject) return false;
+    if (classes && !classes.includes(e.class)) return false;
+    return !allowedDays.has(e.day);
+  });
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `Môn ${subject} chỉ được xếp các ngày ${[...allowedDays].join(', ')}.`, offendingEntries: offending }];
+};
+
+const checkSubjectMinGapDays: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const minGap = Number(spec.params.minGapDays ?? 1);
+  const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
+  const violations: Violation[] = [];
+
+  // Build a stable day order from the schedule itself
+  const dayOrder = [...new Set(schedule.map((e) => e.day))];
+
+  const byClass = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.subject !== subject) continue;
+    if (classes && !classes.includes(e.class)) continue;
+    byClass.set(e.class, [...(byClass.get(e.class) ?? []), e]);
+  }
+
+  for (const [klass, entries] of byClass) {
+    const days = [...new Set(entries.map((e) => e.day))];
+    const indices = days.map((d) => dayOrder.indexOf(d)).sort((a, b) => a - b);
+    for (let i = 1; i < indices.length; i++) {
+      if (indices[i] - indices[i - 1] < minGap) {
+        violations.push({
+          constraintId: spec.id,
+          kind: spec.kind,
+          message: `Lớp ${klass} môn ${subject} có 2 buổi học cách nhau ${indices[i] - indices[i - 1]} ngày (tối thiểu ${minGap} ngày).`,
+          offendingEntries: entries,
+        });
+        break;
+      }
+    }
+  }
+  return violations;
+};
+
+const checkSubjectDailyMaxPeriods: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const maxPerDay = Number(spec.params.maxPerDay ?? NaN);
+  const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.subject !== subject) continue;
+    if (classes && !classes.includes(e.class)) continue;
+    const key = `${e.class}::${e.day}`;
+    byClassDay.set(key, [...(byClassDay.get(key) ?? []), e]);
+  }
+  for (const [key, entries] of byClassDay) {
+    if (entries.length > maxPerDay) {
+      const [klass, day] = key.split('::');
+      violations.push({ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} học môn ${subject} ${entries.length} tiết ngày ${day} (tối đa ${maxPerDay}).`, offendingEntries: entries });
+    }
+  }
+  return violations;
+};
+
+const checkAssignmentPinSlot: CheckFn = (spec, schedule) => {
+  const assignmentId = String(spec.params.assignmentId ?? '');
+  const day = String(spec.params.day ?? '');
+  const period = Number(spec.params.period ?? NaN);
+  const entries = schedule.filter((e) => String(e.assignmentId ?? '') === assignmentId);
+  const pinned = entries.filter((e) => e.day === day && toPeriod(e.period) === period);
+  if (entries.length > 0 && pinned.length === 0) {
+    return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} phải được xếp vào ${day} tiết ${period}.`, offendingEntries: entries }];
+  }
+  return [];
+};
+
+const checkAssignmentBlockSlot: CheckFn = (spec, schedule) => {
+  const assignmentId = String(spec.params.assignmentId ?? '');
+  const day = String(spec.params.day ?? '');
+  const period = Number(spec.params.period ?? NaN);
+  const offending = schedule.filter((e) => String(e.assignmentId ?? '') === assignmentId && e.day === day && toPeriod(e.period) === period);
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} không được xếp vào ${day} tiết ${period}.`, offendingEntries: offending }];
+};
+
+const checkAssignmentAllowedSlots: CheckFn = (spec, schedule) => {
+  const assignmentId = String(spec.params.assignmentId ?? '');
+  const allowedSlots = (Array.isArray(spec.params.slots) ? spec.params.slots : []) as Array<{ day: string; period: number }>;
+  const slotSet = new Set(allowedSlots.map((s) => `${s.day}::${s.period}`));
+  const offending = schedule.filter((e) => {
+    if (String(e.assignmentId ?? '') !== assignmentId) return false;
+    return !slotSet.has(`${e.day}::${toPeriod(e.period)}`);
+  });
+  if (!offending.length) return [];
+  return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} có entry ngoài các slot cho phép.`, offendingEntries: offending }];
+};
+
+const checkAssignmentSpreadDays: CheckFn = (spec, schedule) => {
+  const assignmentId = String(spec.params.assignmentId ?? '');
+  const minDays = Number(spec.params.minDays ?? NaN);
+  const entries = schedule.filter((e) => String(e.assignmentId ?? '') === assignmentId);
+  if (!entries.length) return [];
+  const days = new Set(entries.map((e) => e.day));
+  if (days.size < minDays) {
+    return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} chỉ trải trên ${days.size} ngày (tối thiểu ${minDays} ngày).`, offendingEntries: entries }];
+  }
+  return [];
+};
+
 const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_block_day: checkTeacherBlockDay,
   teacher_block_period: checkTeacherBlockPeriod,
   teacher_block_slot: checkTeacherBlockSlot,
   teacher_max_per_day: checkTeacherMaxPerDay,
   teacher_max_consecutive: checkTeacherMaxConsecutive,
+  teacher_max_working_days: checkTeacherMaxWorkingDays,
+  teacher_min_per_day: checkTeacherMinPerDay,
+  teacher_no_gaps: checkTeacherNoGaps,
+  teacher_allowed_days: checkTeacherAllowedDays,
+  teacher_allowed_periods: checkTeacherAllowedPeriods,
   subject_pin_period: checkSubjectPinPeriod,
   subject_consecutive: checkSubjectConsecutive,
+  subject_max_consecutive: checkSubjectMaxConsecutive,
+  subject_allowed_days: checkSubjectAllowedDays,
+  subject_min_gap_days: checkSubjectMinGapDays,
+  subject_daily_max_periods: checkSubjectDailyMaxPeriods,
+  class_block_day: checkClassBlockDay,
+  class_block_period: checkClassBlockPeriod,
+  class_block_slot: checkClassBlockSlot,
+  class_max_per_day: checkClassMaxPerDay,
+  class_min_per_day: checkClassMinPerDay,
+  class_no_gaps: checkClassNoGaps,
   class_no_double_subject_day: checkClassNoDoubleSubjectDay,
   class_subjects_not_same_day: checkClassSubjectsNotSameDay,
-  teacher_max_working_days: checkTeacherMaxWorkingDays,
-  subject_max_consecutive: checkSubjectMaxConsecutive,
+  assignment_pin_slot: checkAssignmentPinSlot,
+  assignment_block_slot: checkAssignmentBlockSlot,
+  assignment_allowed_slots: checkAssignmentAllowedSlots,
+  assignment_spread_days: checkAssignmentSpreadDays,
   weekly_periods_exact: checkWeeklyPeriodsExact,
   pair_not_same_slot: checkPairNotSameSlot,
   if_then: checkIfThen,
