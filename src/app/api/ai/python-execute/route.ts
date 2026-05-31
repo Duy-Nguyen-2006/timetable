@@ -54,10 +54,9 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
         ...process.env,
         PYTHONUNBUFFERED: '1',
         PYTHONHASHSEED: '0',
-        // fix bug #6 — chuyển timeout xuống Python qua env nữa cho chắc.
         EXECUTOR_TIMEOUT_SECONDS: String(timeoutSeconds),
-        // fix bug #29 — đồng bộ max time của CP-SAT solver với timeoutMs.
         SOLVER_MAX_SECONDS: String(Math.max(5, timeoutSeconds - 5)),
+        SOLVER_WORKERS: String(Math.max(2, os.cpus().length - 1)),
       },
       detached: true, // để có process group riêng để kết thúc cả cây con (fix bug #7)
     });
@@ -105,7 +104,40 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
     child.on('close', () => {
       clearTimeout(timer);
       if (timedOut) {
+        // Trả best-feasible nếu solver kịp ghi result.json trước khi bị kill.
+        const resultPath = path.join(jobDir, 'result.json');
+        let partialResult: unknown;
+        try {
+          if (fs.existsSync(resultPath)) {
+            partialResult = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+          }
+        } catch { /* ignore */ }
         cleanupJobDir();
+        if (
+          partialResult &&
+          typeof partialResult === 'object' &&
+          (partialResult as any).status &&
+          ['optimal', 'feasible'].includes(String((partialResult as any).status).toLowerCase()) &&
+          Array.isArray((partialResult as any).schedule) &&
+          (partialResult as any).schedule.length > 0
+        ) {
+          const artifactDir = path.join(process.cwd(), '.ai_results');
+          fs.mkdirSync(artifactDir, { recursive: true });
+          const artifactPath = path.join(artifactDir, `result_${Date.now()}.json`);
+          fs.writeFileSync(artifactPath, JSON.stringify(partialResult), 'utf8');
+          resolve({
+            phase: 'run',
+            ok: true,
+            status: String((partialResult as any).status).toLowerCase(),
+            durationMs: timeoutMs,
+            resultPath: artifactPath,
+            resultData: partialResult,
+            errorDigest: '',
+            stdout: '',
+            stderr: '',
+          });
+          return;
+        }
         reject(new Error('Python execution timed out.'));
         return;
       }

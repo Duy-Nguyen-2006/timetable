@@ -1,5 +1,6 @@
 import { TokenBudgetGuard } from './budget-guard';
 import { runCoderTurn } from './coder';
+import type { ConstraintSpec, ScheduleEntry } from './constraint-spec';
 import { verifyCpSatRoundTrip } from './cp-sat-roundtrip';
 import { validateSchedule } from './deterministic-validator';
 import { compressPayload, digestError } from './input-compressor';
@@ -117,6 +118,23 @@ function shouldRepairExecutableFailure(
   );
 }
 
+function constraintSignature(spec: ConstraintSpec): string {
+  const normalizedParams = JSON.stringify(
+    Object.fromEntries(Object.entries(spec.params).sort(([a], [b]) => a.localeCompare(b)))
+  );
+  return `${spec.kind}|${spec.severity}|${normalizedParams}`;
+}
+
+function dedupeConstraintSpecs(specs: ConstraintSpec[]): ConstraintSpec[] {
+  const seen = new Set<string>();
+  return specs.filter((spec) => {
+    const sig = constraintSignature(spec);
+    if (seen.has(sig)) return false;
+    seen.add(sig);
+    return true;
+  });
+}
+
 export async function runLocalAgent(
   input: AgentInputPayload,
   config: LocalAgentConfig
@@ -136,16 +154,16 @@ export async function runLocalAgent(
     const translator = await runTranslatorTurn(pickStageConfig(config, 'translator'), input);
     consumeBudget(budget, translator.usageTokens, JSON.stringify(input.constraints), translator.rawResponse ?? '');
     totalToolCalls += 1;
-    emit(config, { type: 'stage_completed', stage: 'translator', message: `Translator done (${translator.constraintSpecs.length} specs)` });
-
-    const compressed = compressPayload(input, translator.constraintSpecs);
-    const solverConstraintSpecs = translator.constraintSpecs.filter(
+    const deduped = dedupeConstraintSpecs(translator.constraintSpecs);
+    emit(config, { type: 'stage_completed', stage: 'translator', message: `Translator done (${translator.constraintSpecs.length} specs, ${deduped.length} after dedupe)` });
+    const compressed = compressPayload(input, deduped);
+    const solverConstraintSpecs = deduped.filter(
       (spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base'))
     );
     const hasCustomConstraintSpecs = solverConstraintSpecs.some(
       (spec) => spec.kind === 'custom_dsl' && spec.severity === 'hard'
     );
-    board.setConstraintSpecs(translator.constraintSpecs);
+    board.setConstraintSpecs(deduped);
     board.setDataset(compressed);
 
     emit(config, { type: 'phase', phase: 'planner', message: 'Đang tạo kế hoạch solver', iteration: 0 });
@@ -161,7 +179,7 @@ export async function runLocalAgent(
           Math.max(1, compressed.datasetDigest.periodCount) *
           Math.max(1, compressed.datasetDigest.totalAssignments),
       },
-      constraintSpecs: translator.constraintSpecs,
+      constraintSpecs: deduped,
     });
     consumeBudget(budget, planner.usageTokens, JSON.stringify(planner.plan), planner.rawResponse ?? '');
     totalToolCalls += 1;
@@ -181,6 +199,7 @@ export async function runLocalAgent(
     let latestCoveredConstraintIds = new Set<string>();
     let lastCheckedCustomIds = new Set<string>();
     let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }> | null = null;
+    let lastSuccessfulSchedule: ScheduleEntry[] | null = null;
 
     while (true) {
       let coderRetry = 0;
@@ -205,7 +224,7 @@ export async function runLocalAgent(
             // covered set dựa trên các comment id còn lại trong code.
             // (fix bug #1 — trước đây giữ nguyên covered cũ, dễ false-positive.)
             const refreshed = new Set<string>(latestCoveredConstraintIds);
-            for (const spec of translator.constraintSpecs) {
+            for (const spec of deduped) {
               if (spec.kind !== 'custom_dsl') continue;
               const re = new RegExp(`(^|[^A-Za-z0-9_])${spec.id}([^A-Za-z0-9_]|$)`, 'm');
               if (re.test(latestConstraintCode)) refreshed.add(spec.id);
@@ -309,6 +328,7 @@ export async function runLocalAgent(
           periods: compressed.periods,
           assignments: compressed.assignments,
           constraints: solverConstraintSpecs,
+          ...(lastSuccessfulSchedule ? { warmStartSchedule: lastSuccessfulSchedule } : {}),
         };
 
         let execResult: Awaited<ReturnType<typeof executeGeneratedCode>>;
@@ -357,7 +377,7 @@ export async function runLocalAgent(
           return { ...entry, assignmentId: matchingAssignments[0].id };
         });
 
-        const report = validateSchedule(scheduleWithAssignmentIds, translator.constraintSpecs, {
+        const report = validateSchedule(scheduleWithAssignmentIds, deduped, {
           assignments: compressed.assignments,
         });
         const roundTrip = verifyCpSatRoundTrip(scheduleWithAssignmentIds, compressed.assignments, {
@@ -366,6 +386,9 @@ export async function runLocalAgent(
           periods: compressed.periods,
         });
 
+        if (roundTrip.ok && scheduleWithAssignmentIds.length > 0) {
+          lastSuccessfulSchedule = scheduleWithAssignmentIds;
+        }
         // Merge custom_dsl predicate results from sandbox
         const customChecks =
           ((execResult.resultData as { customChecks?: Array<{
@@ -379,13 +402,13 @@ export async function runLocalAgent(
           .filter((c) => c.checked && !c.ok)
           .flatMap((c) => c.violations)
           .filter((v) => {
-            const spec = translator.constraintSpecs.find((s) => s.id === v.constraintId);
+            const spec = deduped.find((s) => s.id === v.constraintId);
             return spec?.severity === 'hard';
           });
 
         const hardUncheckedIds = report.uncheckedConstraintIds.filter((id) => {
           if (checkedCustomIds.has(id)) return false;
-          const spec = translator.constraintSpecs.find((item) => item.id === id);
+          const spec = deduped.find((item) => item.id === id);
           return spec?.severity === 'hard';
         });
 
@@ -526,7 +549,7 @@ export async function runLocalAgent(
       // (fix bug #1 / #10)
       const repairViolations = [...lastReport.hardViolations];
       for (const id of uncoveredHardUncheckedIds) {
-        const spec = translator.constraintSpecs.find((item) => item.id === id);
+        const spec = deduped.find((item) => item.id === id);
         repairViolations.push({
           constraintId: id,
           kind: 'base_constraint',

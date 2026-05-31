@@ -83,3 +83,11 @@ julia-*/
 
 # Zig
 zig-out/
+
+# Local build binaries
+scripts/bin/
+# Harness durable layer
+harness.db
+harness.db-wal
+harness.db-shm
+scripts/bin/harness-cli

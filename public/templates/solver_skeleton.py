@@ -719,6 +719,18 @@ def build_custom_constraints(model, slots, data):
 
 soft_terms, unsupported_soft_kinds = build_custom_constraints(model, slots, data)
 
+# Warm-start: inject hints từ schedule cũ nếu có, giúp solver hội tụ nhanh hơn
+# khi user chỉnh sửa nhỏ và re-solve.
+_warm_schedule = data.get("warmStartSchedule") or []
+if _warm_schedule:
+    _warm_set = {
+        (str(e.get("assignmentId") or ""), str(e.get("day") or ""), int(e.get("period")))
+        for e in _warm_schedule
+        if e.get("assignmentId") and e.get("day") and e.get("period") is not None
+    }
+    for _key, _var in slots.items():
+        model.AddHint(_var, 1 if _key in _warm_set else 0)
+
 solver = cp_model.CpSolver()
 # Thời gian giải có thể override qua env SOLVER_MAX_SECONDS để khớp với
 # timeoutMs phía Node (fix bug #29).

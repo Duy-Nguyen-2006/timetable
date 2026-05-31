@@ -1137,6 +1137,22 @@ export async function runTranslatorTurn(
   input: AgentInputPayload,
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<TranslatorTurnResult> {
+  // Pre-parse với deterministic rule parser. Constraints parse được rõ ràng
+  // (kind !== 'custom_dsl') không cần gửi LLM — tiết kiệm latency và token.
+  const deterministicSpecs = fallbackFromRuleParser(input);
+  const parsedOriginals = new Set<string>();
+  for (const spec of deterministicSpecs) {
+    if (spec.kind !== 'custom_dsl') parsedOriginals.add(spec.original);
+  }
+  const unparsedConstraints = input.constraints.filter((c) => !parsedOriginals.has(c.text));
+
+  if (unparsedConstraints.length === 0 && input.constraints.length > 0) {
+    const sanitized = sanitizeSpecs(input, deterministicSpecs);
+    return { constraintSpecs: sanitized, rawResponse: '', usageTokens: 0 };
+  }
+
+  const llmInput: AgentInputPayload = { ...input, constraints: unparsedConstraints };
+
   const systemPrompt = await loadTranslatorSystemPrompt();
   const periods = buildTranslatorPeriods(input);
   const context = {
@@ -1159,7 +1175,7 @@ export async function runTranslatorTurn(
         content: JSON.stringify(
           {
             context,
-            raw_constraints: input.constraints.map((constraint) => ({
+            raw_constraints: llmInput.constraints.map((constraint) => ({
               text: constraint.text,
               severity_hint: constraint.type === 'required' ? 'hard' : 'soft',
             })),
@@ -1253,9 +1269,13 @@ export async function runTranslatorTurn(
     const response = await invokeChat(payload);
     const parsedJson = parseModelJson(response.content);
     const validated = translatorResponseSchema.parse(parsedJson);
-    const sanitized = sanitizeSpecs(input, validated.constraintSpecs);
+    const unparsedTexts = new Set(unparsedConstraints.map((c) => c.text));
+    const deterministicParsed = deterministicSpecs.filter(
+      (s) => s.kind !== 'custom_dsl' && !unparsedTexts.has(s.original)
+    );
+    const merged = sanitizeSpecs(input, [...deterministicParsed, ...validated.constraintSpecs]);
     return {
-      constraintSpecs: sanitized,
+      constraintSpecs: merged,
       rawResponse: response.content,
       usageTokens: response.usage?.total_tokens,
     };
