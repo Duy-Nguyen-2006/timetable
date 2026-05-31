@@ -142,6 +142,18 @@ test('fallback parser returns at least one spec per constraint', () => {
   assert.equal(result[0].id, 'c1');
 });
 
+test('fallback parser ignores room/resource capacity constraints', () => {
+  const result = __translatorInternal.fallbackFromRuleParser({
+    ...sampleInput,
+    constraints: [{ type: 'required', text: 'Phòng Toán tối đa 1 lớp cùng tiết' }],
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].kind, 'custom_dsl');
+  assert.equal(result[0].severity, 'info');
+  assert.equal(result[0].notes, 'ignored:room_constraint');
+});
+
 test('fallback parser covers remaining constraint kinds', () => {
   const input: AgentInputPayload = {
     days: [

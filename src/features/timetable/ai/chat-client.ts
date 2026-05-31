@@ -1,6 +1,7 @@
-import type { ChatUsage } from './types';
+import type { AIProviderType, ChatUsage } from './types';
 
 export interface ChatPayload {
+  provider?: AIProviderType;
   baseURL: string;
   apiKey: string;
   model: string;

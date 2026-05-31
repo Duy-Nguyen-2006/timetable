@@ -45,7 +45,6 @@ const constraintSpecSchema = z.object({
     'weekly_periods_exact',
     'if_then',
     'pair_not_same_slot',
-    'resource_capacity',
     'session_limit',
     'subject_group',
     'subject_group_daily_limit',
@@ -240,7 +239,7 @@ function markAutoBaseSpec(spec: ConstraintSpec): ConstraintSpec {
 function isResourceCapacityText(text: string): { subject: string; capacity: number } | null {
   const normalized = normalizeConstraintText(text);
   const match = normalized.match(
-    /(.+?)\s+toi\s+da\s+(\d+)\s+lop\s+cung\s+slot/iu
+    /(.+?)\s+toi\s+da\s+(\d+)\s+lop\s+cung\s+(?:slot|tiet)/iu
   );
   if (match) {
     const subject = match[1].trim();
@@ -708,9 +707,14 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       return {
         id,
         original: constraint.text,
-        severity,
-        kind: 'resource_capacity',
-        params: resourceCapacity,
+        severity: 'info',
+        kind: 'custom_dsl',
+        params: {
+          ignoredReason: 'room_constraints_ignored',
+          naturalLanguage: constraint.text,
+        },
+        tags: ['auto_base'],
+        notes: 'ignored:room_constraint',
       } satisfies ConstraintSpec;
     }
 
@@ -924,6 +928,10 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
   const validDays = new Set(input.days.map((day) => day.id));
 
   return specs.flatMap((spec, index) => {
+    if (String(spec.kind) === 'resource_capacity') {
+      return [];
+    }
+
     const base: ConstraintSpec = {
       ...spec,
       id: `c${index + 1}`,
@@ -940,6 +948,14 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
     const day = typeof base.params.day === 'string' ? base.params.day : null;
     const weeklyPeriods = Number(base.params.weeklyPeriods ?? NaN);
     const period = Number(base.params.period ?? NaN);
+
+    if (base.notes === 'ignored:room_constraint') {
+      return {
+        ...base,
+        severity: 'info',
+        tags: [...new Set([...(base.tags ?? []), 'auto_base' as const])],
+      };
+    }
 
     if (base.kind === 'custom_dsl' && base.original.trim() && isAutoBaseConstraintText(base.original)) {
       return markAutoBaseSpec(base);
@@ -1236,7 +1252,6 @@ export async function runTranslatorTurn(
                       'weekly_periods_exact',
                       'if_then',
                       'pair_not_same_slot',
-                      'resource_capacity',
                       'session_limit',
                       'subject_group',
                       'subject_group_daily_limit',

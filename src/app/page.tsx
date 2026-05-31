@@ -32,7 +32,7 @@ export default function Home() {
         </h1>
         <p className="mt-4 text-lg text-white/70">
           Nhập dữ liệu giáo viên, môn, lớp, phân công và ràng buộc.<br />
-          Payload đã chuẩn bị sẵn sàng để gửi vào backend mới.
+          AI sẽ tạo thời khóa biểu cuối cùng và kiểm tra ràng buộc cứng trước khi trả kết quả.
         </p>
 
         <button
@@ -82,7 +82,7 @@ export default function Home() {
         ) : null}
 
         <div className="mt-6 text-xs text-white/40">
-          Toàn bộ phần AI / solver cũ đã được gỡ bỏ. Chỉ còn luồng nhập liệu + xuất payload.
+          Dữ liệu và tối đa 3 kết quả gần nhất được lưu cục bộ trên máy để tái sử dụng.
         </div>
       </div>
     </main>

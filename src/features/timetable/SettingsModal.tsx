@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import type { AIProviderConfig } from './ai/types';
+import type { AIProviderConfig, AIProviderType } from './ai/types';
 
 interface SettingsModalProps {
   open: boolean;
@@ -18,6 +18,12 @@ interface SettingsModalProps {
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 
+function inferProvider(baseURL: string, model: string): AIProviderType {
+  if (baseURL.toLowerCase().includes('openrouter.ai')) return 'openrouter';
+  if (/^(gpt-5|gpt-4o|o\d|codex)/u.test(model.toLowerCase())) return 'openai-responses';
+  return 'generic-chat-completion-api';
+}
+
 export function SettingsModal({
   open,
   onOpenChange,
@@ -27,7 +33,7 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [baseURL, setBaseURL] = useState(initialConfig?.baseURL || DEFAULT_BASE_URL);
   const [apiKey, setApiKey] = useState(initialConfig?.apiKey || '');
-  const [model, setModel] = useState(initialConfig?.model || 'deepseek/deepseek-chat');
+  const [model, setModel] = useState(initialConfig?.model || 'deepseek/deepseek-v4-flash');
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const { toast } = useToast();
@@ -53,6 +59,7 @@ export function SettingsModal({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          provider: inferProvider(baseURL.trim(), model.trim()),
           baseURL: baseURL.trim(),
           apiKey: apiKey.trim(),
           model: model.trim(),
@@ -103,6 +110,7 @@ export function SettingsModal({
     }
 
     onSave({
+      provider: inferProvider(trimmedBaseURL, trimmedModel),
       baseURL: trimmedBaseURL,
       apiKey: trimmedKey,
       model: trimmedModel,
@@ -116,7 +124,7 @@ export function SettingsModal({
         <DialogHeader>
           <DialogTitle>Cấu hình AI Provider</DialogTitle>
           <DialogDescription>
-            Nhập thông tin OpenAI-compatible provider của bạn. Dữ liệu chỉ lưu trên máy này.
+            Nhập provider AI. OpenRouter/generic dùng Chat Completions; GPT-5+/GPT-4o/o-series dùng OpenAI Responses API.
           </DialogDescription>
         </DialogHeader>
 
@@ -148,7 +156,10 @@ export function SettingsModal({
               placeholder="deepseek/deepseek-chat"
             />
             <p className="text-xs text-muted-foreground">
-              Ví dụ: deepseek/deepseek-chat, gpt-4o-mini, gemini-1.5-flash
+              Ví dụ: deepseek/deepseek-v4-flash, gpt-5, gpt-4o-mini
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Provider tự nhận diện: {inferProvider(baseURL, model)}
             </p>
           </div>
 

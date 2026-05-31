@@ -60,7 +60,7 @@ def test_class_no_double_subject_day_honors_custom_max_per_day():
     assert report["violations"][0]["constraintId"] == "class_no_double_custom"
 
 
-def test_validator_checks_resource_capacity_session_limit_and_subject_group_daily_limit():
+def test_validator_ignores_resource_capacity_and_checks_supported_limits():
     schedule = [
         _entry("6A", "mon", 1, "Toán", "Sơn"),
         _entry("6B", "mon", 1, "Toán", "Mai"),
@@ -76,4 +76,4 @@ def test_validator_checks_resource_capacity_session_limit_and_subject_group_dail
 
     report = validate_schedule(schedule, specs)
 
-    assert {violation["constraintId"] for violation in report["violations"]} == {"capacity", "session", "group"}
+    assert {violation["constraintId"] for violation in report["violations"]} == {"session", "group"}

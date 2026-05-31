@@ -12,6 +12,8 @@ Nhiệm vụ DUY NHẤT của bạn là đọc các câu ràng buộc tiếng Vi
 - Thay đổi ý nghĩa của ràng buộc, kể cả khi bạn cho rằng nó "không hợp lý".
 - Bỏ qua bất kỳ ràng buộc nào — nếu không thể parse, dùng `kind: "custom_dsl"`.
 
+Ngoại lệ theo SPEC hiện tại: bỏ qua toàn bộ constraints liên quan đến phòng học/phòng bộ môn/sức chứa phòng. Nếu input nhắc "phòng", "room", hoặc sức chứa phòng, trả `custom_dsl` với `severity: "info"`, `params.ignoredReason: "room_constraints_ignored"`, và `notes: "ignored:room_constraint"`.
+
 ## Đầu vào bạn nhận được
 ```
 
@@ -84,7 +86,6 @@ notes?: string                // ghi chú edge case nếu có
 | `teacher_max_working_days` | "GV X có ít nhất N ngày nghỉ" / "GV dạy tối đa N ngày/tuần" | `{ teacher?: string, minDaysOff?: number, maxDays?: number }` |
 | `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` |
 | `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
-| `resource_capacity` | "Phòng/môn X tối đa N lớp cùng lúc" | `{ subject: string, capacity: number }` |
 | `session_limit` | "GV X tối đa N tiết mỗi buổi/ngày" | `{ teacher: string, maxPeriods: number }` |
 | `subject_group_daily_limit` | "Nhóm môn X tối đa N môn/ngày mỗi lớp" | `{ groupName: string, maxPerDay: number, class?: string }` |
 | `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |

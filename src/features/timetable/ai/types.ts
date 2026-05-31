@@ -6,7 +6,10 @@ import type {
   Violation,
 } from './constraint-spec';
 
+export type AIProviderType = 'openrouter' | 'openai-responses' | 'generic-chat-completion-api';
+
 export interface AIProviderConfig {
+  provider?: AIProviderType;
   baseURL: string;
   apiKey: string;
   model: string;

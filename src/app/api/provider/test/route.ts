@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
+import { type ProviderType, resolveProvider, normalizeBaseURL } from '@/lib/provider'
 
 type TestProviderPayload = {
+  provider?: ProviderType
   baseURL?: string
   apiKey?: string
   model?: string
@@ -9,9 +11,10 @@ type TestProviderPayload = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as TestProviderPayload
-    const baseURL = String(body.baseURL ?? '').trim().replace(/\/$/, '')
+    const baseURL = normalizeBaseURL(String(body.baseURL ?? '').trim())
     const apiKey = String(body.apiKey ?? '').trim()
     const model = String(body.model ?? '').trim()
+    const provider = resolveProvider(body.provider, baseURL, model)
 
     if (!baseURL || !apiKey) {
       return NextResponse.json(
@@ -20,15 +23,9 @@ export async function POST(request: Request) {
       )
     }
 
-    const authHeaders = {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    }
-
-    // 1) Try /models first (many OpenAI-compatible providers support this)
     const modelsRes = await fetch(`${baseURL}/models`, {
       method: 'GET',
-      headers: authHeaders,
+      headers: { Authorization: `Bearer ${apiKey}` },
       cache: 'no-store',
     })
 
@@ -39,25 +36,31 @@ export async function POST(request: Request) {
       })
     }
 
-    // 2) Fallback to a tiny chat completion request (some providers disable /models)
     if (model) {
-      const chatRes = await fetch(`${baseURL}/chat/completions`, {
+      const useResponses = provider === 'openai-responses'
+      const chatRes = await fetch(`${baseURL}${useResponses ? '/responses' : '/chat/completions'}`, {
         method: 'POST',
-        headers: authHeaders,
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         cache: 'no-store',
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-          temperature: 0,
-        }),
+        body: JSON.stringify(useResponses
+          ? {
+              model,
+              input: [{ role: 'user', content: 'ping' }],
+              max_output_tokens: 1,
+              store: false,
+            }
+          : {
+              model,
+              messages: [{ role: 'user', content: 'ping' }],
+              max_tokens: 1,
+              temperature: 0,
+            }),
       })
 
       if (chatRes.ok) {
         return NextResponse.json({
           ok: true,
-          message:
-            '✅ Kết nối thành công! /models không khả dụng nhưng model vẫn gọi được qua /chat/completions.',
+          message: `✅ Kết nối thành công! /models không khả dụng nhưng model vẫn gọi được qua ${useResponses ? '/responses' : '/chat/completions'}.`,
         })
       }
 

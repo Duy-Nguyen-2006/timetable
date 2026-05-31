@@ -36,6 +36,58 @@ test('deepseek models do not receive anthropic cache metadata', () => {
   assert.equal((mapped[0] as { cache_control?: { type: string } }).cache_control, undefined);
 });
 
+test('provider resolver keeps OpenRouter models on chat completions', () => {
+  assert.equal(
+    __chatInternal.resolveProvider(undefined, 'https://openrouter.ai/api/v1', 'deepseek/deepseek-v4-flash'),
+    'openrouter'
+  );
+});
+
+test('provider resolver routes direct GPT-5 style models to Responses API', () => {
+  assert.equal(
+    __chatInternal.resolveProvider(undefined, 'https://api.openai.com/v1', 'gpt-5.5'),
+    'openai-responses'
+  );
+});
+
+test('buildChatRequest uses chat completions for OpenRouter', () => {
+  const request = __chatInternal.buildChatRequest(
+    'openrouter',
+    'https://openrouter.ai/api/v1',
+    'deepseek/deepseek-v4-flash',
+    [{ role: 'user', content: 'ping' }],
+    { model: 'deepseek/deepseek-v4-flash' },
+    false
+  );
+
+  assert.equal(request.url, 'https://openrouter.ai/api/v1/chat/completions');
+  assert.deepEqual(request.requestBody.messages, [{ role: 'user', content: 'ping' }]);
+});
+
+test('buildChatRequest uses Responses API for direct OpenAI models', () => {
+  const request = __chatInternal.buildChatRequest(
+    'openai-responses',
+    'https://api.openai.com/v1',
+    'gpt-5.5',
+    [{ role: 'user', content: 'ping' }],
+    { model: 'gpt-5.5', max_tokens: 8 },
+    false
+  );
+
+  assert.equal(request.url, 'https://api.openai.com/v1/responses');
+  assert.deepEqual(request.requestBody.input, [{ role: 'user', content: 'ping' }]);
+  assert.equal(request.requestBody.max_output_tokens, 8);
+});
+
+test('parseProviderResponse parses OpenAI Responses output_text', () => {
+  const parsed = __chatInternal.parseProviderResponse(
+    JSON.stringify({ output_text: '{"ok":true}', usage: { total_tokens: 9 } })
+  );
+
+  assert.equal(parsed.content, '{"ok":true}');
+  assert.deepEqual(parsed.usage, { total_tokens: 9 });
+});
+
 test('parseProviderResponse parses normal JSON chat completion', () => {
   const parsed = __chatInternal.parseProviderResponse(
     JSON.stringify({

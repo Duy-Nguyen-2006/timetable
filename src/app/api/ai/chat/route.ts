@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { type ProviderType, resolveProvider as resolveProviderShared, normalizeBaseURL } from '@/lib/provider';
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -6,6 +7,7 @@ type ChatMessage = {
 };
 
 type ChatPayload = {
+  provider?: ProviderType;
   baseURL?: string;
   apiKey?: string;
   model?: string;
@@ -53,10 +55,6 @@ function normalizeContent(content: unknown): string {
   return '';
 }
 
-function normalizeBaseURL(baseURL: string): string {
-  return baseURL.replace(/\/+$/u, '');
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -79,9 +77,36 @@ function extractErrorMessage(payload: unknown): string | null {
   return null;
 }
 
+function extractResponseOutputContent(payload: unknown): string {
+  const record = asRecord(payload);
+  if (!record) return '';
+
+  if (typeof record.output_text === 'string' && record.output_text.trim()) {
+    return record.output_text;
+  }
+
+  const output = Array.isArray(record.output) ? record.output : [];
+  let content = '';
+  for (const item of output) {
+    const itemRecord = asRecord(item);
+    const parts = Array.isArray(itemRecord?.content) ? itemRecord.content : [];
+    for (const part of parts) {
+      const partRecord = asRecord(part);
+      if (typeof partRecord?.text === 'string') content += partRecord.text;
+      if (typeof partRecord?.output_text === 'string') content += partRecord.output_text;
+    }
+  }
+  return content;
+}
+
 function extractResponseContent(payload: unknown): { content: string; usage: Record<string, unknown> | null } {
   const record = asRecord(payload);
   if (!record) return { content: '', usage: null };
+
+  const responseOutput = extractResponseOutputContent(record);
+  if (responseOutput) {
+    return { content: responseOutput, usage: asRecord(record.usage) };
+  }
 
   const choices = Array.isArray(record.choices) ? record.choices : [];
   let content = '';
@@ -145,6 +170,44 @@ function parseSsePayload(raw: string): { content: string; usage: Record<string, 
   return { content, usage };
 }
 
+function buildChatRequest(
+  provider: ProviderType,
+  baseURL: string,
+  model: string,
+  messages: ChatMessage[],
+  body: ChatPayload,
+  cacheEnabled: boolean
+): { url: string; requestBody: Record<string, unknown>; headers: Record<string, string> } {
+  if (provider === 'openai-responses') {
+    const input = messages.map((message) => ({ role: message.role, content: message.content }));
+    return {
+      url: `${baseURL}/responses`,
+      headers: {},
+      requestBody: {
+        model,
+        input,
+        temperature: body.temperature ?? 0.2,
+        max_output_tokens: body.max_tokens ?? 4000,
+        text: body.response_format ? { format: body.response_format } : undefined,
+        store: false,
+      },
+    };
+  }
+
+  return {
+    url: `${baseURL}/chat/completions`,
+    headers: providerHeaders(model, cacheEnabled) ?? {},
+    requestBody: {
+      model,
+      messages: applyProviderSpecificCaching(model, messages, cacheEnabled),
+      temperature: body.temperature ?? 0.2,
+      max_tokens: body.max_tokens ?? 4000,
+      response_format: body.response_format,
+      stream: false,
+    },
+  };
+}
+
 function parseProviderResponse(raw: string): { content: string; usage: Record<string, unknown> | null } {
   const trimmed = raw.trim();
   if (!trimmed) return { content: '', usage: null };
@@ -193,23 +256,17 @@ export async function POST(request: Request) {
     }
 
     const cacheEnabled = Boolean((body.cache_control as { enable?: boolean } | undefined)?.enable);
-    const messagesWithCache = applyProviderSpecificCaching(model, messages, cacheEnabled);
-    const response = await fetchWithRetry(`${baseURL}/chat/completions`, {
+    const provider = resolveProviderShared(body.provider, baseURL, model);
+    const chatRequest = buildChatRequest(provider, baseURL, model, messages, body, cacheEnabled);
+    const response = await fetchWithRetry(chatRequest.url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        ...(providerHeaders(model, cacheEnabled) ?? {}),
+        ...chatRequest.headers,
       },
       cache: 'no-store',
-      body: JSON.stringify({
-        model,
-        messages: messagesWithCache,
-        temperature: body.temperature ?? 0.2,
-        max_tokens: body.max_tokens ?? 4000,
-        response_format: body.response_format,
-        stream: false,
-      }),
+      body: JSON.stringify(chatRequest.requestBody),
     });
 
     const raw = await response.text();
@@ -258,5 +315,7 @@ export async function POST(request: Request) {
 export const __chatInternal = {
   applyProviderSpecificCaching,
   providerHeaders,
+  resolveProvider: resolveProviderShared,
+  buildChatRequest,
   parseProviderResponse,
 };

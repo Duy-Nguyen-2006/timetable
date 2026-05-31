@@ -618,17 +618,7 @@ def build_custom_constraints(model, slots, data):
             _add_subject_max_consecutive(spec)
 
         elif kind == "resource_capacity":
-            subj = params.get("subject")
-            capacity = int(params.get("capacity", 1))
-            for d in days:
-                for p in _periods_for(d):
-                    slot_vars = [
-                        slots[(a["id"], d, p)]
-                        for a in assignments
-                        if a["subject"] == subj
-                    ]
-                    if slot_vars:
-                        model.Add(sum(slot_vars) <= capacity)
+            continue
 
         elif kind == "session_limit":
             teacher = params.get("teacher")

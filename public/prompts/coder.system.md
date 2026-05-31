@@ -24,7 +24,7 @@ Hệ thống đã có Python REGISTRY trong solver_skeleton.py cho các kind bui
 - if_then
 - pair_not_same_slot
 
-Bạn KHÔNG viết code cho các kind trên.
+Bạn KHÔNG viết code cho các kind trên. Constraints liên quan phòng học/phòng bộ môn/sức chứa phòng đã bị ignore ở translator; nếu còn xuất hiện trong custom_dsl với `notes: "ignored:room_constraint"` hoặc `params.ignoredReason: "room_constraints_ignored"`, không sinh code và không đưa vào `covered_constraint_ids`.
 
 Ngoài ra, MỌI constraint có `severity != "hard"` đều do built-in registry tự xử lý dưới dạng penalty + objective. Bạn KHÔNG viết code cho bất kỳ soft constraint nào, kể cả `custom_dsl` soft.
 

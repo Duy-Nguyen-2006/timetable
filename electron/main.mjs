@@ -23,6 +23,12 @@ function getPythonBinary(name) {
   return path.join(base, process.platform === 'win32' ? 'runner.exe' : 'runner')
 }
 
+function resolvePreloadPath() {
+  const jsPreload = path.join(__dirname, 'preload.js')
+  if (fs.existsSync(jsPreload)) return jsPreload
+  return path.join(__dirname, 'preload.ts')
+}
+
 function createWindow(url) {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -30,7 +36,7 @@ function createWindow(url) {
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
-      preload: path.join(__dirname, 'preload.ts'), // or .js after build
+      preload: resolvePreloadPath(),
     },
   })
 

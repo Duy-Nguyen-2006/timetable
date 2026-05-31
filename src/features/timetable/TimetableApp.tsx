@@ -42,6 +42,12 @@ import { Settings as SettingsIcon } from 'lucide-react'
 type TimetableSolveResult = LocalAgentFinalResult
 type SolverRequestPayload = Pick<AgentInputPayload, 'constraints'>
 type AgentProgressStep = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'
+type CachedRun = {
+  id: string
+  createdAt: string
+  inputDigest: string
+  result: TimetableSolveResult
+}
 import {
   classPresetGroups,
   constraintTypeList,
@@ -69,6 +75,7 @@ import { parseQuickImportText } from './quick-import'
 
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
+const MAX_CACHED_RUNS = 3
 
 const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
 const STEP_LABELS: Record<AgentProgressStep, string> = {
@@ -405,6 +412,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [isFirstRun, setIsFirstRun] = useState(false)
 
   const AI_PROVIDER_STORAGE_KEY = 'tack_ai_provider_config'
+  const RUN_CACHE_STORAGE_KEY = 'tack_ai_run_cache'
   const encodeProviderConfig = (config: AIProviderConfig) =>
     btoa(unescape(encodeURIComponent(JSON.stringify(config))))
   const decodeProviderConfig = (raw: string): AIProviderConfig => {
@@ -413,6 +421,24 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     } catch {
       return JSON.parse(raw) as AIProviderConfig
     }
+  }
+  const readCachedRuns = (): CachedRun[] => {
+    try {
+      const raw = localStorage.getItem(RUN_CACHE_STORAGE_KEY)
+      const parsed = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.slice(0, MAX_CACHED_RUNS) : []
+    } catch {
+      return []
+    }
+  }
+  const writeCachedRun = (inputDigest: string, result: TimetableSolveResult) => {
+    try {
+      const nextRuns = [
+        { id: crypto.randomUUID(), createdAt: new Date().toISOString(), inputDigest, result },
+        ...readCachedRuns().filter((run) => run.inputDigest !== inputDigest),
+      ].slice(0, MAX_CACHED_RUNS)
+      localStorage.setItem(RUN_CACHE_STORAGE_KEY, JSON.stringify(nextRuns))
+    } catch {}
   }
 
   useEffect(() => {
@@ -1047,15 +1073,25 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       }
 
       try {
+        const agentInput = {
+          days: selectedSpreadsheetDays,
+          sessions: selectedSessionData,
+          periodCounts: periods,
+          deletedPeriods,
+          assignments: normalizedAssignments,
+          constraints: requestConstraints,
+        }
+        const inputDigest = JSON.stringify(agentInput)
+        const cachedRun = readCachedRuns().find((run) => run.inputDigest === inputDigest)
+        if (cachedRun) {
+          setAiResult(cachedRun.result)
+          setAgentStatus('Hoàn thành từ cache.')
+          setAgentStep('idle')
+          return
+        }
+
         const agentResult = await runLocalAgent(
-          {
-            days: selectedSpreadsheetDays,
-            sessions: selectedSessionData,
-            periodCounts: periods,
-            deletedPeriods,
-            assignments: normalizedAssignments,
-            constraints: requestConstraints,
-          },
+          agentInput,
           {
             ...aiProvider,
             onEvent: (event) => {
@@ -1081,6 +1117,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
         if (agentResult && agentResult.success && agentResult.finalResult) {
           setAiResult(agentResult.finalResult as any);
+          writeCachedRun(inputDigest, agentResult.finalResult as TimetableSolveResult);
           setAgentStatus("Hoàn thành!");
           setAgentStep("idle");
         } else if (agentResult?.error) {
@@ -2691,7 +2728,7 @@ const handleDownloadExcel = useCallback(() => {
                             </section>
                           ) : null}
 
-                          {(agentTimeline.length > 0 || (aiResult.attemptHistorySummary?.length ?? 0) > 0) && (
+                          {showTechnicalErrors && (agentTimeline.length > 0 || (aiResult.attemptHistorySummary?.length ?? 0) > 0) && (
                             <section className={`${panelClass} p-4`}>
                               <h3 className="mb-3 text-sm font-semibold text-white">Timeline</h3>
                               {agentTimeline.length > 0 ? (

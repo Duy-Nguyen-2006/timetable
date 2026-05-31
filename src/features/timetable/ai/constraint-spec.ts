@@ -30,7 +30,6 @@ export type ConstraintKind =
   | 'weekly_periods_exact'
   | 'if_then'
   | 'pair_not_same_slot'
-  | 'resource_capacity'
   | 'session_limit'
   | 'subject_group'
   | 'subject_group_daily_limit'

@@ -295,24 +295,6 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
                 )
         return out
 
-    if kind == "resource_capacity":
-        subject = params.get("subject")
-        try:
-            capacity = int(params.get("capacity", 1))
-        except (TypeError, ValueError):
-            capacity = 1
-        by_slot: dict[str, list[dict[str, Any]]] = {}
-        for entry in schedule:
-            if entry.get("subject") != subject:
-                continue
-            key = f"{entry.get('day')}::{entry.get('period')}"
-            by_slot.setdefault(key, []).append(entry)
-        out: list[dict[str, Any]] = []
-        for entries in by_slot.values():
-            if len(entries) > capacity:
-                out.append(_violation(cid, kind, "resource_capacity violated.", entries))
-        return out
-
     if kind == "session_limit":
         teacher = params.get("teacher")
         try:
@@ -368,6 +350,8 @@ def validate_schedule(
     unchecked: list[str] = []
 
     for spec in constraint_specs:
+        if spec.get("kind") == "resource_capacity":
+            continue
         if spec.get("kind") == "custom_dsl":
             unchecked.append(str(spec.get("id", "unknown")))
             continue
