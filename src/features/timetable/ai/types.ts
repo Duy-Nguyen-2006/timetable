@@ -7,12 +7,14 @@ import type {
 } from './constraint-spec';
 
 export type AIProviderType = 'openrouter' | 'openai-responses' | 'generic-chat-completion-api';
+export type SolverProfile = 'fast' | 'balanced' | 'deep';
 
 export interface AIProviderConfig {
   provider?: AIProviderType;
   baseURL: string;
   apiKey: string;
   model: string;
+  solverProfile?: SolverProfile;
 }
 
 export interface ChatUsage {
@@ -47,6 +49,7 @@ export interface AgentInputPayload {
   deletedPeriods: Record<string, boolean>;
   assignments: NormalizedAssignment[];
   constraints: ConstraintItemInput[];
+  previousSchedule?: ScheduleEntry[];
   metadata?: {
     schoolName?: string;
     semester?: string;
@@ -56,7 +59,7 @@ export interface AgentInputPayload {
 export interface ExecutionResult {
   phase: 'compile' | 'run' | 'parse';
   ok: boolean;
-  status: 'optimal' | 'feasible' | 'infeasible' | 'unknown' | 'timeout' | 'crashed';
+  status: 'optimal' | 'feasible' | 'infeasible' | 'unknown' | 'timeout' | 'timeout_with_solution' | 'crashed';
   durationMs: number;
   resultPath?: string;
   resultSummary?: {
@@ -69,6 +72,13 @@ export interface ExecutionResult {
     periods: Array<number | string>;
     status?: string;
     schedule: ScheduleEntry[];
+    customChecks?: Array<{
+      id: string;
+      checked: boolean;
+      ok: boolean;
+      violations: Array<{ constraintId: string; kind: string; message: string }>;
+    }>;
+    unsupportedSoftKinds?: string[];
   };
   errorDigest?: string;
   stdout?: string;
@@ -81,6 +91,7 @@ export interface LocalAgentFinalResult {
   periods: Array<number | string>;
   schedule: ScheduleEntry[];
   status: 'solved';
+  solverStatus?: 'optimal' | 'feasible' | 'timeout_with_solution';
   message: string;
   deterministicReport: DeterministicValidationReport;
   checkerReport: DeterministicValidationReport;
@@ -163,6 +174,8 @@ export interface LocalAgentConfig extends AIProviderConfig {
   modelCoder?: string;
   modelRepair?: string;
   timeoutMs?: number;
+  solverProfile?: SolverProfile;
+  solverWorkers?: number;
   onEvent?: (event: AgentEvent) => void;
 }
 

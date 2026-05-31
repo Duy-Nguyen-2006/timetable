@@ -53,6 +53,8 @@ const constraintSpecSchema = z.object({
   params: z.record(z.string(), z.unknown()),
   tags: z.array(z.enum(['auto_base', 'user_required', 'user_preferred'])).optional(),
   notes: z.string().optional(),
+  weight: z.number().optional(),
+  pythonPredicate: z.string().optional(),
 });
 
 const translatorResponseSchema = z.object({
@@ -324,6 +326,17 @@ function splitFallbackConstraintText(text: string): string[] {
     .filter(Boolean);
 }
 
+function applyConstraintWeight(spec: ConstraintSpec, weight: number | undefined): ConstraintSpec {
+  if (spec.severity !== 'soft') return spec;
+  const safeWeight = Number(weight);
+  if (!Number.isFinite(safeWeight) || safeWeight <= 0) return spec;
+  return {
+    ...spec,
+    weight: safeWeight,
+    params: { ...spec.params, weight: safeWeight },
+  };
+}
+
 function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   const teacherLabels = [...new Set(input.assignments.map((assignment) => assignment.teacher.label))];
   const classLabels = [...new Set(input.assignments.map((assignment) => assignment.class.label))];
@@ -332,11 +345,13 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   const sessionIds = Object.fromEntries(input.sessions.map((session) => [session.id, session.id]));
 
   let nextId = 1;
-  return input.constraints.flatMap((rawConstraint) => {
+  const weightByText = new Map(input.constraints.map((constraint) => [constraint.text, constraint.weight]));
+  const specs = input.constraints.flatMap((rawConstraint) => {
     const clauses = splitFallbackConstraintText(rawConstraint.text);
     return clauses.flatMap<ConstraintSpec>((clause) => {
       const constraint = { ...rawConstraint, text: clause };
       const id = `c${nextId++}`;
+      const withWeight = (spec: ConstraintSpec): ConstraintSpec => applyConstraintWeight(spec, constraint.weight);
       const parsed = parseConstraint(constraint.text, {
         teacherLabels,
         classLabels,
@@ -919,6 +934,8 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
     return isAutoBaseConstraintText(constraint.text) ? markAutoBaseSpec(fallbackSpec) : fallbackSpec;
     });
   });
+
+  return specs.map((spec) => applyConstraintWeight(spec, weightByText.get(spec.original)));
 }
 
 function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): ConstraintSpec[] {
@@ -932,15 +949,21 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
       return [];
     }
 
-    const base: ConstraintSpec = {
-      ...spec,
-      id: `c${index + 1}`,
-      original: spec.original || input.constraints[index]?.text || '',
-      severity:
-        spec.severity ?? (input.constraints[index]?.type === 'required' ? 'hard' : 'soft'),
-      params: spec.params ?? {},
-      tags: spec.tags ?? [],
-    };
+    const original = spec.original || input.constraints[index]?.text || '';
+    const inputConstraint = input.constraints.find((constraint) => constraint.text === original) ?? input.constraints[index];
+    const base = applyConstraintWeight(
+      {
+        ...spec,
+        id: `c${index + 1}`,
+        original,
+        severity:
+          spec.severity ?? (inputConstraint?.type === 'required' ? 'hard' : 'soft'),
+        params: spec.params ?? {},
+        tags: spec.tags ?? [],
+        ...(spec.pythonPredicate ? { pythonPredicate: spec.pythonPredicate } : {}),
+      },
+      inputConstraint?.weight
+    );
 
     const teacher = typeof base.params.teacher === 'string' ? base.params.teacher : null;
     const klass = typeof base.params.class === 'string' ? base.params.class : null;
@@ -968,19 +991,20 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
           {
             type: base.severity === 'hard' ? 'required' : 'preferred',
             text: base.original,
+            weight: base.weight,
           },
         ],
       });
       const reparsed = fallback.filter((item) => item.kind !== 'custom_dsl');
 
       if (reparsed.length > 0) {
-        return reparsed.map((item, itemIndex) => ({
+        return reparsed.map((item, itemIndex) => applyConstraintWeight({
           ...item,
           id: reparsed.length === 1 ? base.id : `${base.id}_${itemIndex + 1}`,
           original: base.original,
           severity: base.severity,
           tags: base.tags,
-        }));
+        }, base.weight));
       }
 
       if (fallback.length === 0) return [];
@@ -993,18 +1017,19 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
           {
             type: base.severity === 'hard' ? 'required' : 'preferred',
             text: base.original,
+            weight: base.weight,
           },
         ],
       }).filter((item) => item.kind !== 'custom_dsl');
 
       if (reparsed.length > 0) {
-        return reparsed.map((item, itemIndex) => ({
+        return reparsed.map((item, itemIndex) => applyConstraintWeight({
           ...item,
           id: reparsed.length === 1 ? base.id : `${base.id}_${itemIndex + 1}`,
           original: base.original,
           severity: base.severity,
           tags: base.tags,
-        }));
+        }, base.weight));
       }
     }
 
@@ -1018,18 +1043,19 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
           {
             type: base.severity === 'hard' ? 'required' : 'preferred',
             text: base.original,
+            weight: base.weight,
           },
         ],
       }).filter((item) => item.kind !== 'custom_dsl');
 
       if (reparsed.length > 0) {
-        return reparsed.map((item, itemIndex) => ({
+        return reparsed.map((item, itemIndex) => applyConstraintWeight({
           ...item,
           id: reparsed.length === 1 ? base.id : `${base.id}_${itemIndex + 1}`,
           original: base.original,
           severity: base.severity,
           tags: base.tags,
-        }));
+        }, base.weight));
       }
     }
 
@@ -1203,6 +1229,7 @@ export async function runTranslatorTurn(
     ],
     temperature: 0,
     max_tokens: 3500,
+    cache_control: { enable: true },
     response_format: {
       type: 'json_schema',
       json_schema: {
@@ -1259,6 +1286,8 @@ export async function runTranslatorTurn(
                     ],
                   },
                   params: { type: 'object', additionalProperties: true },
+                  weight: { type: 'number' },
+                  pythonPredicate: { type: 'string' },
                   tags: {
                     type: 'array',
                     items: {

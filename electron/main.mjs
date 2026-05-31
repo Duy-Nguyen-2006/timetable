@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -48,7 +49,7 @@ function createWindow(url) {
 }
 
 // IPC for Python execution (used by local AI agent)
-ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360000) => {
+ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360000, solverWorkers = undefined) => {
   return new Promise((resolve) => {
     const binary = getPythonBinary('code_executor')
     const jobDir = path.join(app.getPath('temp'), `tack-job-${Date.now()}`)
@@ -61,10 +62,21 @@ ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360
       'utf8'
     )
 
-    const child = spawn(binary, [], {
+    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
+    const cpuCount = Math.max(1, os.cpus().length)
+    const workerCount = Math.min(8, Math.max(1, Number(solverWorkers || process.env.SOLVER_WORKERS || cpuCount - 1)))
+
+    const child = spawn(binary, [String(timeoutSeconds)], {
       cwd: jobDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        PYTHONHASHSEED: '0',
+        EXECUTOR_TIMEOUT_SECONDS: String(timeoutSeconds),
+        SOLVER_MAX_SECONDS: String(Math.max(5, timeoutSeconds - 5)),
+        SOLVER_WORKERS: String(workerCount),
+      },
     })
 
     let stdout = ''
@@ -78,7 +90,9 @@ ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360
         has_solution: false,
         stdout,
         stderr: stderr + '\n[MAIN] Timeout from Electron main process',
+        durationMs: timeoutMs,
         execution_time_ms: timeoutMs,
+        status: 'timeout',
         error_type: 'timeout',
         result: null,
       })
@@ -108,7 +122,9 @@ ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360
           has_solution: false,
           stdout,
           stderr: stderr + '\n[MAIN] Failed to parse executor output: ' + e.message,
+          durationMs: 0,
           execution_time_ms: 0,
+          status: 'crashed',
           error_type: 'parse_error',
           result: null,
         })

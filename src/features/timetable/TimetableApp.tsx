@@ -76,6 +76,11 @@ import { parseQuickImportText } from './quick-import'
 const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
 const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
 const MAX_CACHED_RUNS = 3
+const SOLVER_STATUS_LABELS: Record<string, string> = {
+  optimal: 'Tối ưu',
+  feasible: 'Khả thi',
+  timeout_with_solution: 'Hết giờ có lịch',
+}
 
 const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
 const STEP_LABELS: Record<AgentProgressStep, string> = {
@@ -1080,6 +1085,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           deletedPeriods,
           assignments: normalizedAssignments,
           constraints: requestConstraints,
+          ...(aiResult?.schedule?.length ? { previousSchedule: aiResult.schedule } : {}),
         }
         const inputDigest = JSON.stringify(agentInput)
         const cachedRun = readCachedRuns().find((run) => run.inputDigest === inputDigest)
@@ -1185,7 +1191,7 @@ const handleDownloadExcel = useCallback(() => {
       const diagnosticsRows: string[][] = [
 
       ['Field', 'Value'],
-      ['Status', aiResult.status],
+      ['Status', aiResult.solverStatus ?? aiResult.status],
       ['Message', aiResult.message],
       ['Diagnostics', aiResult.diagnostics.join(' | ') || ''],
       ['Execution errors', aiResult.executionErrors.map((item) => `${item.constraintId}: ${item.error}`).join(' | ')],
@@ -2694,15 +2700,16 @@ const handleDownloadExcel = useCallback(() => {
                             <div className="mb-3 flex items-center justify-between gap-3">
                               <h3 className="text-sm font-semibold text-white">Kết quả pipeline</h3>
                               <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
-                                {aiResult.status}
+                                {SOLVER_STATUS_LABELS[aiResult.solverStatus ?? ''] ?? aiResult.status}
                               </span>
                             </div>
                             <p className="mb-3 text-xs text-white/55">{aiResult.message}</p>
-                            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                               <MetricCard label="Base constraints" value={aiResult.deterministicReport.baseConstraintPass ? 'Pass' : 'Fail'} />
                               <MetricCard label="Hard constraints" value={aiResult.deterministicReport.hardConstraintPass ? 'Pass' : 'Fail'} />
                               <MetricCard label="Soft constraints" value={aiResult.deterministicReport.softConstraintPass ? 'Pass' : 'Fail'} />
                               <MetricCard label="Violations" value={aiResult.deterministicReport.violations.length} />
+                              <MetricCard label="Solver" value={SOLVER_STATUS_LABELS[aiResult.solverStatus ?? ''] ?? 'Đã giải'} />
                             </div>
                           </section>
 

@@ -22,16 +22,74 @@ def periods_for_day(day_id):
     return periods
 
 
+def is_slot_allowed(assignment, day, period, constraint_specs):
+    for spec in constraint_specs:
+        if spec.get("severity", "hard") != "hard":
+            continue
+        kind = spec.get("kind")
+        params = spec.get("params", {}) or {}
+
+        if kind == "teacher_block_day" and assignment.get("teacher") == params.get("teacher") and day == params.get("day"):
+            return False
+        if kind == "teacher_block_period" and assignment.get("teacher") == params.get("teacher") and period == int(params.get("period", -1)):
+            return False
+        if kind == "teacher_block_slot" and assignment.get("teacher") == params.get("teacher") and day == params.get("day") and period == int(params.get("period", -1)):
+            return False
+        if kind == "teacher_allowed_days" and assignment.get("teacher") == params.get("teacher"):
+            allowed_days = set(params.get("days") or [])
+            if allowed_days and day not in allowed_days:
+                return False
+        if kind == "teacher_allowed_periods" and assignment.get("teacher") == params.get("teacher"):
+            allowed_periods = {int(x) for x in (params.get("periods") or [])}
+            if allowed_periods and period not in allowed_periods:
+                return False
+        if kind == "class_block_day" and assignment.get("class") == params.get("class") and day == params.get("day"):
+            return False
+        if kind == "class_block_period" and assignment.get("class") == params.get("class") and period == int(params.get("period", -1)):
+            return False
+        if kind == "class_block_slot" and assignment.get("class") == params.get("class") and day == params.get("day") and period == int(params.get("period", -1)):
+            return False
+        if kind == "subject_allowed_days" and assignment.get("subject") == params.get("subject"):
+            allowed_days = set(params.get("days") or [])
+            if allowed_days and day not in allowed_days:
+                return False
+        if kind == "subject_pin_period" and assignment.get("subject") == params.get("subject"):
+            target_classes = set(params.get("classes") or classes)
+            allowed_periods = {int(x) for x in (params.get("periods") or [])}
+            if assignment.get("class") in target_classes and allowed_periods and period not in allowed_periods:
+                return False
+        if kind == "assignment_block_slot" and assignment.get("id") == params.get("assignmentId") and day == params.get("day") and period == int(params.get("period", -1)):
+            return False
+        if kind == "assignment_pin_slot" and assignment.get("id") == params.get("assignmentId"):
+            if day != params.get("day") or period != int(params.get("period", -1)):
+                return False
+        if kind == "assignment_allowed_slots" and assignment.get("id") == params.get("assignmentId"):
+            allowed_slots = {
+                (item.get("day"), int(item.get("period", -1)))
+                for item in (params.get("slots") or [])
+                if isinstance(item, dict)
+            }
+            if allowed_slots and (day, period) not in allowed_slots:
+                return False
+    return True
+
+
 slots = {}
 for a in assignments:
     for d in days:
         for p in periods_for_day(d):
-            slots[(a["id"], d, p)] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
+            if is_slot_allowed(a, d, p, constraints):
+                slots[(a["id"], d, p)] = model.NewBoolVar(f"x_{a['id']}_{d}_{p}")
+
+
+def _slot_var(a, d, p):
+    return slots.get((a["id"], d, p))
+
 
 # Mỗi assignment đúng weeklyPeriods
 for a in assignments:
     model.Add(
-        sum(slots[(a["id"], d, p)] for d in days for p in periods_for_day(d))
+        sum(_slot_var(a, d, p) for d in days for p in periods_for_day(d) if (a["id"], d, p) in slots)
         == a["weeklyPeriods"]
     )
 
@@ -39,14 +97,14 @@ for a in assignments:
 for c in classes:
     for d in days:
         for p in periods_for_day(d):
-            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["class"] == c) <= 1)
+            model.Add(sum(_slot_var(a, d, p) for a in assignments if a["class"] == c and (a["id"], d, p) in slots) <= 1)
 
 # Mỗi teacher/day/period tối đa 1 assignment
 teachers = list({a["teacher"] for a in assignments})
 for t in teachers:
     for d in days:
         for p in periods_for_day(d):
-            model.Add(sum(slots[(a["id"], d, p)] for a in assignments if a["teacher"] == t) <= 1)
+            model.Add(sum(_slot_var(a, d, p) for a in assignments if a["teacher"] == t and (a["id"], d, p) in slots) <= 1)
 
 
 def build_custom_constraints(model, slots, data):
@@ -64,6 +122,18 @@ def build_custom_constraints(model, slots, data):
         if isinstance(day_periods, list) and day_periods:
             return day_periods
         return periods
+
+    def _slot_var(a, d, p):
+        return slots.get((a["id"], d, p))
+
+    def _slot_vars(items):
+        return [var for var in items if var is not None]
+
+    def _safe_add_zero(var, guard=None):
+        if var is not None:
+            ct = model.Add(var == 0)
+            if guard is not None:
+                ct.OnlyEnforceIf(guard)
 
     def _soft_weight(spec):
         weight = spec.get("weight")
@@ -114,7 +184,7 @@ def build_custom_constraints(model, slots, data):
                 present_vars = []
                 for subject in subjects:
                     asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
-                    slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                    slot_vars = _slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))
                     if not slot_vars:
                         continue
                     present = model.NewBoolVar(f"pres_{c}_{subject}_{d}")
@@ -145,7 +215,7 @@ def build_custom_constraints(model, slots, data):
             teacher_asgs = [a for a in assignments if a["teacher"] == target_teacher]
             work_vars = []
             for d in days:
-                day_slots = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                day_slots = _slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in _periods_for(d))
                 if not day_slots:
                     continue
                 work_var = model.NewBoolVar(f"work_{target_teacher}_{d}")
@@ -179,7 +249,7 @@ def build_custom_constraints(model, slots, data):
                     window = day_periods[i:i + window_length]
                     if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
                         continue
-                    window_slot_vars = [slots[(a["id"], d, p)] for a in asgs for p in window]
+                    window_slot_vars = _slot_vars(_slot_var(a, d, p) for a in asgs for p in window)
                     if soft_terms_ref is None:
                         model.Add(sum(window_slot_vars) <= max_consecutive)
                     else:
@@ -202,43 +272,43 @@ def build_custom_constraints(model, slots, data):
                     for d in days:
                         for p in _periods_for(d):
                             if p not in allowed:
-                                forbidden.append(slots[(a["id"], d, p)])
-            _penalize_forbidden_slots(spec, forbidden)
+                                forbidden.append(_slot_var(a, d, p))
+            _penalize_forbidden_slots(spec, _slot_vars(forbidden))
 
         elif kind == "teacher_block_day":
             teacher = params.get("teacher")
             day = params.get("day")
             forbidden = [
-                slots[(a["id"], day, p)]
+                _slot_var(a, day, p)
                 for a in assignments
                 if a["teacher"] == teacher
                 for p in _periods_for(day)
             ]
-            _penalize_forbidden_slots(spec, forbidden)
+            _penalize_forbidden_slots(spec, _slot_vars(forbidden))
 
         elif kind == "teacher_block_period":
             teacher = params.get("teacher")
             period = int(params.get("period"))
             forbidden = [
-                slots[(a["id"], d, period)]
+                _slot_var(a, d, period)
                 for a in assignments
                 if a["teacher"] == teacher
                 for d in days
                 if period in _periods_for(d)
             ]
-            _penalize_forbidden_slots(spec, forbidden)
+            _penalize_forbidden_slots(spec, _slot_vars(forbidden))
 
         elif kind == "teacher_block_slot":
             teacher = params.get("teacher")
             day = params.get("day")
             period = int(params.get("period"))
             forbidden = [
-                slots[(a["id"], day, period)]
+                _slot_var(a, day, period)
                 for a in assignments
                 if a["teacher"] == teacher
                 if period in _periods_for(day)
             ]
-            _penalize_forbidden_slots(spec, forbidden)
+            _penalize_forbidden_slots(spec, _slot_vars(forbidden))
 
         elif kind == "teacher_max_per_day":
             teacher = params.get("teacher")
@@ -247,7 +317,7 @@ def build_custom_constraints(model, slots, data):
             limit = int(params.get("maxPerDay"))
             teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
             for d in days:
-                count_vars = [slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)]
+                count_vars = _slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in _periods_for(d))
                 _penalize_excess(spec, count_vars, limit, f"{teacher}_{d}")
 
         elif kind == "class_no_double_subject_day":
@@ -260,7 +330,7 @@ def build_custom_constraints(model, slots, data):
                 for current_subject in subjects:
                     asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
                     for d in days:
-                        count_vars = [slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)]
+                        count_vars = _slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))
                         _penalize_excess(spec, count_vars, max_per_day, f"{c}_{current_subject}_{d}")
 
         elif kind == "subject_group_daily_limit":
@@ -274,7 +344,7 @@ def build_custom_constraints(model, slots, data):
                     a for a in assignments if a["class"] == c and a["subject"] in group_subjects
                 ]
                 for d in days:
-                    count_vars = [slots[(a["id"], d, p)] for a in class_assignments for p in _periods_for(d)]
+                    count_vars = _slot_vars(_slot_var(a, d, p) for a in class_assignments for p in _periods_for(d))
                     _penalize_excess(spec, count_vars, max_per_day, f"grp_{c}_{d}")
 
         elif kind == "class_subjects_not_same_day":
@@ -298,12 +368,12 @@ def build_custom_constraints(model, slots, data):
         if op == "teacher_teaches_on_day":
             teacher = condition.get("teacher")
             day = condition.get("day")
-            day_slots = [
-                slots[(a["id"], day, p)]
+            day_slots = _slot_vars(
+                _slot_var(a, day, p)
                 for a in assignments
                 if a["teacher"] == teacher
                 for p in _periods_for(day)
-            ]
+            )
             if day_slots:
                 model.Add(sum(day_slots) >= 1).OnlyEnforceIf(lit)
                 model.Add(sum(day_slots) == 0).OnlyEnforceIf(lit.Not())
@@ -315,11 +385,11 @@ def build_custom_constraints(model, slots, data):
             teacher = condition.get("teacher")
             day = condition.get("day")
             period = int(condition.get("period"))
-            slot_vars = [
-                slots[(a["id"], day, period)]
+            slot_vars = _slot_vars(
+                _slot_var(a, day, period)
                 for a in assignments
                 if a["teacher"] == teacher and period in _periods_for(day)
-            ]
+            )
             if slot_vars:
                 model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(lit)
                 model.Add(sum(slot_vars) == 0).OnlyEnforceIf(lit.Not())
@@ -381,7 +451,7 @@ def build_custom_constraints(model, slots, data):
                     if len(window) != length or any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
                         continue
                     run = model.NewBoolVar(f"run_{a['id']}_{d}_{window[0]}_{length}")
-                    window_vars = [slots[(a["id"], d, p)] for p in window]
+                    window_vars = _slot_vars(_slot_var(a, d, p) for p in window)
                     for var in window_vars:
                         model.Add(run <= var)
                     model.Add(run >= sum(window_vars) - length + 1)
@@ -408,7 +478,7 @@ def build_custom_constraints(model, slots, data):
             for a in assignments:
                 if a["teacher"] == t:
                     for p in _periods_for(d):
-                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+                        _safe_add_zero(_slot_var(a, d, p), guard)
 
         elif kind == "teacher_block_period":
             t = params.get("teacher")
@@ -417,7 +487,7 @@ def build_custom_constraints(model, slots, data):
                 if a["teacher"] == t:
                     for d in days:
                         if p in _periods_for(d):
-                            model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+                            _safe_add_zero(_slot_var(a, d, p), guard)
 
         elif kind == "teacher_block_slot":
             t = params.get("teacher")
@@ -426,7 +496,7 @@ def build_custom_constraints(model, slots, data):
             if p in _periods_for(d):
                 for a in assignments:
                     if a["teacher"] == t:
-                        model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+                        _safe_add_zero(_slot_var(a, d, p), guard)
 
         elif kind == "teacher_max_per_day":
             t = params.get("teacher")
@@ -437,7 +507,7 @@ def build_custom_constraints(model, slots, data):
                 teacher_asgs = [a for a in assignments if a["teacher"] == t]
                 for d in days:
                     model.Add(
-                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                        sum(_slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in _periods_for(d))) <= n
                     ).OnlyEnforceIf(guard)
 
         elif kind == "subject_pin_period":
@@ -449,7 +519,7 @@ def build_custom_constraints(model, slots, data):
                     for d in days:
                         for p in _periods_for(d):
                             if p not in allowed:
-                                model.Add(slots[(a["id"], d, p)] == 0).OnlyEnforceIf(guard)
+                                _safe_add_zero(_slot_var(a, d, p), guard)
 
         elif kind == "class_no_double_subject_day":
             cls = params.get("class")
@@ -462,7 +532,7 @@ def build_custom_constraints(model, slots, data):
                     asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
                     for d in days:
                         model.Add(
-                            sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
+                            sum(_slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))) <= max_per_day
                         ).OnlyEnforceIf(guard)
 
         elif kind == "pair_not_same_slot":
@@ -477,8 +547,8 @@ def build_custom_constraints(model, slots, data):
             for d in days_to_check:
                 for p in _periods_for(d):
                     model.Add(
-                        sum(slots[(a["id"], d, p)] for a in asgs1) +
-                        sum(slots[(a["id"], d, p)] for a in asgs2)
+                        sum(_slot_vars(_slot_var(a, d, p) for a in asgs1)) +
+                        sum(_slot_vars(_slot_var(a, d, p) for a in asgs2))
                         <= 1
                     ).OnlyEnforceIf(guard)
 
@@ -506,7 +576,7 @@ def build_custom_constraints(model, slots, data):
             for a in assignments:
                 if a["teacher"] == t:
                     for p in _periods_for(d):
-                        model.Add(slots[(a["id"], d, p)] == 0)
+                        _safe_add_zero(_slot_var(a, d, p))
 
         elif kind == "teacher_block_period":
             t = params.get("teacher")
@@ -515,7 +585,7 @@ def build_custom_constraints(model, slots, data):
                 if a["teacher"] == t:
                     for d in days:
                         if p in _periods_for(d):
-                            model.Add(slots[(a["id"], d, p)] == 0)
+                            _safe_add_zero(_slot_var(a, d, p))
 
         elif kind == "teacher_block_slot":
             t = params.get("teacher")
@@ -524,7 +594,7 @@ def build_custom_constraints(model, slots, data):
             if p in _periods_for(d):
                 for a in assignments:
                     if a["teacher"] == t:
-                        model.Add(slots[(a["id"], d, p)] == 0)
+                        _safe_add_zero(_slot_var(a, d, p))
 
         elif kind == "teacher_max_per_day":
             t = params.get("teacher")
@@ -534,7 +604,7 @@ def build_custom_constraints(model, slots, data):
             teacher_asgs = [a for a in assignments if a["teacher"] == t]
             for d in days:
                 model.Add(
-                    sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in _periods_for(d)) <= n
+                    sum(_slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in _periods_for(d))) <= n
                 )
 
         elif kind == "teacher_max_consecutive":
@@ -559,7 +629,7 @@ def build_custom_constraints(model, slots, data):
                     if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
                         continue
                     model.Add(
-                        sum(slots[(a["id"], d, p)] for a in teacher_asgs for p in window) <= n
+                        sum(_slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in window)) <= n
                     )
 
         elif kind == "subject_pin_period":
@@ -571,7 +641,7 @@ def build_custom_constraints(model, slots, data):
                     for d in days:
                         for p in _periods_for(d):
                             if p not in allowed:
-                                model.Add(slots[(a["id"], d, p)] == 0)
+                                _safe_add_zero(_slot_var(a, d, p))
 
         elif kind == "class_no_double_subject_day":
             cls = params.get("class")
@@ -584,7 +654,7 @@ def build_custom_constraints(model, slots, data):
                     asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
                     for d in days:
                         model.Add(
-                            sum(slots[(a["id"], d, p)] for a in asgs for p in _periods_for(d)) <= max_per_day
+                            sum(_slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))) <= max_per_day
                         )
 
         elif kind == "pair_not_same_slot":
@@ -600,8 +670,8 @@ def build_custom_constraints(model, slots, data):
             for d in days_to_check:
                 for p in _periods_for(d):
                     model.Add(
-                        sum(slots[(a["id"], d, p)] for a in asgs1) +
-                        sum(slots[(a["id"], d, p)] for a in asgs2)
+                        sum(_slot_vars(_slot_var(a, d, p) for a in asgs1)) +
+                        sum(_slot_vars(_slot_var(a, d, p) for a in asgs2))
                         <= 1
                     )
 
@@ -641,11 +711,11 @@ def build_custom_constraints(model, slots, data):
                                 if s2["id"] == session_obj["id"]
                             )
                         ]
-                slot_vars = [
-                    slots[(a["id"], d, p)]
+                slot_vars = _slot_vars(
+                    _slot_var(a, d, p)
                     for a in teacher_asgs
                     for p in session_periods
-                ]
+                )
                 if slot_vars:
                     model.Add(sum(slot_vars) <= max_periods)
 
@@ -670,11 +740,11 @@ def build_custom_constraints(model, slots, data):
             for cls in target_classes:
                 cls_asgs = [a for a in assignments if a["class"] == cls and a["subject"] in group_subjects]
                 for d in days:
-                    slot_vars = [
-                        slots[(a["id"], d, p)]
+                    slot_vars = _slot_vars(
+                        _slot_var(a, d, p)
                         for a in cls_asgs
                         for p in _periods_for(d)
-                    ]
+                    )
                     if slot_vars:
                         model.Add(sum(slot_vars) <= max_per_day)
 
@@ -685,7 +755,7 @@ def build_custom_constraints(model, slots, data):
                 guard = _build_condition_literal(condition)
                 for then_spec in then_specs:
                     if isinstance(then_spec, dict):
-                        _apply_then_constraint(then_spec, guard)
+                        _apply_then_constraint(then_spec)
 
         elif kind == "custom_dsl":
             # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
@@ -730,10 +800,10 @@ except Exception:
     _max_seconds = 60.0
 _deterministic = _os.environ.get("TT_DETERMINISTIC", "") == "1"
 try:
-    _workers = 1 if _deterministic else int(_os.environ.get("SOLVER_WORKERS", "") or 8)
+    _workers = 1 if _deterministic else int(_os.environ.get("SOLVER_WORKERS", "") or max(1, (_os.cpu_count() or 2) - 1))
 except Exception:
-    _workers = 1 if _deterministic else 8
-solver.parameters.num_search_workers = max(1, _workers)
+    _workers = 1 if _deterministic else max(1, (_os.cpu_count() or 2) - 1)
+solver.parameters.num_search_workers = min(max(1, _workers), 8)
 try:
     solver.parameters.random_seed = int(_os.environ.get("SOLVER_RANDOM_SEED", "") or 42)
 except Exception:
@@ -786,7 +856,7 @@ def _verify_custom_predicates(schedule_out):
         if spec.get("kind") != "custom_dsl":
             continue
         sid = spec.get("id", "unknown")
-        src = (spec.get("params") or {}).get("pythonPredicate")
+        src = (spec.get("params") or {}).get("pythonPredicate") or spec.get("pythonPredicate")
         if not src:
             checks.append({"id": sid, "checked": False, "ok": False,
                            "violations": [{"constraintId": sid, "kind": "custom_dsl",

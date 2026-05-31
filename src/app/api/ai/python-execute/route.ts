@@ -9,6 +9,7 @@ type ExecutePayload = {
   code?: string;
   input?: unknown;
   timeoutMs?: number;
+  solverWorkers?: number;
 };
 
 function digestError(raw: string, maxLen = 800): string {
@@ -24,7 +25,7 @@ function truncateOutput(raw: string, maxLines = 100): string {
   return `${lines.slice(0, maxLines).join('\n')}\n...[truncated ${lines.length - maxLines} lines]`;
 }
 
-function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<Record<string, unknown>> {
+function runExecutor(code: string, input: unknown, timeoutMs: number, solverWorkers?: number): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const repoRoot = process.cwd();
     const jobDir = path.join(
@@ -47,6 +48,7 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
     };
 
     const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+    const workerCount = Math.min(8, Math.max(1, Math.floor(Number(solverWorkers ?? os.cpus().length - 1))));
     const child = spawn('python3', [executorPath, String(timeoutSeconds)], {
       cwd: jobDir,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -56,7 +58,7 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
         PYTHONHASHSEED: '0',
         EXECUTOR_TIMEOUT_SECONDS: String(timeoutSeconds),
         SOLVER_MAX_SECONDS: String(Math.max(5, timeoutSeconds - 5)),
-        SOLVER_WORKERS: String(Math.max(2, os.cpus().length - 1)),
+        SOLVER_WORKERS: String(workerCount),
       },
       detached: true, // để có process group riêng để kết thúc cả cây con (fix bug #7)
     });
@@ -125,10 +127,11 @@ function runExecutor(code: string, input: unknown, timeoutMs: number): Promise<R
           fs.mkdirSync(artifactDir, { recursive: true });
           const artifactPath = path.join(artifactDir, `result_${Date.now()}.json`);
           fs.writeFileSync(artifactPath, JSON.stringify(partialResult), 'utf8');
+          const partialStatus = String((partialResult as any).status).toLowerCase();
           resolve({
             phase: 'run',
             ok: true,
-            status: String((partialResult as any).status).toLowerCase(),
+            status: partialStatus === 'optimal' ? 'optimal' : 'timeout_with_solution',
             durationMs: timeoutMs,
             resultPath: artifactPath,
             resultData: partialResult,
@@ -236,7 +239,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Missing python code.' }, { status: 400 });
     }
 
-    const result = await runExecutor(code, body.input, timeoutMs);
+    const result = await runExecutor(code, body.input, timeoutMs, body.solverWorkers);
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     return NextResponse.json(

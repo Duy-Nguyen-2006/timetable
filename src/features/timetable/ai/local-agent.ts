@@ -23,6 +23,10 @@ const MAX_RUNTIME_REPAIR_ROUNDS = 1;
 const MAX_VIOLATION_REPAIR_ROUNDS = 2;
 const MAX_TOTAL_TOOL_CALLS = 15;
 const TOKEN_CAP_PER_RUN = 80_000;
+const STAGE_CACHE_MAX_ENTRIES = 20;
+const stageCache = new Map<string, unknown>();
+
+type SolverRuntimeConfig = { timeoutMs: number; workers: number };
 
 function emit(
   config: LocalAgentConfig,
@@ -55,6 +59,46 @@ function pickStageConfig(
     ...config,
     model: model || config.model,
   };
+}
+
+function stableHash(value: unknown): string {
+  return JSON.stringify(sortObjectDeep(value));
+}
+
+async function getCachedStage<T>(key: string, producer: () => Promise<T>): Promise<{ value: T; hit: boolean }> {
+  if (stageCache.has(key)) {
+    return { value: stageCache.get(key) as T, hit: true };
+  }
+  const value = await producer();
+  stageCache.set(key, value);
+  if (stageCache.size > STAGE_CACHE_MAX_ENTRIES) {
+    const firstKey = stageCache.keys().next().value;
+    if (firstKey) stageCache.delete(firstKey);
+  }
+  return { value, hit: false };
+}
+
+function resolveSolverRuntime(config: LocalAgentConfig): SolverRuntimeConfig {
+  const cpuCount = typeof navigator !== 'undefined' && Number(navigator.hardwareConcurrency) > 0
+    ? Number(navigator.hardwareConcurrency)
+    : 2;
+  const profile = config.solverProfile ?? 'balanced';
+  const defaults: Record<string, SolverRuntimeConfig> = {
+    fast: { timeoutMs: 20_000, workers: Math.max(1, Math.floor(cpuCount / 2)) },
+    balanced: { timeoutMs: 60_000, workers: Math.max(1, cpuCount - 1) },
+    deep: { timeoutMs: 180_000, workers: cpuCount },
+  };
+  const resolved = defaults[profile] ?? defaults.balanced;
+  return {
+    timeoutMs: config.timeoutMs ?? resolved.timeoutMs,
+    workers: Math.min(8, Math.max(1, Math.floor(config.solverWorkers ?? resolved.workers))),
+  };
+}
+
+function buildFinalMessage(status: string | undefined): string {
+  if (status === 'optimal') return 'Đã tạo thời khóa biểu tối ưu.';
+  if (status === 'feasible') return 'Đã tìm được lịch hợp lệ, nhưng chưa chứng minh là tối ưu.';
+  return 'Đã tạo thời khóa biểu thành công.';
 }
 
 function consumeBudget(
@@ -118,11 +162,24 @@ function shouldRepairExecutableFailure(
   );
 }
 
-function constraintSignature(spec: ConstraintSpec): string {
-  const normalizedParams = JSON.stringify(
-    Object.fromEntries(Object.entries(spec.params).sort(([a], [b]) => a.localeCompare(b)))
+function sortObjectDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortObjectDeep);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => [key, sortObjectDeep(item)])
   );
-  return `${spec.kind}|${spec.severity}|${normalizedParams}`;
+}
+
+function constraintSignature(spec: ConstraintSpec): string {
+  return JSON.stringify({
+    kind: spec.kind,
+    severity: spec.severity,
+    params: sortObjectDeep(spec.params),
+    weight: spec.weight ?? null,
+    pythonPredicate: spec.pythonPredicate ?? null,
+  });
 }
 
 function dedupeConstraintSpecs(specs: ConstraintSpec[]): ConstraintSpec[] {
@@ -139,7 +196,8 @@ export async function runLocalAgent(
   input: AgentInputPayload,
   config: LocalAgentConfig
 ): Promise<RunLocalAgentResult> {
-  const timeoutMs = config.timeoutMs ?? 360_000;
+  const runtime = resolveSolverRuntime(config);
+  const timeoutMs = runtime.timeoutMs;
   const startedAt = Date.now();
   const deadlineAt = startedAt + timeoutMs;
   const budget = new TokenBudgetGuard(TOKEN_CAP_PER_RUN);
@@ -151,9 +209,21 @@ export async function runLocalAgent(
     emit(config, { type: 'phase', phase: 'translator', message: 'Đang dịch constraints', iteration: 0 });
     emit(config, { type: 'stage_started', stage: 'translator', message: 'Translator started' });
 
-    const translator = await runTranslatorTurn(pickStageConfig(config, 'translator'), input);
-    consumeBudget(budget, translator.usageTokens, JSON.stringify(input.constraints), translator.rawResponse ?? '');
-    totalToolCalls += 1;
+    const translatorCacheKey = `translator:${stableHash({
+      model: pickStageConfig(config, 'translator').model,
+      assignments: input.assignments,
+      constraints: input.constraints,
+      days: input.days,
+      sessions: input.sessions,
+      periodCounts: input.periodCounts,
+      deletedPeriods: input.deletedPeriods,
+    })}`;
+    const translatorCached = await getCachedStage(translatorCacheKey, () =>
+      runTranslatorTurn(pickStageConfig(config, 'translator'), input)
+    );
+    const translator = translatorCached.value;
+    consumeBudget(budget, translatorCached.hit ? 0 : translator.usageTokens, JSON.stringify(input.constraints), translator.rawResponse ?? '');
+    if (!translatorCached.hit) totalToolCalls += 1;
     const deduped = dedupeConstraintSpecs(translator.constraintSpecs);
     emit(config, { type: 'stage_completed', stage: 'translator', message: `Translator done (${translator.constraintSpecs.length} specs, ${deduped.length} after dedupe)` });
     const compressed = compressPayload(input, deduped);
@@ -168,7 +238,7 @@ export async function runLocalAgent(
 
     emit(config, { type: 'phase', phase: 'planner', message: 'Đang tạo kế hoạch solver', iteration: 0 });
     emit(config, { type: 'stage_started', stage: 'planner', message: 'Planner started' });
-    const planner = await runPlannerTurn(pickStageConfig(config, 'planner'), {
+    const plannerInput = {
       datasetDigest: {
         classes: compressed.datasetDigest.classCount,
         days: compressed.datasetDigest.dayCount,
@@ -180,9 +250,14 @@ export async function runLocalAgent(
           Math.max(1, compressed.datasetDigest.totalAssignments),
       },
       constraintSpecs: deduped,
-    });
-    consumeBudget(budget, planner.usageTokens, JSON.stringify(planner.plan), planner.rawResponse ?? '');
-    totalToolCalls += 1;
+    };
+    const plannerCached = await getCachedStage(
+      `planner:${stableHash({ model: pickStageConfig(config, 'planner').model, input: plannerInput })}`,
+      () => runPlannerTurn(pickStageConfig(config, 'planner'), plannerInput)
+    );
+    const planner = plannerCached.value;
+    consumeBudget(budget, plannerCached.hit ? 0 : planner.usageTokens, JSON.stringify(planner.plan), planner.rawResponse ?? '');
+    if (!plannerCached.hit) totalToolCalls += 1;
     board.setPlan(planner.plan);
     emit(config, { type: 'stage_completed', stage: 'planner', message: 'Planner done' });
 
@@ -199,7 +274,7 @@ export async function runLocalAgent(
     let latestCoveredConstraintIds = new Set<string>();
     let lastCheckedCustomIds = new Set<string>();
     let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }> | null = null;
-    let lastSuccessfulSchedule: ScheduleEntry[] | null = null;
+    let lastSuccessfulSchedule: ScheduleEntry[] | null = input.previousSchedule ?? null;
 
     while (true) {
       let coderRetry = 0;
@@ -257,12 +332,29 @@ export async function runLocalAgent(
         } else {
           emit(config, { type: 'stage_started', stage: 'coder', attempt, message: 'Coder started' });
           let coder: Awaited<ReturnType<typeof runCoderTurn>>;
+          const coderInput = {
+            dataset: compressed,
+            plan: planner.plan,
+            previousAttemptSummary,
+          };
+          let coderCacheHit = false;
           try {
-            coder = await runCoderTurn(pickStageConfig(config, 'coder'), {
-              dataset: compressed,
-              plan: planner.plan,
-              previousAttemptSummary,
-            });
+            const cacheableCoder = !previousAttemptSummary.trim();
+            if (cacheableCoder) {
+              const cached = await getCachedStage(
+                `coder:${stableHash({
+                  model: pickStageConfig(config, 'coder').model,
+                  constraintSpecs: compressed.constraints,
+                  plan: planner.plan,
+                  skeletonVersion: skeleton,
+                })}`,
+                () => runCoderTurn(pickStageConfig(config, 'coder'), coderInput)
+              );
+              coder = cached.value;
+              coderCacheHit = cached.hit;
+            } else {
+              coder = await runCoderTurn(pickStageConfig(config, 'coder'), coderInput);
+            }
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Coder returned an invalid model response.';
             previousAttemptSummary = digestError(message);
@@ -276,10 +368,10 @@ export async function runLocalAgent(
             });
             continue;
           }
-          totalToolCalls += 1;
+          if (!coderCacheHit) totalToolCalls += 1;
           consumeBudget(
             budget,
-            coder.usageTokens,
+            coderCacheHit ? 0 : coder.usageTokens,
             JSON.stringify(compressed.datasetDigest),
             coder.rawResponse ?? ''
           );
@@ -333,7 +425,10 @@ export async function runLocalAgent(
 
         let execResult: Awaited<ReturnType<typeof executeGeneratedCode>>;
         try {
-          execResult = await executeGeneratedCode(injected.solverCode, executePayload, { timeoutMs });
+          execResult = await executeGeneratedCode(injected.solverCode, executePayload, {
+            timeoutMs,
+            solverWorkers: runtime.workers,
+          });
         } catch (error) {
           previousAttemptSummary = digestError(
             error instanceof Error ? error.message : 'Solver execution failed.'
@@ -420,11 +515,19 @@ export async function runLocalAgent(
           roundTrip.ok &&
           hardUncheckedIds.length === 0
         ) {
+          const solverStatus: 'optimal' | 'feasible' | 'timeout_with_solution' = execResult.status === 'timeout_with_solution'
+            ? 'timeout_with_solution'
+            : execResult.status === 'feasible'
+              ? 'feasible'
+              : 'optimal';
           const finalResult = {
             ...execResult.resultData,
             schedule: scheduleWithAssignmentIds,
             status: 'solved' as const,
-            message: 'Đã tạo thời khóa biểu thành công.',
+            solverStatus,
+            message: execResult.status === 'timeout_with_solution'
+              ? 'Hết thời gian nhưng đã tìm được lịch hợp lệ.'
+              : buildFinalMessage(execResult.status),
             deterministicReport: report,
             checkerReport: report,
             violations: [],
@@ -580,4 +683,8 @@ export const __localAgentInternal = {
   buildRepeatedViolationMessage,
   normalizeRoundTripMessage,
   shouldRepairExecutableFailure,
+  constraintSignature,
+  dedupeConstraintSpecs,
+  resolveSolverRuntime,
+  stableHash,
 };

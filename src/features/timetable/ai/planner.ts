@@ -3,9 +3,9 @@ import { z } from 'zod';
 import type { ConstraintSpec, Plan } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, PlannerTurnResult } from './types';
-import { invokeChat } from './chat-client';
+import { invokeChat, type ChatPayload } from './chat-client';
 
-type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
+type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
 
 const planSchema = z.object({
   decisionVars: z.string(),
@@ -25,7 +25,7 @@ const planSchema = z.object({
   risks: z.array(z.string()),
 });
 
-const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
+const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
 
 function loadPlannerSystemPrompt(): Promise<string> {
   return fetch('/prompts/planner.system.md')
@@ -86,6 +86,7 @@ export async function runPlannerTurn(
     ],
     temperature: 0,
     max_tokens: 2500,
+    cache_control: { enable: true },
     response_format: {
       type: 'json_schema',
       json_schema: {

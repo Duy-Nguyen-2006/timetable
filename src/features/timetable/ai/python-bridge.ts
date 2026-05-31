@@ -10,6 +10,7 @@ import type { ExecutionResult } from './types';
 
 export interface PythonBridgeOptions {
   timeoutMs?: number;
+  solverWorkers?: number;
   signal?: AbortSignal;
 }
 
@@ -27,7 +28,7 @@ export async function executeGeneratedCode(
   // In production this will be an IPC call to the main process
   // which actually spawns the bundled binary.
   if (typeof window !== 'undefined' && (window as any).electron?.python?.executeCode) {
-    return (window as any).electron.python.executeCode(code, input, timeout);
+    return (window as any).electron.python.executeCode(code, input, timeout, options.solverWorkers);
   }
 
   // Web fallback: call server-side executor route.
@@ -41,6 +42,7 @@ export async function executeGeneratedCode(
         code,
         input,
         timeoutMs: timeout,
+        solverWorkers: options.solverWorkers,
       }),
     });
 

@@ -136,6 +136,27 @@ test('fallback parser does not split if_then clauses', () => {
   assert.equal(clauses.length, 1);
 });
 
+test('fallback parser preserves preferred weights on generated soft specs', () => {
+  const result = __translatorInternal.fallbackFromRuleParser({
+    ...sampleInput,
+    constraints: [{ type: 'preferred', text: 'Sơn không dạy thứ 2', weight: 8 }],
+  });
+
+  assert.equal(result[0].severity, 'soft');
+  assert.equal(result[0].weight, 8);
+  assert.equal(result[0].params.weight, 8);
+});
+
+test('sanitize preserves preferred weights on model specs', () => {
+  const result = __translatorInternal.sanitizeSpecs(
+    { ...sampleInput, constraints: [{ type: 'preferred', text: 'Sơn không dạy thứ 2', weight: 3 }] },
+    [{ id: 'm1', original: 'Sơn không dạy thứ 2', severity: 'soft', kind: 'teacher_block_day', params: { teacher: 'Sơn', day: 'mon' } }]
+  );
+
+  assert.equal(result[0].weight, 3);
+  assert.equal(result[0].params.weight, 3);
+});
+
 test('fallback parser returns at least one spec per constraint', () => {
   const result = __translatorInternal.fallbackFromRuleParser(sampleInput);
   assert.equal(result.length, 1);

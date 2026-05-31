@@ -25,11 +25,102 @@ test('buildViolationSignature distinguishes pass/fail roundtrip states', () => {
   assert.match(okSignature, /rt:ok$/);
 });
 
+test('dedupeConstraintSpecs keeps one copy of identical constraints', () => {
+  const specs = [
+    { id: 'c1', original: 'Sơn không dạy thứ 2', severity: 'hard' as const, kind: 'teacher_block_day' as const, params: { teacher: 'Sơn', day: 'mon' } },
+    { id: 'c2', original: 'Sơn không dạy thứ 2', severity: 'hard' as const, kind: 'teacher_block_day' as const, params: { day: 'mon', teacher: 'Sơn' } },
+  ];
+  const result = __localAgentInternal.dedupeConstraintSpecs(specs);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, 'c1');
+});
+
+test('constraintSignature distinguishes soft weights', () => {
+  const base = { id: 'c1', original: 'ưu tiên', severity: 'soft' as const, kind: 'teacher_block_day' as const, params: { teacher: 'Sơn', day: 'mon' } };
+  assert.notEqual(
+    __localAgentInternal.constraintSignature({ ...base, weight: 3 }),
+    __localAgentInternal.constraintSignature({ ...base, weight: 8 })
+  );
+});
+
+test('resolveSolverRuntime maps profiles to bounded timeouts and workers', () => {
+  assert.deepEqual(__localAgentInternal.resolveSolverRuntime({ baseURL: 'x', apiKey: 'k', model: 'm', solverProfile: 'fast', solverWorkers: 99 }), { timeoutMs: 20_000, workers: 8 });
+  assert.equal(__localAgentInternal.resolveSolverRuntime({ baseURL: 'x', apiKey: 'k', model: 'm', solverProfile: 'deep', timeoutMs: 1234 }).timeoutMs, 1234);
+});
+
 test('buildCoderExhaustedMessage includes the last actionable failure', () => {
   assert.equal(
     __localAgentInternal.buildCoderExhaustedMessage('RuntimeError: bad generated code'),
     'Coder could not produce an executable schedule. Last failure: RuntimeError: bad generated code'
   );
+});
+
+test('runLocalAgent accepts feasible solver results and passes worker hints', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let executeBody: { solverWorkers?: number; input?: { warmStartSchedule?: unknown[] } } | null = null;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+
+    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
+    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+    if (url.endsWith('/api/ai/chat')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: Array<{ role: string; content: string }> };
+      const systemPrompt = body.messages?.[0]?.content;
+      if (systemPrompt === 'planner') {
+        return Response.json({ ok: true, content: JSON.stringify({ decisionVars: 'slots', domainSize: { classes: 1, days: 1, periods: 1 }, constraintOrder: [], reifiedNeeded: [], objective: 'none', templatesUsed: [], risks: [] }), usage: { total_tokens: 1 } });
+      }
+    }
+    if (url.endsWith('/api/ai/python-syntax-check')) return Response.json({ ok: true, result: { ok: true } });
+    if (url.endsWith('/api/ai/python-execute')) {
+      executeBody = JSON.parse(String(init?.body ?? '{}'));
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'feasible',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['mon'],
+            periods: [1],
+            schedule: [{ assignmentId: 'a1', class: '6A', day: 'mon', period: 1, subject: 'Math', teacher: 'Lan' }],
+          },
+        },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'mon', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { mon: 1 },
+        deletedPeriods: {},
+        assignments: [{ id: 'a1', class: { id: 'c1', label: '6A' }, subject: { id: 'math', label: 'Math' }, teacher: { id: 't1', label: 'Lan' }, weeklyPeriods: 1 }],
+        constraints: [],
+        previousSchedule: [{ assignmentId: 'a1', class: '6A', day: 'mon', period: 1, subject: 'Math', teacher: 'Lan' }],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test', solverProfile: 'fast', solverWorkers: 4 }
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(result.finalResult?.solverStatus, 'feasible');
+    assert.match(result.finalResult?.message ?? '', /chưa chứng minh là tối ưu/);
+    assert.equal(executeBody?.solverWorkers, 4);
+    assert.equal(executeBody?.input?.warmStartSchedule?.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
 });
 
 test('runLocalAgent repairs runtime failures before returning coder exhausted', async () => {

@@ -19,6 +19,7 @@
     "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "lint": "eslint .",
     "electron": "electron .",
+    "package:win": "electron-builder --win --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never"
   },
   "dependencies": {
@@ -76,12 +77,16 @@
     ],
     "extraResources": [
       {
-        "from": "python-dist/runner",
+        "from": "python-dist/code_executor",
         "to": "python"
       },
       {
-        "from": "python/timetable_solver",
-        "to": "python-src/timetable_solver",
+        "from": "python/code_executor.py",
+        "to": "python-src/code_executor.py"
+      },
+      {
+        "from": "python/code_executor",
+        "to": "python-src/code_executor",
         "filter": [
           "**/*",
           "!__pycache__/**/*"

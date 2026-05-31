@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import type { AIProviderConfig, AIProviderType } from './ai/types';
+import type { AIProviderConfig, AIProviderType, SolverProfile } from './ai/types';
 
 interface SettingsModalProps {
   open: boolean;
@@ -17,6 +17,11 @@ interface SettingsModalProps {
 }
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
+const SOLVER_PROFILES: Array<{ value: SolverProfile; label: string; description: string }> = [
+  { value: 'fast', label: 'Nhanh', description: '20s, dùng khoảng nửa CPU' },
+  { value: 'balanced', label: 'Cân bằng', description: '60s, dùng CPU - 1 worker' },
+  { value: 'deep', label: 'Sâu', description: '180s, ưu tiên chất lượng nghiệm' },
+];
 
 function inferProvider(baseURL: string, model: string): AIProviderType {
   if (baseURL.toLowerCase().includes('openrouter.ai')) return 'openrouter';
@@ -34,6 +39,7 @@ export function SettingsModal({
   const [baseURL, setBaseURL] = useState(initialConfig?.baseURL || DEFAULT_BASE_URL);
   const [apiKey, setApiKey] = useState(initialConfig?.apiKey || '');
   const [model, setModel] = useState(initialConfig?.model || 'deepseek/deepseek-v4-flash');
+  const [solverProfile, setSolverProfile] = useState<SolverProfile>(initialConfig?.solverProfile || 'balanced');
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const { toast } = useToast();
@@ -114,6 +120,7 @@ export function SettingsModal({
       baseURL: trimmedBaseURL,
       apiKey: trimmedKey,
       model: trimmedModel,
+      solverProfile,
     });
     onOpenChange(false);
   };
@@ -161,6 +168,27 @@ export function SettingsModal({
             <p className="text-xs text-muted-foreground">
               Provider tự nhận diện: {inferProvider(baseURL, model)}
             </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Mức hiệu năng solver</Label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {SOLVER_PROFILES.map((profile) => (
+                <button
+                  key={profile.value}
+                  type="button"
+                  onClick={() => setSolverProfile(profile.value)}
+                  className={`rounded-md border p-2 text-left text-xs transition ${
+                    solverProfile === profile.value
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className="block font-medium">{profile.label}</span>
+                  <span className="mt-1 block">{profile.description}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <Button onClick={handleTest} disabled={isTesting} variant="outline" className="w-full">
