@@ -2894,11 +2894,33 @@ const handleDownloadExcel = useCallback(() => {
                           Nhấn Xếp lịch để tạo bảng kết quả cuối.
                         </div>
                         ) : aiResult || aiError ? (
-                          <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] px-4 py-12 text-center text-sm font-semibold text-white">
-                            <div>{aiError || aiResult?.message || RESULT_NOT_FOUND_MESSAGE}</div>
-                            {aiResult?.diagnostics?.length ? (
-                              <div className="mx-auto mt-3 max-w-2xl text-xs font-normal text-white/45">
-                                {aiResult.diagnostics.slice(0, 3).join(' · ')}
+                          <div className="space-y-3">
+                            <div className="rounded-md border border-white/[0.06] bg-[#0a0a0a] px-4 py-8 text-center text-sm font-semibold text-white">
+                              <div>{aiError || aiResult?.message || RESULT_NOT_FOUND_MESSAGE}</div>
+                              {aiResult?.diagnostics?.length ? (
+                                <div className="mx-auto mt-3 max-w-2xl text-xs font-normal text-white/45">
+                                  {aiResult.diagnostics.slice(0, 3).join(' · ')}
+                                </div>
+                              ) : null}
+                            </div>
+                            {aiResult?.deterministicReport?.hardViolations?.length ? (
+                              <div className={`${panelClass} p-4`}>
+                                <h3 className="mb-3 text-sm font-semibold text-red-300">Ràng buộc bắt buộc bị vi phạm</h3>
+                                <div className="space-y-2">
+                                  {aiResult.deterministicReport.hardViolations.map((v, i) => (
+                                    <div key={`fail-v-${v.constraintId}-${i}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3">
+                                      <p className="text-xs font-medium text-red-300/80">{v.constraintId}</p>
+                                      <p className="mt-1 text-sm text-white/75">{v.message}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                            {aiResult?.deterministicReport?.uncheckedConstraintIds?.length ? (
+                              <div className={`${panelClass} p-3`}>
+                                <p className="text-xs text-amber-200/80">
+                                  Chưa kiểm tra được: {aiResult.deterministicReport.uncheckedConstraintIds.join(', ')}
+                                </p>
                               </div>
                             ) : null}
                           </div>

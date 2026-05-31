@@ -70,11 +70,11 @@ def _map_status(raw: str) -> str:
     return "unknown"
 
 
-def run_user_code(code: str, timeout: int) -> dict[str, Any]:
+def run_user_code(code: str, timeout: int, job_dir: str | None = None) -> dict[str, Any]:
     started = time.time()
     with tempfile.TemporaryDirectory(prefix="timetable_exec_") as temp_dir:
         workspace = Path(temp_dir)
-        input_src = Path.cwd() / "input.json"
+        input_src = Path(job_dir) / "input.json" if job_dir else Path.cwd() / "input.json"
         input_dst = workspace / "input.json"
         solver_path = workspace / "solver_generated.py"
         result_path = workspace / "result.json"
@@ -266,5 +266,42 @@ def main() -> None:
     print(json.dumps(result, ensure_ascii=False))
 
 
+def daemon() -> None:
+    """Persistent mode: read newline-delimited JSON jobs from stdin, write results to stdout."""
+    for raw_line in sys.stdin:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            job = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            print(json.dumps({"phase": "parse", "ok": False, "status": "crashed",
+                              "durationMs": 0, "errorDigest": f"JSON decode error: {exc}",
+                              "stdout": "", "stderr": ""}, ensure_ascii=False), flush=True)
+            continue
+
+        code = job.get("code", "")
+        timeout = int(job.get("timeoutSeconds", TIMEOUT_SECONDS))
+        job_dir = job.get("jobDir") or None
+        solver_workers = job.get("solverWorkers")
+        if solver_workers is not None:
+            _os_mod.environ["SOLVER_WORKERS"] = str(int(solver_workers))
+        if not code.strip():
+            print(json.dumps({"phase": "parse", "ok": False, "status": "crashed",
+                              "durationMs": 0, "errorDigest": "No code in job.",
+                              "stdout": "", "stderr": ""}, ensure_ascii=False), flush=True)
+            continue
+
+        try:
+            result = run_user_code(code, timeout, job_dir)
+        except Exception:
+            result = {"phase": "run", "ok": False, "status": "crashed", "durationMs": 0,
+                      "errorDigest": _digest_error(traceback.format_exc()), "stdout": "", "stderr": ""}
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+
+
 if __name__ == "__main__":
-    main()
+    if "--daemon" in sys.argv:
+        daemon()
+    else:
+        main()

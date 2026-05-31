@@ -6,6 +6,7 @@ import type {
   ScheduleEntry,
   Violation,
 } from './constraint-spec';
+import { CHECKED_KINDS } from './constraint-registry';
 
 type CheckFn = (
   spec: ConstraintSpec,
@@ -963,7 +964,7 @@ export function validateSchedule(
   const uncheckedConstraintIds: string[] = [];
 
   for (const spec of constraintSpecs) {
-    if (spec.kind === 'custom_dsl') {
+    if (!CHECKED_KINDS.has(spec.kind)) {
       uncheckedConstraintIds.push(spec.id);
       continue;
     }
