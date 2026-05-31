@@ -2,7 +2,7 @@ import type { DeterministicValidationReport } from './ai/constraint-spec'
 import type { AgentLifecyclePhase } from './ai/types'
 import type { AgentProgressStep } from './types'
 
-export const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
+export const RESULT_NOT_FOUND_MESSAGE = 'Không tìm được thời khóa biểu hợp lệ.'
 export const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
 export const MAX_CACHED_RUNS = 3
 export const SOLVER_STATUS_LABELS: Record<string, string> = {
@@ -13,11 +13,11 @@ export const SOLVER_STATUS_LABELS: Record<string, string> = {
 
 export const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
 export const STEP_LABELS: Record<AgentProgressStep, string> = {
-  thinking: 'Suy nghi',
-  coding: 'Viet code',
-  running: 'Chay thu',
-  checking: 'Kiem tra',
-  fixing: 'Sua loi',
+  thinking: 'Suy nghĩ',
+  coding: 'Viết code',
+  running: 'Chạy thử',
+  checking: 'Kiểm tra',
+  fixing: 'Sửa lỗi',
   idle: 'Idle',
 }
 

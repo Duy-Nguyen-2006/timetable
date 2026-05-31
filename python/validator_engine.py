@@ -186,35 +186,43 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
         length = int(params.get("length", 2))
         subject = params.get("subject")
         classes = params.get("classes")
-        grouped: dict[str, list[dict[str, Any]]] = {}
+        by_class: dict[str, list[dict[str, Any]]] = {}
         for entry in schedule:
             if entry.get("subject") != subject:
                 continue
             if classes and entry.get("class") not in classes:
                 continue
-            grouped.setdefault(f"{entry.get('class')}::{entry.get('day')}", []).append(entry)
+            by_class.setdefault(str(entry.get("class")), []).append(entry)
 
         out: list[dict[str, Any]] = []
-        for entries in grouped.values():
-            periods = sorted(
-                p for p in (_to_period(e.get("period")) for e in entries) if p is not None
-            )
-            if len(periods) < length:
+        for entries in by_class.values():
+            if len(entries) < length:
                 continue
-            total_periods = len(periods)
-            required_runs = total_periods // length
+            # Rule A: required runs derive from the class's total weekly periods,
+            # while runs are counted per-day (streaks never cross a day boundary).
+            required_runs = len(entries) // length
             runs_of_correct_length = 0
-            streak = 1
-            for i in range(1, len(periods)):
-                if periods[i] == periods[i - 1] + 1:
-                    streak += 1
-                else:
-                    if streak >= length:
-                        runs_of_correct_length += streak // length
-                    streak = 1
-            if streak >= length:
-                runs_of_correct_length += streak // length
-            if runs_of_correct_length < required_runs:
+            by_day: dict[str, list[int]] = {}
+            for entry in entries:
+                p = _to_period(entry.get("period"))
+                if p is None:
+                    continue
+                by_day.setdefault(str(entry.get("day")), []).append(p)
+            for day_periods in by_day.values():
+                periods = sorted(day_periods)
+                if len(periods) < length:
+                    continue
+                streak = 1
+                for i in range(1, len(periods)):
+                    if periods[i] == periods[i - 1] + 1:
+                        streak += 1
+                    else:
+                        if streak >= length:
+                            runs_of_correct_length += streak // length
+                        streak = 1
+                if streak >= length:
+                    runs_of_correct_length += streak // length
+            if required_runs > 0 and runs_of_correct_length < required_runs:
                 out.append(_violation(cid, kind, "subject_consecutive violated.", entries))
         return out
 

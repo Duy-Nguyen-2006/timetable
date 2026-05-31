@@ -6,10 +6,28 @@ try:
 except ImportError:
     pytest = None
 
-# Add python directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from code_executor import _map_status, run_user_code
+
+
+def _make_sandbox_stub(result_payload):
+    """Build a fake run_sandboxed that writes result.json and reports success."""
+
+    def fake_run_sandboxed(file_path, timeout=120, workspace_dir=None):
+        cwd = Path(workspace_dir or Path(file_path).parent)
+        (cwd / "result.json").write_text(json.dumps(result_payload), encoding="utf-8")
+        return {
+            "success": True,
+            "return_code": 0,
+            "stdout": "SOLUTION_FOUND",
+            "stderr": "",
+            "combined_output": "SOLUTION_FOUND",
+            "sandbox": "test",
+        }
+
+    return fake_run_sandboxed
+
 
 def test_map_status():
     assert _map_status("OPTIMAL") == "optimal"
@@ -18,26 +36,20 @@ def test_map_status():
     assert _map_status("MODEL_INVALID") == "infeasible"
     assert _map_status("UNKNOWN") == "unknown"
 
+
 def test_run_user_code_accepts_feasible_status(tmp_path, monkeypatch):
     import code_executor
+    import sandbox.run as sandbox_run
 
-    class MockCompletedProcess:
-        returncode = 0
-        stdout = "SOLUTION_FOUND"
-        stderr = ""
-
-    def mock_run(*args, **kwargs):
-        cwd = kwargs.get("cwd")
-        if cwd:
-            result_path = Path(cwd) / "result.json"
-            result_path.write_text(json.dumps({
-                "status": "feasible",
-                "schedule": [{"assignmentId": "a1"}],
-                "assignments": [{"id": "a1"}]
-            }))
-        return MockCompletedProcess()
-
-    monkeypatch.setattr(code_executor.subprocess, "run", mock_run)
+    monkeypatch.setattr(
+        sandbox_run,
+        "run_sandboxed",
+        _make_sandbox_stub({
+            "status": "feasible",
+            "schedule": [{"assignmentId": "a1"}],
+            "assignments": [{"id": "a1"}],
+        }),
+    )
     monkeypatch.setattr(code_executor.Path, "cwd", lambda: Path(tmp_path))
 
     res = run_user_code("print('hello')", timeout=10)
@@ -46,33 +58,24 @@ def test_run_user_code_accepts_feasible_status(tmp_path, monkeypatch):
 
 
 def test_run_user_code_empty_schedule_optimal_coerced(tmp_path, monkeypatch):
-    import code_executor
+    import sandbox.run as sandbox_run
 
-    class MockCompletedProcess:
-        returncode = 0
-        stdout = "SOLUTION_FOUND"
-        stderr = ""
-
-    def mock_run(*args, **kwargs):
-        cwd = kwargs.get("cwd")
-        if cwd:
-            result_path = Path(cwd) / "result.json"
-            result_path.write_text(json.dumps({
-                "status": "optimal",
-                "schedule": []
-            }))
-        return MockCompletedProcess()
-
-    monkeypatch.setattr(code_executor.subprocess, "run", mock_run)
+    monkeypatch.setattr(
+        sandbox_run,
+        "run_sandboxed",
+        _make_sandbox_stub({"status": "optimal", "schedule": []}),
+    )
 
     res = run_user_code("print('hello')", timeout=10)
     assert res["ok"] is False
     assert res["status"] == "infeasible"
 
+
 def test_artifact_cleanup(tmp_path, monkeypatch):
     import code_executor
     import os
     import time
+    import sandbox.run as sandbox_run
 
     mock_artifact_dir = Path(tmp_path) / ".ai_results"
     mock_artifact_dir.mkdir()
@@ -84,23 +87,11 @@ def test_artifact_cleanup(tmp_path, monkeypatch):
         os.utime(file, (mtime, mtime))
 
     monkeypatch.setattr(code_executor.Path, "cwd", lambda: Path(tmp_path))
-
-    class MockCompletedProcess:
-        returncode = 0
-        stdout = "SOLUTION_FOUND"
-        stderr = ""
-
-    def mock_run(*args, **kwargs):
-        cwd = kwargs.get("cwd")
-        if cwd:
-            result_path = Path(cwd) / "result.json"
-            result_path.write_text(json.dumps({
-                "status": "optimal",
-                "schedule": [{"id": "x"}]
-            }))
-        return MockCompletedProcess()
-
-    monkeypatch.setattr(code_executor.subprocess, "run", mock_run)
+    monkeypatch.setattr(
+        sandbox_run,
+        "run_sandboxed",
+        _make_sandbox_stub({"status": "optimal", "schedule": [{"id": "x"}]}),
+    )
 
     res = run_user_code("print('hello')", timeout=10)
     assert res["ok"] is True
@@ -109,4 +100,3 @@ def test_artifact_cleanup(tmp_path, monkeypatch):
     assert len(remaining_files) == 51
     for i in range(10):
         assert not (mock_artifact_dir / f"result_{i}.json").exists()
-

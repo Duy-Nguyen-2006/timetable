@@ -33,14 +33,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Build Python executor
+      - name: Build Python executor (PyInstaller)
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path python-dist | Out-Null
-          pyinstaller python/code_executor.py --onefile --name code_executor --distpath python-dist/code_executor --workpath build/pyinstaller --specpath build/pyinstaller
+        run: npm run build:executor:win
 
       - name: Validate Electron main syntax
         run: node --check electron/main.mjs
+
+      - name: Run Electron tests
+        run: npm run test:electron
 
       - name: Build Next app
         shell: bash

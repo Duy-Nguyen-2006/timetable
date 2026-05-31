@@ -19,8 +19,10 @@ import {
   TOKEN_CAP_PER_RUN,
 } from './local-agent-limits';
 import { getCachedStage } from './stage-cache';
+import { PIPELINE_VERSIONS } from './pipeline-versions';
 import {
   buildCoderExhaustedMessage,
+  buildExhaustionError,
   buildFinalMessage,
   buildRepeatedViolationMessage,
   buildViolationSignature,
@@ -60,6 +62,8 @@ export async function runLocalAgent(
 
     const translatorCacheKey = `translator:${stableHash({
       model: pickStageConfig(config, 'translator').model,
+      promptVersion: PIPELINE_VERSIONS.prompt.translator,
+      registryVersion: PIPELINE_VERSIONS.constraintRegistry,
       assignments: input.assignments,
       constraints: input.constraints,
       days: input.days,
@@ -101,7 +105,12 @@ export async function runLocalAgent(
       constraintSpecs: deduped,
     };
     const plannerCached = await getCachedStage(
-      `planner:${stableHash({ model: pickStageConfig(config, 'planner').model, input: plannerInput })}`,
+      `planner:${stableHash({
+        model: pickStageConfig(config, 'planner').model,
+        promptVersion: PIPELINE_VERSIONS.prompt.planner,
+        registryVersion: PIPELINE_VERSIONS.constraintRegistry,
+        input: plannerInput,
+      })}`,
       () => runPlannerTurn(pickStageConfig(config, 'planner'), plannerInput)
     );
     const planner = plannerCached.value;
@@ -124,6 +133,7 @@ export async function runLocalAgent(
     let lastCheckedCustomIds = new Set<string>();
     let pendingRepairPatches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }> | null = null;
     let lastSuccessfulSchedule: ScheduleEntry[] | null = input.previousSchedule ?? null;
+    let lastExecStatus: string | undefined;
 
     while (true) {
       let coderRetry = 0;
@@ -193,6 +203,9 @@ export async function runLocalAgent(
               const cached = await getCachedStage(
                 `coder:${stableHash({
                   model: pickStageConfig(config, 'coder').model,
+                  promptVersion: PIPELINE_VERSIONS.prompt.coder,
+                  templateVersion: PIPELINE_VERSIONS.solverTemplate,
+                  registryVersion: PIPELINE_VERSIONS.constraintRegistry,
                   constraintSpecs: compressed.constraints,
                   plan: planner.plan,
                   skeletonVersion: skeleton,
@@ -293,6 +306,8 @@ export async function runLocalAgent(
         }
         totalToolCalls += 1;
         emit(config, { type: 'execution_result', attempt, result: execResult });
+
+        lastExecStatus = execResult.status;
 
         if (!execResult.ok || !execResult.resultData) {
           previousAttemptSummary = execResult.errorDigest || 'Solver execution failed.';
@@ -423,7 +438,7 @@ export async function runLocalAgent(
           if (!repair.patches.length) {
             return {
               success: false,
-              error: buildCoderExhaustedMessage(previousAttemptSummary),
+              error: buildExhaustionError(lastExecStatus, previousAttemptSummary),
             };
           }
 
@@ -433,7 +448,7 @@ export async function runLocalAgent(
 
         return {
           success: false,
-          error: buildCoderExhaustedMessage(previousAttemptSummary),
+          error: buildExhaustionError(lastExecStatus, previousAttemptSummary),
         };
       }
 

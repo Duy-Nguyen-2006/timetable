@@ -52,12 +52,13 @@ import { MetricCard, SelectField } from './components/TimetableFields'
 import { SelectPage, PeriodsPage } from './components/SetupPages'
 import { PreviewPage } from './components/PreviewPage'
 import {
-  AI_PROVIDER_STORAGE_KEY,
-  decodeProviderConfig,
-  encodeProviderConfig,
+  loadProviderConfig,
+  persistProviderConfig,
+} from './ai/provider-storage'
+import {
   readCachedRuns,
   writeCachedRun,
-} from './cache'
+} from './ai/run-cache'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -129,17 +130,48 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [isFirstRun, setIsFirstRun] = useState(false)
+  const [solverRuntimeNotice, setSolverRuntimeNotice] = useState<string | null>(null)
+
+  const pushSolverRuntimeMode = (mode: AIProviderConfig['solverRuntimeMode']) => {
+    try {
+      ;(window as any).electron?.solverRuntime?.setMode?.(mode || 'bundled')
+    } catch {
+      /* renderer may not have the bridge in dev/web mode */
+    }
+  }
 
   useEffect(() => {
-    // Load local AI provider config
-    try {
-      const saved = localStorage.getItem(AI_PROVIDER_STORAGE_KEY)
-      if (saved) {
-        setAiProvider(decodeProviderConfig(saved))
-      } else {
-        setIsFirstRun(true)
+    let cancelled = false
+    void (async () => {
+      try {
+        const config = await loadProviderConfig()
+        if (cancelled) return
+        if (config) {
+          setAiProvider(config)
+          pushSolverRuntimeMode(config.solverRuntimeMode)
+        } else {
+          setIsFirstRun(true)
+        }
+      } catch (err) {
+        if (typeof console !== 'undefined') console.warn('loadProviderConfig failed', err)
+        if (!cancelled) setIsFirstRun(true)
       }
-    } catch {}
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = (window as any).electron?.solverRuntime?.onNotice?.(
+      (payload: { level: string; message: string }) => {
+        if (!payload?.message) return
+        setSolverRuntimeNotice(payload.message)
+      }
+    )
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
@@ -1907,6 +1939,19 @@ const handleDownloadExcel = useCallback(() => {
                         </div>
                       </div>
 
+                      {solverRuntimeNotice && (
+                        <div className="mb-4 flex items-start justify-between gap-3 rounded-md border border-amber-400/30 bg-amber-400/[0.06] px-4 py-3 text-xs text-amber-200">
+                          <span>{solverRuntimeNotice}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSolverRuntimeNotice(null)}
+                            className="shrink-0 text-amber-200/70 hover:text-amber-100"
+                          >
+                            Đóng
+                          </button>
+                        </div>
+                      )}
+
                       {aiLoading && (
                         <div className="mb-4 rounded-md border border-white/[0.08] bg-[#0a0a0a] p-4">
                           {/* Header with timer */}
@@ -2309,7 +2354,8 @@ const handleDownloadExcel = useCallback(() => {
         initialConfig={aiProvider || undefined}
         onSave={(config) => {
           setAiProvider(config);
-          try { localStorage.setItem(AI_PROVIDER_STORAGE_KEY, encodeProviderConfig(config)); } catch {}
+          void persistProviderConfig(config);
+          pushSolverRuntimeMode(config.solverRuntimeMode);
           setIsFirstRun(false);
         }}
         requireValid={isFirstRun}

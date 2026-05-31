@@ -14,12 +14,19 @@
     "start": "next start",
     "pretest": "npm run presync:skeleton",
     "test": "tsx --test \"src/**/*.test.ts\"",
+    "test:electron": "node --test \"electron/tests/*.test.mjs\"",
     "test:grep": "sh -c 'tsx --test \"src/**/*$1*.test.ts\"' --",
     "test:prompt": "tsx scripts/validate_coder_prompt_models.ts",
     "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "lint": "eslint .",
+    "build:executor": "node scripts/build_executor.mjs",
+    "build:executor:mac": "node scripts/build_executor.mjs",
+    "build:executor:win": "node scripts/build_executor.mjs",
+    "build:executor:linux": "node scripts/build_executor.mjs",
     "electron": "electron .",
     "package:win": "electron-builder --win --publish never",
+    "package:linux": "electron-builder --linux --publish never",
+    "package:mac": "electron-builder --mac --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never"
   },
   "dependencies": {
@@ -116,6 +123,14 @@
       ],
       "artifactName": "Tack-Timetable-${version}-${arch}.${ext}",
       "category": "Education"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Tack-Timetable-${version}-${arch}.${ext}",
+      "category": "public.app-category.education"
     }
   }
 }

@@ -1,3 +1,5 @@
+import type { DayId, SessionId } from '../features/timetable/calendar-schema'
+
 export type ParsedConstraint =
   | { kind: 'teacher_block_days'; teacherLabels: string[]; dayIds: string[] }
   | { kind: 'teacher_block_periods'; teacherLabels: string[]; periods: number[] }
@@ -27,7 +29,7 @@ type ParseContext = {
   sessionIds: Record<string, string>
 }
 
-const VN_DAY_ALIASES: Array<[RegExp, string]> = [
+const VN_DAY_ALIASES: Array<[RegExp, DayId]> = [
   [/\bthứ\s*(?:2|hai)\b/u, 'monday'],
   [/\bthứ\s*(?:3|ba)\b/u, 'tuesday'],
   [/\bthứ\s*(?:4|tư|tu)\b/u, 'wednesday'],
@@ -37,7 +39,7 @@ const VN_DAY_ALIASES: Array<[RegExp, string]> = [
   [/\b(?:chủ\s*nhật|chu\s*nhat|cn)\b/u, 'sunday'],
 ]
 
-const SESSION_ALIASES: Array<[RegExp, string]> = [
+const SESSION_ALIASES: Array<[RegExp, SessionId]> = [
   [/\b(?:buổi\s*)?(?:sáng|sang|sáng\s*sớm|sang\s*som)\b/u, 'morning'],
   [/\b(?:buổi\s*)?(?:chiều|chieu)\b/u, 'afternoon'],
   [/\b(?:buổi\s*)?(?:tối|toi)\b/u, 'night'],

@@ -19,6 +19,28 @@ def _auto_mode() -> str:
         return "docker"
     return "none"
 
+
+def check_unsafe_allowed(env: dict[str, str] | None = None) -> tuple[bool, str]:
+    """Decide whether the no-sandbox ("none") path may run.
+
+    Pure + testable. Packaged builds set TT_PRODUCTION=1 and must never run
+    user code without a sandbox, even if TT_SANDBOX_ALLOW_UNSAFE=1 is present.
+    """
+    env = os.environ if env is None else env
+    if env.get("TT_PRODUCTION") == "1":
+        return (
+            False,
+            "Sandbox không khả dụng trong bản đóng gói (production). "
+            "Cần Docker hoặc bwrap để chạy solver an toàn.",
+        )
+    if env.get("TT_SANDBOX_ALLOW_UNSAFE") != "1":
+        return (
+            False,
+            "No sandbox available (no Docker, no bwrap). "
+            "Set TT_SANDBOX_ALLOW_UNSAFE=1 to bypass (DEV ONLY).",
+        )
+    return True, ""
+
 def run_sandboxed(file_path: str, timeout: int = 120, workspace_dir: str | None = None) -> dict[str, Any]:
     mode = os.environ.get("TT_SANDBOX_MODE", _auto_mode()).lower()
 
@@ -35,18 +57,23 @@ def run_sandboxed(file_path: str, timeout: int = 120, workspace_dir: str | None 
         return res
 
     if mode == "none":
-        # Dev only — phải set TT_SANDBOX_ALLOW_UNSAFE=1 để confirm.
-        if os.environ.get("TT_SANDBOX_ALLOW_UNSAFE") != "1":
-            raise RuntimeError(
-                "No sandbox available (no Docker, no bwrap). Set TT_SANDBOX_ALLOW_UNSAFE=1 to bypass (DEV ONLY)."
-            )
+        # Dev only — phải set TT_SANDBOX_ALLOW_UNSAFE=1 để confirm; bản
+        # production (TT_PRODUCTION=1) luôn bị chặn (#8).
+        allowed, reason = check_unsafe_allowed()
+        if not allowed:
+            raise RuntimeError(reason)
         import subprocess
         cwd = Path(workspace_dir) if workspace_dir else Path(file_path).resolve().parent
+        # Frozen binary acts as its own interpreter via --run-solver.
+        if getattr(sys, "frozen", False):
+            argv = [sys.executable, "--run-solver", str(Path(file_path).resolve())]
+        else:
+            argv = [sys.executable, str(Path(file_path).resolve())]
         # fix bug #23 — catch TimeoutExpired để trả về status "timeout" thay
         # vì ném exception ngược lên caller.
         try:
             result = subprocess.run(
-                [sys.executable, str(Path(file_path).resolve())],
+                argv,
                 cwd=cwd, capture_output=True, text=True, timeout=timeout
             )
         except subprocess.TimeoutExpired as exc:

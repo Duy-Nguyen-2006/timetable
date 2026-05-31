@@ -5,7 +5,8 @@ Post-execution deterministic validation is the fifth stage inside the 6-stage Lo
 
 ## Core Entry Points
 
-- TypeScript: `validateSchedule(schedule, constraintSpecs, ctx)` — `src/features/timetable/ai/deterministic-validator.ts`
+- TypeScript facade: `validateSchedule(schedule, constraintSpecs, ctx)` — `src/features/timetable/ai/deterministic-validator.ts`
+- Extracted helpers (post-May 2026 refactor): `toPeriod`, `slotKey`, `pushViolation`, `evaluateCondition`, `checkBaseConstraints` — `src/features/timetable/ai/validator-helpers.ts`
 - Python reference: `validate_schedule(schedule, constraint_specs, assignments)` — `python/validator_engine.py`
 - CP-SAT round-trip: `verifyCpSatRoundTrip(schedule, assignments, domain)` — `src/features/timetable/ai/cp-sat-roundtrip.ts`
 

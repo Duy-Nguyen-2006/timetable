@@ -1,8 +1,13 @@
-import { days, defaultPeriods } from './constants'
+import { defaultPeriods } from './constants'
+import {
+  DAY_IDS,
+  WEEKDAY_IDS,
+  normalizeDayId,
+  normalizeSessionId,
+  type DayId,
+  type SessionId,
+} from './calendar-schema'
 import { makeAssignmentKey, normalizeSubjectName } from './utils'
-
-type DayId = (typeof days)[number]['id']
-type SessionId = keyof typeof defaultPeriods
 
 type QuickSection = 'teachers' | 'subjects' | 'classes' | 'assignments' | 'hard' | 'soft' | null
 
@@ -75,70 +80,12 @@ Soft constraints:
 Toán nên xếp tiết 1-2
 Văn nên liên tiếp 2 tiết`
 
-const DAY_ORDER: DayId[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-const MONDAY_TO_FRIDAY: DayId[] = DAY_ORDER.slice(0, 5)
-
-const dayAliasMap = new Map<string, DayId>([
-  ['mon', 'monday'],
-  ['monday', 'monday'],
-  ['t2', 'monday'],
-  ['thu2', 'monday'],
-  ['thuhai', 'monday'],
-  ['tue', 'tuesday'],
-  ['tuesday', 'tuesday'],
-  ['t3', 'tuesday'],
-  ['thu3', 'tuesday'],
-  ['thuba', 'tuesday'],
-  ['wed', 'wednesday'],
-  ['wednesday', 'wednesday'],
-  ['t4', 'wednesday'],
-  ['thu4', 'wednesday'],
-  ['thutu', 'wednesday'],
-  ['thu', 'thursday'],
-  ['thursday', 'thursday'],
-  ['t5', 'thursday'],
-  ['thu5', 'thursday'],
-  ['thunam', 'thursday'],
-  ['fri', 'friday'],
-  ['friday', 'friday'],
-  ['t6', 'friday'],
-  ['thu6', 'friday'],
-  ['thusau', 'friday'],
-  ['sat', 'saturday'],
-  ['saturday', 'saturday'],
-  ['t7', 'saturday'],
-  ['thu7', 'saturday'],
-  ['thubay', 'saturday'],
-  ['sun', 'sunday'],
-  ['sunday', 'sunday'],
-  ['cn', 'sunday'],
-  ['chunhat', 'sunday'],
-])
-
-const sessionAliasMap = new Map<string, SessionId>([
-  ['morning', 'morning'],
-  ['sang', 'morning'],
-  ['buoisang', 'morning'],
-  ['casang', 'morning'],
-  ['afternoon', 'afternoon'],
-  ['chieu', 'afternoon'],
-  ['buoichieu', 'afternoon'],
-  ['cachieu', 'afternoon'],
-  ['night', 'night'],
-  ['toi', 'night'],
-  ['buoitoi', 'night'],
-  ['catoi', 'night'],
-])
-
-const stripDiacritics = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '')
-const normalizeToken = (value: string) => stripDiacritics(value).toLowerCase().replace(/[^a-z0-9]/g, '')
-
 const pushUnique = (list: string[], value: string) => {
   if (!list.includes(value)) list.push(value)
 }
 
 const parseDayList = (raw: string): DayId[] => {
-  if (!raw.trim()) return MONDAY_TO_FRIDAY
+  if (!raw.trim()) return [...WEEKDAY_IDS]
   const resolved: DayId[] = []
 
   raw
@@ -148,30 +95,30 @@ const parseDayList = (raw: string): DayId[] => {
     .forEach((token) => {
       const rangeTokens = token.split('-').map((part) => part.trim()).filter(Boolean)
       if (rangeTokens.length === 2) {
-        const start = dayAliasMap.get(normalizeToken(rangeTokens[0]))
-        const end = dayAliasMap.get(normalizeToken(rangeTokens[1]))
+        const start = normalizeDayId(rangeTokens[0])
+        const end = normalizeDayId(rangeTokens[1])
         if (!start || !end) {
           throw new Error(`Không nhận diện được ngày trong khoảng: "${token}"`)
         }
-        const startIndex = DAY_ORDER.indexOf(start)
-        const endIndex = DAY_ORDER.indexOf(end)
+        const startIndex = DAY_IDS.indexOf(start)
+        const endIndex = DAY_IDS.indexOf(end)
         if (startIndex > endIndex) {
           throw new Error(`Khoảng ngày không hợp lệ: "${token}"`)
         }
-        DAY_ORDER.slice(startIndex, endIndex + 1).forEach((day) => {
+        DAY_IDS.slice(startIndex, endIndex + 1).forEach((day) => {
           if (!resolved.includes(day)) resolved.push(day)
         })
         return
       }
 
-      const day = dayAliasMap.get(normalizeToken(token))
+      const day = normalizeDayId(token)
       if (!day) {
         throw new Error(`Không nhận diện được ngày: "${token}"`)
       }
       if (!resolved.includes(day)) resolved.push(day)
     })
 
-  return resolved.length ? resolved : MONDAY_TO_FRIDAY
+  return resolved.length ? resolved : [...WEEKDAY_IDS]
 }
 
 const parseSessionList = (raw: string): SessionId[] => {
@@ -184,7 +131,7 @@ const parseSessionList = (raw: string): SessionId[] => {
     .map((token) => token.trim())
     .filter(Boolean)
     .forEach((token) => {
-      const session = sessionAliasMap.get(normalizeToken(token))
+      const session = normalizeSessionId(token)
       if (!session) {
         throw new Error(`Không nhận diện được buổi học: "${token}"`)
       }

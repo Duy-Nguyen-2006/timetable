@@ -1,0 +1,14 @@
+{
+  "name": "subject_consecutive allows Rule A remainder",
+  "schedule": [
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "mon", "period": 2, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "wed", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "wed", "period": 2, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "fri", "period": 5, "subject": "Toán", "teacher": "Sơn" }
+  ],
+  "constraints": [
+    { "id": "c_consecutive", "kind": "subject_consecutive", "severity": "hard", "params": { "subject": "Toán", "length": 2 } }
+  ],
+  "expectedViolationIds": []
+}

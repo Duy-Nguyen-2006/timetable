@@ -4,15 +4,23 @@ Active contributors: Duy
 
 ## Purpose
 
-The Scheduling Wizard is the primary interactive user interface of Tack Timetable. It is implemented as a single large React component (`src/features/timetable/TimetableApp.tsx`, ~3k LOC) that guides the user through the full workflow: selecting teaching days and sessions, configuring maximum periods, previewing and pruning the timetable grid, entering teachers/subjects/classes, defining assignments, specifying natural-language constraints (required/preferred), invoking the Local Agent AI pipeline, reviewing deterministic validation results and violations, and exporting the final timetable plus diagnostics to Excel.
+The Scheduling Wizard is the primary interactive user interface of Tack Timetable. After the May 2026 component extraction refactor, it is implemented as an orchestrator component (`src/features/timetable/TimetableApp.tsx`, reduced from ~118 kLOC to ~3 kLOC core logic) that delegates individual wizard pages to focused components under `components/`. It guides the user through the full workflow: selecting teaching days and sessions, configuring maximum periods, previewing and pruning the timetable grid, entering teachers/subjects/classes, defining assignments, specifying natural-language constraints (required/preferred), invoking the Local Agent AI pipeline, reviewing deterministic validation results and violations, and exporting the final timetable plus diagnostics to Excel.
 
 The wizard is the sole driver of the entire end-user experience and orchestrates the 6-stage Local Agent pipeline.
 
 ## Directory layout
 
-Relevant files under `src/features/timetable/` (the feature directory for the interactive scheduling canvas):
+Relevant files under `src/features/timetable/` (the feature directory for the interactive scheduling canvas). After the May 2026 refactor, page-level UI logic has been extracted from the monolithic orchestrator into focused components:
 
-- `TimetableApp.tsx` — The main wizard component (~3k LOC). Contains all UI pages, state, agent integration, and export logic.
+- `TimetableApp.tsx` — The orchestrator component (~3 kLOC after extraction). Manages global wizard state, agent integration, caching, and Excel export; delegates page rendering to components/.
+- `components/`
+  - `PreviewPage.tsx` — Live timetable grid preview with per-cell delete/restore (period pruning UI).
+  - `SetupPages.tsx` — Early wizard pages: SelectPage (days/sessions), PeriodsPage, DetailsPage, SubjectsPage, ClassesPage, etc.
+  - `TimetableFields.tsx` — Reusable field components: DayTile, SessionTile, PeriodControl, MetricCard, SelectField.
+- `assignment-helpers.tsx` — Assignment-related helpers extracted during the refactor.
+- `cache.ts` — Wizard result caching utilities.
+- `solver-ui.ts` — UI formatting helpers for solver/agent results.
+- `types.ts` — UI-specific TypeScript types for the wizard.
 - `quick-import.ts` — Parser for the "Nhập dữ liệu nhanh" (quick import) text dataset format.
 - `quick-import.test.ts` — Unit tests for the quick-import parser.
 - `SettingsModal.tsx` — AI provider configuration modal (base URL, API key, model, solver profile).
@@ -23,14 +31,14 @@ Relevant files under `src/features/timetable/` (the feature directory for the in
 ## Key abstractions
 
 - `TimetableAppProps`: `{ onBackToLanding?: () => void; quickDatasetText?: string | null }`
-- Internal React state (`useState`):
+- Internal React state (`useState`, managed in the orchestrator `TimetableApp.tsx`):
   - Wizard navigation: `page` (`'select' | 'periods' | 'final' | 'details' | 'subjects' | 'classes' | 'assignments' | 'constraints' | 'summary'`)
   - Structure: `selectedDays`, `selectedSessions`, `periods: Record<'morning'|'afternoon'|'night', number>`, `deletedPeriods`
   - Master data: `teacherList`, `subjectList`, `classList`
   - `assignmentList: AssignmentItem[]` (each with `key`, `teacher`, `subject`, `className`, `weeklyPeriods`)
   - `constraintList: ConstraintItem[]` (each with `id`, `type: 'required'|'preferred'`, `text`, optional `weight`)
   - AI/runtime: `aiResult: TimetableSolveResult | null`, `aiLoading`, `aiError`, `agentStatus`, `agentStep: AgentProgressStep`, `agentTimeline: AgentLifecycleEvent[]`, `aiProvider: AIProviderConfig | null`
-- Types imported from `./ai/types`:
+- Types imported from `./ai/types` and `./types` (post-refactor):
   - `AIProviderConfig`, `AgentInputPayload`, `AgentLifecycleEvent`, `AgentLifecyclePhase`, `LocalAgentFinalResult`
 - `ConstraintItem` distinguishes hard (`required`) vs soft (`preferred` with weight) constraints.
 - Quick-import result shape: `QuickImportData` (from `quick-import.ts`).

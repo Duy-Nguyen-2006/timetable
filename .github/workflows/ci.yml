@@ -22,6 +22,7 @@ jobs:
       - run: npm run lint
       - run: npm run test:prompt
       - run: npx tsx --test "src/**/*.test.ts"
+      - run: npm run test:electron
       - run: npm run build
       - name: Provider smoke tests
         env:

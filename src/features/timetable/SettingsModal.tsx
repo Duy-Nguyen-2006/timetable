@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import type { AIProviderConfig, AIProviderType, SolverProfile } from './ai/types';
+import type { AIProviderConfig, AIProviderType, SolverProfile, SolverRuntimeMode } from './ai/types';
+import { resolveProvider, normalizeBaseURL } from '@/lib/provider';
 
 interface SettingsModalProps {
   open: boolean;
@@ -22,11 +23,14 @@ const SOLVER_PROFILES: Array<{ value: SolverProfile; label: string; description:
   { value: 'balanced', label: 'Cân bằng', description: '60s, dùng CPU - 1 worker' },
   { value: 'deep', label: 'Sâu', description: '180s, ưu tiên chất lượng nghiệm' },
 ];
+const RUNTIME_MODES: Array<{ value: SolverRuntimeMode; label: string; description: string }> = [
+  { value: 'bundled', label: 'Bundled', description: 'Mặc định, không cần cài Python' },
+  { value: 'docker', label: 'Docker', description: 'Nâng cao, cách ly bằng container' },
+  { value: 'system', label: 'System Python', description: 'Cho dev, dùng python3 hệ thống' },
+];
 
 function inferProvider(baseURL: string, model: string): AIProviderType {
-  if (baseURL.toLowerCase().includes('openrouter.ai')) return 'openrouter';
-  if (/^(gpt-5|gpt-4o|o\d|codex)/u.test(model.toLowerCase())) return 'openai-responses';
-  return 'generic-chat-completion-api';
+  return resolveProvider(undefined, baseURL, model);
 }
 
 export function SettingsModal({
@@ -39,7 +43,20 @@ export function SettingsModal({
   const [baseURL, setBaseURL] = useState(initialConfig?.baseURL || DEFAULT_BASE_URL);
   const [apiKey, setApiKey] = useState(initialConfig?.apiKey || '');
   const [model, setModel] = useState(initialConfig?.model || 'deepseek/deepseek-v4-flash');
+  const [modelTranslator, setModelTranslator] = useState(initialConfig?.modelTranslator || '');
+  const [modelPlanner, setModelPlanner] = useState(initialConfig?.modelPlanner || '');
+  const [modelCoder, setModelCoder] = useState(initialConfig?.modelCoder || '');
+  const [modelRepair, setModelRepair] = useState(initialConfig?.modelRepair || '');
+  const [showAdvancedModels, setShowAdvancedModels] = useState(
+    Boolean(
+      initialConfig?.modelTranslator ||
+        initialConfig?.modelPlanner ||
+        initialConfig?.modelCoder ||
+        initialConfig?.modelRepair,
+    ),
+  );
   const [solverProfile, setSolverProfile] = useState<SolverProfile>(initialConfig?.solverProfile || 'balanced');
+  const [solverRuntimeMode, setSolverRuntimeMode] = useState<SolverRuntimeMode>(initialConfig?.solverRuntimeMode || 'bundled');
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const { toast } = useToast();
@@ -91,7 +108,7 @@ export function SettingsModal({
   };
 
   const handleSave = () => {
-    const trimmedBaseURL = baseURL.trim().replace(/\/$/, '');
+    const trimmedBaseURL = normalizeBaseURL(baseURL.trim());
     const trimmedKey = apiKey.trim();
     const trimmedModel = model.trim();
 
@@ -120,7 +137,12 @@ export function SettingsModal({
       baseURL: trimmedBaseURL,
       apiKey: trimmedKey,
       model: trimmedModel,
+      modelTranslator: modelTranslator.trim() || undefined,
+      modelPlanner: modelPlanner.trim() || undefined,
+      modelCoder: modelCoder.trim() || undefined,
+      modelRepair: modelRepair.trim() || undefined,
       solverProfile,
+      solverRuntimeMode,
     });
     onOpenChange(false);
   };
@@ -168,6 +190,37 @@ export function SettingsModal({
             <p className="text-xs text-muted-foreground">
               Provider tự nhận diện: {inferProvider(baseURL, model)}
             </p>
+            <button
+              type="button"
+              onClick={() => setShowAdvancedModels((v) => !v)}
+              className="text-xs underline text-muted-foreground hover:text-foreground"
+            >
+              {showAdvancedModels ? 'Ẩn model nâng cao' : 'Cấu hình model riêng cho từng stage'}
+            </button>
+            {showAdvancedModels ? (
+              <div className="grid gap-2 pt-2">
+                {(
+                  [
+                    { label: 'Translator model', value: modelTranslator, set: setModelTranslator },
+                    { label: 'Planner model', value: modelPlanner, set: setModelPlanner },
+                    { label: 'Coder model', value: modelCoder, set: setModelCoder },
+                    { label: 'Repair model', value: modelRepair, set: setModelRepair },
+                  ] as const
+                ).map(({ label, value, set }) => (
+                  <div className="space-y-1" key={label}>
+                    <Label className="text-xs">{label}</Label>
+                    <Input
+                      value={value}
+                      onChange={(e) => set(e.target.value)}
+                      placeholder="(mặc định: dùng model chính)"
+                    />
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Để trống ô nào sẽ fallback về model chính. Hữu ích khi muốn dùng model rẻ cho translator và model mạnh cho coder.
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -186,6 +239,27 @@ export function SettingsModal({
                 >
                   <span className="block font-medium">{profile.label}</span>
                   <span className="mt-1 block">{profile.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Chế độ chạy solver</Label>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {RUNTIME_MODES.map((runtime) => (
+                <button
+                  key={runtime.value}
+                  type="button"
+                  onClick={() => setSolverRuntimeMode(runtime.value)}
+                  className={`rounded-md border p-2 text-left text-xs transition ${
+                    solverRuntimeMode === runtime.value
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className="block font-medium">{runtime.label}</span>
+                  <span className="mt-1 block">{runtime.description}</span>
                 </button>
               ))}
             </div>

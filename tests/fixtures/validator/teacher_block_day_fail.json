@@ -1,0 +1,10 @@
+{
+  "name": "teacher_block_day flags blocked day",
+  "schedule": [
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Toán", "teacher": "Sơn" }
+  ],
+  "constraints": [
+    { "id": "c_block_day", "kind": "teacher_block_day", "severity": "hard", "params": { "teacher": "Sơn", "day": "mon" } }
+  ],
+  "expectedViolationIds": ["c_block_day"]
+}

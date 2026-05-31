@@ -1,0 +1,14 @@
+{
+  "name": "subject_consecutive fails when required runs are not met",
+  "schedule": [
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "mon", "period": 2, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "tue", "period": 4, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "wed", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "fri", "period": 5, "subject": "Toán", "teacher": "Sơn" }
+  ],
+  "constraints": [
+    { "id": "c_consecutive", "kind": "subject_consecutive", "severity": "hard", "params": { "subject": "Toán", "length": 2 } }
+  ],
+  "expectedViolationIds": ["c_consecutive"]
+}

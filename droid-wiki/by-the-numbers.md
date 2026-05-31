@@ -1,6 +1,6 @@
 # By the Numbers
 
-Data collected on 2026-05-31 (current HEAD: `2ca87b44`).
+Data collected on 2026-05-31 (current HEAD: `cb55d90`).
 
 ## Size
 

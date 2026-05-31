@@ -1,0 +1,9 @@
+{
+  "name": "class clash detected at same slot",
+  "schedule": [
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Văn", "teacher": "Lan" }
+  ],
+  "constraints": [],
+  "expectedViolationIds": ["base_class_clash"]
+}

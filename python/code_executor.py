@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import json
+import py_compile
+import runpy
 import shutil
 import subprocess
 import sys
@@ -9,6 +11,15 @@ import time
 import traceback
 from pathlib import Path
 from typing import Any
+
+# When PyInstaller freezes us into a single binary, sys.frozen=True and
+# sys.executable points at the binary itself, not a Python interpreter. The
+# bundled CPython is only reachable by re-exec'ing this binary with a
+# dedicated mode flag (--run-solver). Sandbox launchers must use this same
+# binary as the interpreter — never bare `python`, which is unavailable on
+# user machines that didn't install Python.
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+SELF_EXECUTABLE = sys.executable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -86,21 +97,29 @@ def run_user_code(code: str, timeout: int, job_dir: str | None = None) -> dict[s
 
         solver_path.write_text(code, encoding="utf-8")
 
-        compile_proc = subprocess.run(
-            [sys.executable, "-m", "py_compile", str(solver_path)],
-            capture_output=True,
-            text=True,
-            cwd=workspace,
-        )
-        if compile_proc.returncode != 0:
+        # Syntax check in-process. Avoids re-spawning sys.executable, which in a
+        # PyInstaller binary points at the binary itself, not a Python.
+        try:
+            py_compile.compile(str(solver_path), doraise=True)
+        except py_compile.PyCompileError as exc:
             return {
                 "phase": "compile",
                 "ok": False,
                 "status": "crashed",
                 "durationMs": int((time.time() - started) * 1000),
-                "errorDigest": _digest_error(compile_proc.stderr or compile_proc.stdout),
-                "stdout": _truncate_output(compile_proc.stdout or ""),
-                "stderr": _truncate_output(compile_proc.stderr or ""),
+                "errorDigest": _digest_error(str(exc)),
+                "stdout": "",
+                "stderr": str(exc),
+            }
+        except SyntaxError as exc:
+            return {
+                "phase": "compile",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": int((time.time() - started) * 1000),
+                "errorDigest": _digest_error(str(exc)),
+                "stdout": "",
+                "stderr": str(exc),
             }
 
         from sandbox.run import run_sandboxed
@@ -307,7 +326,35 @@ def daemon() -> None:
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
 
+def run_solver_self_exec() -> int:
+    """Self-interpreter mode: ``code_executor --run-solver <file>``.
+
+    Lets sandbox launchers use this binary as the Python interpreter when no
+    system Python is available (PyInstaller frozen build).
+    """
+    args = [a for a in sys.argv[1:] if a != "--run-solver"]
+    if not args:
+        print("[code_executor] --run-solver requires a script path", file=sys.stderr)
+        return 2
+    script = Path(args[0]).resolve()
+    if not script.exists():
+        print(f"[code_executor] script not found: {script}", file=sys.stderr)
+        return 2
+    sys.argv = [str(script), *args[1:]]
+    sys.path.insert(0, str(script.parent))
+    try:
+        runpy.run_path(str(script), run_name="__main__")
+        return 0
+    except SystemExit as exc:
+        return int(exc.code) if isinstance(exc.code, int) else 0
+    except Exception:
+        traceback.print_exc()
+        return 1
+
+
 if __name__ == "__main__":
+    if "--run-solver" in sys.argv:
+        sys.exit(run_solver_self_exec())
     if "--daemon" in sys.argv:
         daemon()
     else:

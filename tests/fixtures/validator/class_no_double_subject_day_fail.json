@@ -1,0 +1,11 @@
+{
+  "name": "class_no_double_subject_day flags same subject twice in a day",
+  "schedule": [
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "mon", "period": 2, "subject": "Toán", "teacher": "Sơn" }
+  ],
+  "constraints": [
+    { "id": "c_double", "kind": "class_no_double_subject_day", "severity": "hard", "params": { "class": "6A", "subject": "Toán" } }
+  ],
+  "expectedViolationIds": ["c_double"]
+}

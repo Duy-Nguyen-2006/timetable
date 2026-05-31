@@ -1,20 +1,7 @@
-import type { AIProviderConfig } from './ai/types'
-import type { CachedRun, TimetableSolveResult } from './types'
-import { MAX_CACHED_RUNS } from './solver-ui'
+import type { CachedRun, TimetableSolveResult } from '../types'
+import { MAX_CACHED_RUNS } from '../solver-ui'
 
-export const AI_PROVIDER_STORAGE_KEY = 'tack_ai_provider_config'
 export const RUN_CACHE_STORAGE_KEY = 'tack_ai_run_cache'
-
-export const encodeProviderConfig = (config: AIProviderConfig) =>
-  btoa(unescape(encodeURIComponent(JSON.stringify(config))))
-
-export const decodeProviderConfig = (raw: string): AIProviderConfig => {
-  try {
-    return JSON.parse(decodeURIComponent(escape(atob(raw)))) as AIProviderConfig
-  } catch {
-    return JSON.parse(raw) as AIProviderConfig
-  }
-}
 
 export const readCachedRuns = (): CachedRun[] => {
   try {

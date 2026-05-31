@@ -8,22 +8,52 @@ type TestProviderPayload = {
   model?: string
 }
 
+const PROVIDER_TEST_TIMEOUT_MS = 12_000
+
+function validateBaseURL(raw: string): { ok: true; url: URL } | { ok: false; message: string } {
+  if (!raw) return { ok: false, message: 'Thiếu Base URL.' }
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return { ok: false, message: 'Base URL không hợp lệ.' }
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { ok: false, message: 'Base URL phải bắt đầu bằng http:// hoặc https://' }
+  }
+  return { ok: true, url }
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = PROVIDER_TEST_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as TestProviderPayload
     const baseURL = normalizeBaseURL(String(body.baseURL ?? '').trim())
+    const validation = validateBaseURL(baseURL)
+    if (!validation.ok) {
+      return NextResponse.json({ ok: false, message: validation.message }, { status: 400 })
+    }
     const apiKey = String(body.apiKey ?? '').trim()
     const model = String(body.model ?? '').trim()
     const provider = resolveProvider(body.provider, baseURL, model)
 
-    if (!baseURL || !apiKey) {
+    if (!apiKey) {
       return NextResponse.json(
-        { ok: false, message: 'Thiếu Base URL hoặc API Key.' },
+        { ok: false, message: 'Thiếu API Key.' },
         { status: 400 },
       )
     }
 
-    const modelsRes = await fetch(`${baseURL}/models`, {
+    const modelsRes = await fetchWithTimeout(`${baseURL}/models`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
       cache: 'no-store',
@@ -38,7 +68,7 @@ export async function POST(request: Request) {
 
     if (model) {
       const useResponses = provider === 'openai-responses'
-      const chatRes = await fetch(`${baseURL}${useResponses ? '/responses' : '/chat/completions'}`, {
+      const chatRes = await fetchWithTimeout(`${baseURL}${useResponses ? '/responses' : '/chat/completions'}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         cache: 'no-store',
@@ -85,7 +115,14 @@ export async function POST(request: Request) {
       { status: 200 },
     )
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error'
+    const isAbort =
+      (error instanceof DOMException && error.name === 'AbortError') ||
+      (error instanceof Error && error.name === 'AbortError')
+    const msg = isAbort
+      ? `Provider không phản hồi trong ${PROVIDER_TEST_TIMEOUT_MS / 1000}s.`
+      : error instanceof Error
+        ? error.message
+        : 'Unknown error'
     return NextResponse.json(
       {
         ok: false,

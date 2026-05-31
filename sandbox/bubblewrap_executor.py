@@ -27,6 +27,7 @@ import os
 import shutil
 import site
 import subprocess
+import sys
 import sysconfig
 import time
 from pathlib import Path
@@ -35,6 +36,24 @@ from typing import Dict, Any
 
 def is_bwrap_available() -> bool:
     return shutil.which("bwrap") is not None
+
+
+def _interpreter_argv(script_name: str) -> tuple[list[str], list[str], Path | None]:
+    """Return (argv tail, extra ro-binds [host_path], host binary to mount).
+
+    Inside a PyInstaller frozen binary we re-exec the binary itself with
+    --run-solver so the bundled CPython is reused. Otherwise fall back to
+    `python` from PATH (dev mode where the user has Python installed).
+    """
+    if getattr(sys, "frozen", False):
+        host_binary = Path(sys.executable).resolve()
+        sandbox_binary = f"/tmp/timetable-frozen-executor"
+        return (
+            [sandbox_binary, "--run-solver", script_name],
+            [str(host_binary), sandbox_binary],
+            host_binary,
+        )
+    return (["python", script_name], [], None)
 
 
 def _python_package_roots() -> list[Path]:
@@ -111,7 +130,11 @@ def run_with_bubblewrap(
     if package_mounts:
         cmd.extend(["--setenv", "PYTHONPATH", os.pathsep.join(package_mounts)])
 
-    cmd.extend(["python", str(file_path.name)])
+    interp_argv, interp_binds, host_binary = _interpreter_argv(file_path.name)
+    if host_binary is not None:
+        # Mount the frozen executor binary read-only inside the sandbox.
+        cmd.extend(["--ro-bind", interp_binds[0], interp_binds[1]])
+    cmd.extend(interp_argv)
 
     print(f"[Bubblewrap] Running {file_path.name} in lightweight sandbox...")
 

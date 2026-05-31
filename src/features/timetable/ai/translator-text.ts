@@ -26,13 +26,13 @@ export function extractDayId(text: string, days: Array<{ id: string; label: stri
     if (includesLabel(text, day.id) || includesLabel(text, day.label)) return day.id;
   }
 
-  if (/thứ\s*2|thu\s*2/u.test(text)) return 'mon';
-  if (/thứ\s*3|thu\s*3/u.test(text)) return 'tue';
-  if (/thứ\s*4|thu\s*4/u.test(text)) return 'wed';
-  if (/thứ\s*5|thu\s*5/u.test(text)) return 'thu';
-  if (/thứ\s*6|thu\s*6/u.test(text)) return 'fri';
-  if (/thứ\s*7|thu\s*7/u.test(text)) return 'sat';
-  if (/chủ\s*nhật|chu\s*nhat|cn/u.test(text)) return 'sun';
+  if (/thứ\s*2|thu\s*2/iu.test(text)) return 'monday';
+  if (/thứ\s*3|thu\s*3/iu.test(text)) return 'tuesday';
+  if (/thứ\s*4|thu\s*4/iu.test(text)) return 'wednesday';
+  if (/thứ\s*5|thu\s*5/iu.test(text)) return 'thursday';
+  if (/thứ\s*6|thu\s*6/iu.test(text)) return 'friday';
+  if (/thứ\s*7|thu\s*7/iu.test(text)) return 'saturday';
+  if (/chủ\s*nhật|chu\s*nhat|\bcn\b/iu.test(text)) return 'sunday';
 
   return null;
 }

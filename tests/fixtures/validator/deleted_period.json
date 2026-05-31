@@ -1,0 +1,11 @@
+{
+  "name": "deleted period is not present in any schedule entry",
+  "schedule": [
+    { "class": "6A", "day": "mon", "period": 1, "subject": "Toán", "teacher": "Sơn" },
+    { "class": "6A", "day": "mon", "period": 2, "subject": "Văn", "teacher": "Lan" }
+  ],
+  "constraints": [
+    { "id": "c_block_deleted", "kind": "teacher_block_slot", "severity": "hard", "params": { "teacher": "Sơn", "day": "mon", "period": 3 } }
+  ],
+  "expectedViolationIds": []
+}

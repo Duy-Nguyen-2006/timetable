@@ -18,20 +18,23 @@ The product ships as both a web app (Next.js 16 + React 19 standalone) and a des
 │   │   ├── layout.tsx
 │   │   └── api/ai/*            # LLM proxy, python-execute, checks
 │   └── features/timetable/     # All product logic lives here
-│       ├── TimetableApp.tsx    # Main interactive canvas (~3 kLOC)
+│       ├── TimetableApp.tsx    # Orchestrator for the scheduling wizard (post-refactor core ~3 kLOC)
+│       ├── components/         # Extracted wizard pages (PreviewPage, SetupPages, TimetableFields, …)
 │       ├── SettingsModal.tsx
 │       ├── quick-import.ts
-│       └── ai/                 # The 6-stage Local Agent
+│       └── ai/                 # The 6-stage Local Agent (modularized May 2026)
 │           ├── local-agent.ts  # Orchestrator (runLocalAgent)
-│           ├── translator.ts, planner.ts, coder.ts, repair.ts
-│           ├── deterministic-validator.ts
+│           ├── local-agent-limits.ts, local-agent-utils.ts, stage-cache.ts
+│           ├── translator.ts + translator-text.ts + translator-periods.ts
+│           ├── deterministic-validator.ts + validator-helpers.ts
+│           ├── planner.ts, coder.ts, repair.ts
 │           ├── python-bridge.ts
 │           └── ...
 ├── prompts/                    # Source of truth for AI behavior (4 .md files)
 ├── public/prompts/             # Build-time copy (synced by scripts)
 ├── python/
 │   ├── code_executor.py        # Secure host for generated solver code
-│   ├── validator_engine.py     # 46 constraint checkers
+│   ├── validator_engine.py     # Deterministic constraint checkers (35 implemented kinds)
 │   └── templates/solver_skeleton.py
 ├── sandbox/                    # Docker + bubblewrap isolation
 ├── electron/                   # Desktop main process + preload
@@ -44,7 +47,7 @@ The product ships as both a web app (Next.js 16 + React 19 standalone) and a des
 | Type / Concept                  | Location                                              | One-line description |
 |--------------------------------|-------------------------------------------------------|----------------------|
 | `AgentInputPayload`            | `src/features/timetable/ai/types.ts`                  | Normalized days, sessions, assignments, and raw constraints coming from the UI. |
-| `ConstraintSpec` + `ConstraintKind` | `src/features/timetable/ai/constraint-spec.ts`     | 46 structured constraint kinds (hard/soft/info) with parameters; the central domain model. |
+| `ConstraintSpec` + `ConstraintKind` | `src/features/timetable/ai/constraint-spec.ts`     | 35 implemented structured constraint kinds (hard/soft/info) with parameters; the central domain model. |
 | `Plan`                         | `src/features/timetable/ai/types.ts`                  | Planner output: decision variables, objective, template selection, risks. |
 | `LocalAgentFinalResult`        | `src/features/timetable/ai/types.ts`                  | Validated schedule + deterministic report + violation details returned to UI. |
 | `ExecutionResult`              | `src/features/timetable/ai/types.ts`                  | Structured result from the Python sandbox (status, schedule, stdout/stderr). |

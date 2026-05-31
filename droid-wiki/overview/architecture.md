@@ -39,8 +39,8 @@ graph TD
     end
 
     subgraph "Validation"
-        PyVal[python/validator_engine.py<br/>46 constraint checkers]
-        TsVal[src/.../deterministic-validator.ts]
+        PyVal[python/validator_engine.py<br/>35 implemented constraint checkers]
+        TsVal[src/.../deterministic-validator.ts + validator-helpers.ts]
     end
 
     UI --> Agent
@@ -153,7 +153,9 @@ In `electron/main.mjs` a long-lived `code_executor --daemon` process is kept ali
 
 - **Electron app** (`electron/main.mjs` + `preload.ts`):
   - Exposes `window.electron.python.executeCode` → talks to the bundled PyInstaller binary via the daemon.
-  - Builds produce AppImage/deb (Linux) and NSIS/portable (Windows).
+  - Exposes `window.electron.solverRuntime.{setMode, probeDocker, onNotice}` so the renderer can switch between bundled / Docker / system Python and react to runtime notices.
+  - Exposes `window.electron.secureStore.{saveProvider, loadProvider, clearProvider, isAvailable}` which proxies to `electron/secure-store.mjs`. Provider credentials are encrypted with `safeStorage` (OS keychain when available) and written to `userData/provider-credentials.bin` with mode `0o600`. The legacy base64 `localStorage` blob is still readable as a fallback for upgrades.
+  - Builds produce AppImage/deb (Linux), NSIS/portable (Windows), DMG/ZIP (macOS). The PyInstaller `code_executor` binary is bundled as an extra resource and selected by the runtime abstraction in `electron/solver-runtime.mjs`.
   - Python runner + skeleton + validator are bundled as extra resources.
 
 - **Web / standalone Next.js**:
@@ -171,7 +173,7 @@ All routes live under `src/app/api/ai/` and `src/app/api/provider/`:
 - `POST /api/ai/python-execute` — web fallback described above.
 - `POST /api/ai/python-syntax-check`, `POST /api/ai/python-ast-check` — lightweight static checks used by the agent before expensive execution.
 - `GET /api/ai/solver-skeleton` — serves the current `public/templates/solver_skeleton.py` (kept in sync with `python/templates/` by `scripts/sync_solver_template.mjs`).
-- `POST /api/provider/test` — connectivity + model listing smoke for the configured provider.
+- `POST /api/provider/test` — connectivity + model listing smoke for the configured provider. Validates that the base URL is `http:` or `https:` and aborts via `AbortController` after `12s`.
 
 These routes are intentionally narrow; they exist only to bridge the browser agent to external services or the sandboxed Python host.
 
@@ -197,6 +199,15 @@ This invariant is enforced at three boundaries:
 1. `python-bridge.ts` — refuses to execute locally.
 2. `code_executor.py` — always calls the sandbox dispatcher.
 3. `sandbox/run.py` — makes unsafe execution deliberately hard to enable.
+
+## Reliability primitives
+
+A handful of small modules glue the pipeline together so failures are observable and reproducible:
+
+- `src/features/timetable/ai/pipeline-versions.ts` — single source of truth for prompt versions, solver template version, and constraint registry version. These values are folded into `stage-cache.ts` keys so a prompt or template bump invalidates all stale entries automatically.
+- `src/features/timetable/ai/preflight.ts` — pure-function checklist used before kicking off the agent. It verifies provider config, assignments, roster coverage, active periods, and runtime availability, then returns a single `PreflightOutcome` the UI can render.
+- `src/features/timetable/ai/debug-bundle.ts` — collects per-run artifacts (input digest, compressed payload, planner/coder output, generated solver, execution + validation reports) into a JSON download. `downloadDebugBundle` is browser-only; the structure is deliberately serializable so it can be attached to bug reports.
+- `src/features/timetable/ai/run-cache.ts` — cached run history (last three) used by the renderer; provider credentials live separately in `provider-storage.ts` so a credential rewrite never accidentally evicts run history.
 
 ## Observability & debugging
 

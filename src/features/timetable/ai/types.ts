@@ -8,13 +8,19 @@ import type {
 
 export type AIProviderType = 'openrouter' | 'openai-responses' | 'generic-chat-completion-api';
 export type SolverProfile = 'fast' | 'balanced' | 'deep';
+export type SolverRuntimeMode = 'bundled' | 'docker' | 'system';
 
 export interface AIProviderConfig {
   provider?: AIProviderType;
   baseURL: string;
   apiKey: string;
   model: string;
+  modelTranslator?: string;
+  modelPlanner?: string;
+  modelCoder?: string;
+  modelRepair?: string;
   solverProfile?: SolverProfile;
+  solverRuntimeMode?: SolverRuntimeMode;
 }
 
 export interface ChatUsage {

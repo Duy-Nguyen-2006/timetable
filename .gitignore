@@ -14,6 +14,7 @@ __pycache__/
 node_modules/
 venv/
 .venv/
+.venv-build/
 .env
 .env.local
 *.env.*
@@ -24,6 +25,8 @@ build/
 target/
 .next/
 .ai_results/
+.pyinstaller-build/
+python-dist/
 *.tsbuildinfo
 repomix-output.xml
 harness.db

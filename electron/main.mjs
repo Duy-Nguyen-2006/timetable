@@ -5,6 +5,21 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 
+import {
+  DEFAULT_RUNTIME_MODE,
+  normalizeRuntimeMode,
+  resolveSpawnSpec,
+  resolveWorkerCount,
+  resolveTimeoutSeconds,
+} from './solver-runtime.mjs'
+import { probeDocker, dockerFallbackMessage } from './docker-check.mjs'
+import {
+  isSecureStoreAvailable,
+  saveProvider,
+  loadProvider,
+  clearProvider,
+} from './secure-store.mjs'
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
@@ -12,28 +27,63 @@ const isDev = !app.isPackaged
 let serverProcess = null
 let mainWindow = null
 
+// Selected solver runtime mode (bundled | docker | system) + docker probe cache.
+let currentRuntimeMode = DEFAULT_RUNTIME_MODE
+let dockerProbeCache = null // { usable, reason, ... }
+
 // Persistent Python worker daemon
 let daemonWorker = null
 let daemonPending = null // { resolve, timer }
 let daemonStdout = ''
+let daemonMode = null // the runtime mode the live daemon was spawned with
 
-function getDaemonBinary() {
-  const base = isDev
-    ? path.join(__dirname, '..', 'python-dist')
-    : path.join(process.resourcesPath, 'python')
-  return path.join(base, process.platform === 'win32' ? 'code_executor.exe' : 'code_executor')
+async function getDockerAvailability() {
+  if (currentRuntimeMode !== 'docker') return false
+  if (!dockerProbeCache) {
+    dockerProbeCache = await probeDocker()
+  }
+  return dockerProbeCache.usable === true
 }
 
-function spawnDaemon() {
-  const binary = getDaemonBinary()
-  if (!fs.existsSync(binary)) return null
+// Resolve the spawn spec for the current mode. Surfaces a one-time fallback
+// notice to the renderer when docker was requested but is unavailable (#7).
+function resolveCurrentSpec(dockerAvailable) {
+  const spec = resolveSpawnSpec({
+    mode: currentRuntimeMode,
+    isDev,
+    isPackaged: app.isPackaged,
+    appDir: __dirname,
+    resourcesPath: process.resourcesPath,
+    platform: process.platform,
+    dockerAvailable,
+  })
+  if (spec.fallbackReason && dockerProbeCache) {
+    notifyRenderer('solver-runtime:notice', {
+      level: 'warning',
+      message: dockerFallbackMessage(dockerProbeCache.reason || spec.fallbackReason),
+    })
+  }
+  return spec
+}
 
-  const worker = spawn(binary, ['--daemon'], {
+function notifyRenderer(channel, payload) {
+  try {
+    mainWindow?.webContents?.send(channel, payload)
+  } catch {
+    /* ignore */
+  }
+}
+
+function spawnDaemon(spec) {
+  if (!fs.existsSync(spec.command)) return null
+
+  const worker = spawn(spec.command, [...spec.baseArgs, '--daemon'], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONHASHSEED: '0' },
+    env: { ...process.env, ...spec.env },
   })
 
   daemonStdout = ''
+  daemonMode = spec.mode
 
   worker.stdout.on('data', (chunk) => {
     daemonStdout += chunk.toString()
@@ -72,16 +122,20 @@ function spawnDaemon() {
   return worker
 }
 
-function ensureDaemon() {
-  if (!daemonWorker || daemonWorker.exitCode !== null) {
-    daemonWorker = spawnDaemon()
+function ensureDaemon(spec) {
+  // Re-spawn if dead or if the runtime mode changed since last spawn.
+  if (!daemonWorker || daemonWorker.exitCode !== null || daemonMode !== spec.mode) {
+    if (daemonWorker && daemonWorker.exitCode === null) {
+      try { daemonWorker.kill('SIGKILL') } catch { /* ignore */ }
+    }
+    daemonWorker = spawnDaemon(spec)
   }
   return daemonWorker
 }
 
-function runWithDaemon(code, timeoutSeconds, solverWorkers, jobDir) {
+function runWithDaemon(spec, code, timeoutSeconds, solverWorkers, jobDir) {
   return new Promise((resolve) => {
-    const worker = ensureDaemon()
+    const worker = ensureDaemon(spec)
     if (!worker) {
       resolve(null) // fall back to per-call spawn
       return
@@ -99,18 +153,6 @@ function runWithDaemon(code, timeoutSeconds, solverWorkers, jobDir) {
     const job = JSON.stringify({ code, timeoutSeconds, solverWorkers, jobDir })
     worker.stdin.write(job + '\n')
   })
-}
-
-function getPythonBinary(name) {
-  const base = isDev
-    ? path.join(__dirname, '..', 'python-dist')
-    : path.join(process.resourcesPath, 'python')
-
-  if (name === 'code_executor') {
-    return path.join(base, process.platform === 'win32' ? 'code_executor.exe' : 'code_executor')
-  }
-  // existing timetable_solver
-  return path.join(base, process.platform === 'win32' ? 'runner.exe' : 'runner')
 }
 
 function resolvePreloadPath() {
@@ -137,25 +179,22 @@ function createWindow(url) {
   })
 }
 
-function spawnPerCall(code, input, timeoutMs, solverWorkers) {
+function cleanupJobDir(jobDir) {
+  try {
+    fs.rmSync(jobDir, { recursive: true, force: true })
+  } catch {
+    /* ignore */
+  }
+}
+
+function spawnPerCall(spec, code, jobDir, timeoutMs, timeoutSeconds, workerCount) {
   return new Promise((resolve) => {
-    const binary = getPythonBinary('code_executor')
-    const jobDir = path.join(app.getPath('temp'), `tack-job-${Date.now()}`)
-    fs.mkdirSync(jobDir, { recursive: true })
-
-    fs.writeFileSync(path.join(jobDir, 'input.json'), JSON.stringify(input, null, 2), 'utf8')
-
-    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
-    const cpuCount = Math.max(1, os.cpus().length)
-    const workerCount = Math.min(8, Math.max(1, Number(solverWorkers || process.env.SOLVER_WORKERS || cpuCount - 1)))
-
-    const child = spawn(binary, [String(timeoutSeconds)], {
+    const child = spawn(spec.command, [...spec.baseArgs, String(timeoutSeconds)], {
       cwd: jobDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        PYTHONUNBUFFERED: '1',
-        PYTHONHASHSEED: '0',
+        ...spec.env,
         EXECUTOR_TIMEOUT_SECONDS: String(timeoutSeconds),
         SOLVER_MAX_SECONDS: String(Math.max(5, timeoutSeconds - 5)),
         SOLVER_WORKERS: String(workerCount),
@@ -164,15 +203,26 @@ function spawnPerCall(code, input, timeoutMs, solverWorkers) {
 
     let stdout = ''
     let stderr = ''
+    let settled = false
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
 
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
-      resolve({ ok: false, status: 'timeout', durationMs: timeoutMs,
+      finish({ ok: false, status: 'timeout', durationMs: timeoutMs,
         errorDigest: '[MAIN] Timeout from Electron main process' })
     }, timeoutMs)
 
     child.stdout.on('data', (d) => (stdout += d.toString()))
     child.stderr.on('data', (d) => (stderr += d.toString()))
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      finish({ ok: false, status: 'crashed', durationMs: 0,
+        errorDigest: `[MAIN] Failed to spawn executor: ${err.message}` })
+    })
 
     child.on('close', () => {
       clearTimeout(timer)
@@ -183,9 +233,9 @@ function spawnPerCall(code, input, timeoutMs, solverWorkers) {
         if (parsed.resultPath && fs.existsSync(parsed.resultPath)) {
           try { resultData = JSON.parse(fs.readFileSync(parsed.resultPath, 'utf8')) } catch { /* ignore */ }
         }
-        resolve({ ...parsed, ...(resultData ? { resultData } : {}) })
+        finish({ ...parsed, ...(resultData ? { resultData } : {}) })
       } catch (e) {
-        resolve({ ok: false, status: 'crashed', durationMs: 0,
+        finish({ ok: false, status: 'crashed', durationMs: 0,
           errorDigest: `[MAIN] Failed to parse executor output: ${e.message}` })
       }
     })
@@ -195,29 +245,50 @@ function spawnPerCall(code, input, timeoutMs, solverWorkers) {
   })
 }
 
+ipcMain.handle('solver-runtime:set', async (_event, mode) => {
+  const next = normalizeRuntimeMode(mode)
+  if (next !== currentRuntimeMode) {
+    currentRuntimeMode = next
+    dockerProbeCache = null // re-probe on next run
+  }
+  return { mode: currentRuntimeMode }
+})
+
+ipcMain.handle('solver-runtime:probeDocker', async () => {
+  dockerProbeCache = await probeDocker()
+  return dockerProbeCache
+})
+
+ipcMain.handle('secure-store:available', async () => isSecureStoreAvailable())
+ipcMain.handle('secure-store:save-provider', async (_event, config) => saveProvider(config))
+ipcMain.handle('secure-store:load-provider', async () => loadProvider())
+ipcMain.handle('secure-store:clear-provider', async () => clearProvider())
+
 // IPC for Python execution (used by local AI agent)
 ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360000, solverWorkers = undefined) => {
-  const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
-  const cpuCount = Math.max(1, os.cpus().length)
-  const workerCount = Math.min(8, Math.max(1, Number(solverWorkers || process.env.SOLVER_WORKERS || cpuCount - 1)))
+  const timeoutSeconds = resolveTimeoutSeconds(timeoutMs)
+  const workerCount = resolveWorkerCount({
+    requested: solverWorkers,
+    cpuCount: os.cpus().length,
+    envWorkers: process.env.SOLVER_WORKERS,
+  })
 
-  // Embed input into code as a comment-free env var so daemon can access it
-  // Daemon mode: inject input.json into a temp dir and pass path via env
+  const dockerAvailable = await getDockerAvailability()
+  const spec = resolveCurrentSpec(dockerAvailable)
+
   const jobDir = path.join(app.getPath('temp'), `tack-job-${Date.now()}`)
   fs.mkdirSync(jobDir, { recursive: true })
-  fs.writeFileSync(path.join(jobDir, 'input.json'), JSON.stringify(input, null, 2), 'utf8')
+  fs.writeFileSync(path.join(jobDir, 'input.json'), JSON.stringify(input ?? {}), 'utf8')
 
-  const daemonResult = await runWithDaemon(
-    code,
-    timeoutSeconds,
-    workerCount,
-    jobDir
-  )
+  try {
+    const daemonResult = await runWithDaemon(spec, code, timeoutSeconds, workerCount, jobDir)
+    if (daemonResult !== null) return daemonResult
 
-  if (daemonResult !== null) return daemonResult
-
-  // Fallback: per-call spawn
-  return spawnPerCall(code, input, timeoutMs, solverWorkers)
+    // Fallback: per-call spawn
+    return await spawnPerCall(spec, code, jobDir, timeoutMs, timeoutSeconds, workerCount)
+  } finally {
+    cleanupJobDir(jobDir)
+  }
 })
 
 
