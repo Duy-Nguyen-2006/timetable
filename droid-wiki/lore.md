@@ -2,113 +2,105 @@
 
 Active contributors: Duy
 
-This page tells the story of how the Tack Timetable codebase evolved. It is a narrative history, not a technical reference. Dates are derived from git commit timestamps and tag metadata.
+This page tells the story of how the codebase evolved. All dates are derived from git commit timestamps in the default branch history.
 
-## The Great Reset (May 2026)
+## Eras
 
-The public git history of the repository begins on **2026-05-15** with a single commit whose message is in Vietnamese:
+### The Big Bang Restart (May 15, 2026)
 
-> "Khoi tao lai va ghi de toan bo code"  
-> ("Reset and overwrite all code")
+The visible history of the current repository begins with a full rewrite:
 
-This was not a gradual evolution from an earlier prototype. It was a deliberate, near-total rewrite. The commit established the modern shape of the project:
+- `b7dfd0a` and `822736a` — "Khoi tao lai va ghi de toan bo code" (Restart and overwrite all code)
+- Immediate follow-ups: refactor of the timetable app structure, style improvements to the wizard, and the first public declaration of intent: "feat(timetable): add AI-assisted timetable solver"
+- Same day: first Windows desktop packaging work ("feat(release): package Windows desktop app")
 
-- Next.js 16 + React 19 + TypeScript frontend
-- The 6-stage Local Agent architecture (Translator → Planner → Coder → Sandbox → Validator → Repair)
-- The Python execution host (`code_executor.py`) and sandbox isolation model
-- The initial set of built-in constraints and the solver skeleton pattern
+This was not an incremental evolution from a prior codebase. It was a deliberate ground-up rebuild that established the Next.js + Electron + Python foundation that still exists today.
 
-From this point forward, the repository's history is continuous and intensive.
+### API Keys, Early Agentic Dreams, and the Repomix Era (May 16–18, 2026)
 
-## The Era of Constraint Expansion (late May 2026)
+- Lowprizo.com API key integration appears (`1908912`).
+- The first major architectural leap: "feat: upgrade AI pipeline - compiler → sandbox exec → verifier" (`371e75a`, May 18).
+- "feat: refactor backend to agentic sandbox architecture" (`0b0cb83`).
+- The infamous `repomix-output.xml` (eventually 17.5 kLOC) is introduced as a context-packing artifact for AI-assisted development.
+- "feat: implement agentic loop with AI Judge for timetable generation" (`1c4cddb`).
 
-Throughout the second half of May 2026 the project underwent rapid, focused growth in its scheduling rule system.
+This period established the core security idea (sandboxed execution of AI-written code) and the "agentic loop" mental model, even though the concrete pipeline shape would change dramatically later.
 
-Key milestones visible in the commit history:
+### The Turn Toward Deterministic Trust (May 19–20, 2026)
 
-- **2026-05-28 to 2026-05-29**: Multiple "Fix BE" commits, translator fixes, coder fixes, and the first wave of new built-in constraints (`resource_capacity`, `session_limit`, `subject_group`).
-- **2026-05-30**: A bot-assisted commit ("qwen.ai[bot]") addressed a `custom_dsl` validation deadlock and enhanced constraint specification.
-- **2026-05-31**: The landmark commit `cdac5b5` — "feat: add 17 new built-in constraint kinds with checkers and fallback parser rules."
+Two pivotal shifts happen in quick succession:
 
-This single commit brought the total number of native `ConstraintKind` values from roughly 29 to **46**. It touched:
+- Multiple test datasets are added with validation harnesses.
+- "feat: redesign solver architecture - AI writes constraint snippets, not full solver" (`2a708ac`).
+- "feat: implement Tier A verification - deterministic checker replaces LLM Judge" (`3e2041a`).
 
-- `src/features/timetable/ai/constraint-spec.ts` (the type union)
-- `src/features/timetable/ai/deterministic-validator.ts` (+270 lines of new checkers)
-- `src/features/timetable/ai/translator.ts` (+194 lines, including expanded fallback parser rules)
-- The Python `validator_engine.py`
-- Prompt updates and solver skeleton adjustments
+The project explicitly moves away from "LLM as judge" (letting another model decide whether a schedule is good) toward **deterministic, auditable checkers** that can be reasoned about and unit-tested. This decision would later enable the 46-constraint expansion with real correctness guarantees.
 
-The addition of 17 new constraint kinds in one go — each with deterministic checkers on both sides of the TypeScript/Python boundary — was the single largest functional expansion in the project's recorded history.
+### Release Hardening and Intermediate Architectures (May 21–24, 2026)
 
-## The Great Artifact Purge (same period)
+A rapid series of release tags appears: v0.2.0 through v3.0.10 in just a few days.
 
-In the same delta window that produced the 17 new constraints, the repository also deleted a **17,546-line file** called `repomix-output.xml`.
+- Heavy investment in Electron packaging (Linux AppImage/deb, Windows NSIS/portable, cross-platform build scripts).
+- "refactor timetable generation to two-agent solver loop" — an intermediate architecture that split responsibilities differently than the final 6-stage design.
+- Significant work on violation display (separate hard/soft, conflict analysis).
+- Multiple "fix: Checker LLM failure no longer blocks valid schedules" patches show the team learning the hard way that LLM-based validation is unreliable.
 
-This file had apparently been generated by an AI code-analysis or context-packing tool (Repomix) and committed wholesale. Its removal, along with the addition of `scripts/bin/harness-cli` (a 3.5 MB binary) and significant `.gitignore` expansion (+111 lines), marked a deliberate cleanup of the repository:
+By the end of this week the project has a shippable desktop app, a clearer understanding that deterministic validation is non-negotiable, and a lot of battle scars from trying to make LLM judges trustworthy.
 
-- Removal of massive generated/context-dump artifacts
-- Better separation of build outputs, Python distributions, and temporary harness binaries
-- Recognition that such files do not belong in version control
+### The Great Constraint Expansion + Harness Engineering (May 29–31, 2026)
 
-The net effect of the delta since the previous wiki generation (`82d45e84`) was +1,913 insertions and -17,617 deletions — the project became *smaller on disk* while becoming significantly more capable in its constraint system.
+This is the largest single capability jump in the recorded history:
 
-## Versioning Oddities and Release Tags
+- May 29: "feat: add resource_capacity, session_limit, subject_group built-ins to solver"
+- May 30: "Fix custom_dsl validation deadlock and enhance constraint specification"
+- May 31 (cdac5b5): "feat: add 17 new built-in constraint kinds with checkers and fallback parser rules" — the commit that took the system from ~29 to 46 constraint kinds in one leap
+- Same day (9d33311): "feat: 17 constraint kinds, executor status, local agent improvements, solver skeleton"
+- Same day (2ca87b4 — current HEAD): "feat: constraint registry, persistent Python daemon worker, violations UI on fail"
 
-The repository carries a set of release tags whose numbering is inconsistent:
+Parallel to the constraint explosion, the project adopts the **Harness** operating system (multiple "Init Harness Engineering" commits, introduction of `scripts/bin/harness-cli`, durable SQLite layer, intake/story/trace workflow).
 
-- Early tags follow a `v0.x` pattern (`v0.2.0`, `v0.3.0` through `v0.3.6`).
-- Later tags jump to `v3.0.7` and `v3.0.8`.
+In the same 48-hour window the team also:
+- Hardened the prompt syncing infrastructure
+- Added a persistent Python daemon worker in the Electron main process (major cold-start win)
+- Removed large generated artifacts (including the original 17 kLOC repomix file and duplicate CLAUDE.md/Backup.md files)
+- Landed the current 6-stage pipeline shape with bounded repair loops and typed lifecycle events
 
-There is no recorded `v1.x` or `v2.x` series in the visible tag list. This suggests either:
-
-- A private or squashed history before the May 2026 reset, or
-- A deliberate decision to align the public version with a larger product family or internal milestone numbering.
-
-The presence of both Electron desktop builds and a standalone Next.js web build in the same repository further complicates simple semantic versioning.
-
-## The Culture of Mandatory Impact Analysis
-
-One of the most distinctive characteristics of the project — visible from `AGENTS.md`, `CLAUDE.md`, and the repeated GitNexus blocks — is the **non-negotiable rule** that every symbol edit must be preceded by `gitnexus_impact` or `gitnexus_context`, and that renames must go through `gitnexus_rename`.
-
-This rule appears to have been adopted early (it is present in the very first committed versions of the agent guidelines) and is treated as a first-class part of the development process, on par with writing tests or running lint.
-
-The existence of this rule, combined with the project's heavy use of a 6-stage prompt-driven agent that generates code, suggests the team learned early that unconstrained edits in a system this complex (AI + solver + sandbox + dual-language validation) rapidly become unmaintainable.
+This is the era in which Tack Timetable became recognizably the system described in the current documentation.
 
 ## Longest-standing features
 
-Because the recorded history begins with a near-total reset on 2026-05-15, "longest-standing" is relative to that date:
+These components have survived the most refactors and are still central:
 
-- The core agent orchestration pattern (`runLocalAgent` with typed events, token budgeting, and bounded repair loops) has survived every subsequent refactor and is still the central control flow.
-- The solver skeleton + injection pattern (`loadSolverSkeleton` + `injectConstraintCode`) has been present since the reset and remains the mechanism by which the Coder contributes constraints without rewriting the entire model.
-- The sandbox isolation requirement (Docker or bubblewrap, never raw host execution) was part of the initial architecture and has only been strengthened.
-- The dual execution paths (Electron IPC vs web `/api/ai/python-execute` fallback) were designed in from the beginning to support both desktop and browser usage.
+- **`src/features/timetable/TimetableApp.tsx`** (37 commits touching it) — the entire interactive canvas, assignment entry, quick-import, live grid, Excel export, and agent progress UI. It has been the stable "front door" since the May 15 restart.
+- **`src/features/timetable/ai/types.ts`** (19 commits) — the core data contracts (`AgentInputPayload`, `ConstraintSpec`, `LocalAgentFinalResult`, etc.). These types have been remarkably stable even as the pipeline around them changed.
+- **`electron/main.mjs`** (15 commits) — the desktop bridge and (later) persistent daemon. The packaging story has been painful, but the main process contract has been a constant.
+- **`python/templates/solver_skeleton.py`** (12+ commits) — the template that the Coder completes. Its shape has evolved, but the "AI writes the constraint blocks, not the whole solver" pattern has been consistent since the May 20 redesign.
+- **`AGENTS.md`** (18 commits) — the project-specific agent instructions, including the GitNexus impact analysis rule, have been maintained as living documents rather than one-time scaffolding.
 
-## Deprecated or abandoned experiments
+## Deprecated experiments and removed paths
 
-Within the recorded history there are few clear deprecations, because the reset already removed whatever came before. Visible cleanups in the current era include:
+- **LLM-as-Judge (AI Judge)**: Heavily used in mid-May ("agentic loop with AI Judge"), explicitly replaced by "Tier A verification - deterministic checker" on May 20. The project learned that another LLM cannot be trusted to validate hard scheduling constraints.
+- **"Compiler → sandbox exec → verifier" pipeline**: The May 18 shape. Later replaced by the 6-stage prompt-driven loop (Translator/Planner/Coder/Exec/Validator/Repair).
+- **"Two-agent solver loop"**: An intermediate May 24 architecture. Superseded by the current single orchestrator with explicit stages and repair.
+- **`repomix-output.xml`** (13 commits touching it): A 17.5 kLOC generated context file that was added in the early agentic period and deleted during the May 31 cleanup. Its entire lifecycle was measured in days.
+- Early "full solver generation" approach: Before the May 20 redesign, the AI was asked to emit entire solvers. The pivot to "AI writes constraint snippets against a stable skeleton" was a major complexity reduction.
 
-- The removal of the 17.5k-line `repomix-output.xml` (generated context artifact).
-- The addition of `repomix-output.xml` and `scripts/bin/harness-cli` to `.gitignore` patterns, indicating a policy decision that large generated or binary harness artifacts should not be committed.
-- Various "Fix BE" commits that appear to be rapid iteration on backend stability after the constraint expansion — these are not deprecations but evidence of the cost of adding 17 new constraint kinds at once.
+## Major rewrites and growth trajectory
 
-## Growth trajectory
+- **May 15, 2026**: Complete codebase restart (the "Khoi tao lai" commits). Everything before this is not visible in the current clone history.
+- **May 18, 2026**: First sandboxed agentic architecture ("compiler → sandbox → verifier").
+- **May 20, 2026**: Deterministic verification becomes the law ("Tier A verification replaces LLM Judge").
+- **May 24–25, 2026**: Release cadence peaks (v0.2.0 → v3.0.10 in ~4 days). Heavy Electron packaging investment.
+- **May 29–31, 2026**: The 17-kind constraint explosion + Harness adoption + daemon worker + artifact cleanup. The single largest delta in the project's recorded life.
 
-- **2026-05-15**: Near-total reset. Foundational architecture (UI + 6-stage agent + sandbox + Python bridge) lands in one commit.
-- **Late May 2026**: Intensive daily development (multiple commits per day). Focus on constraint expressiveness, translator robustness, and validator coverage.
-- **2026-05-31**: Peak single-day expansion — 17 new constraint kinds + corresponding checkers + prompt/skeleton updates. Simultaneously, major repository hygiene (repomix deletion, gitignore expansion).
-- **Post-2026-05-31**: Continued "Fix BE" work, CI hardening, and packaging improvements (Windows release workflow, PyInstaller bundling).
+The growth pattern is classic for a small, high-intensity team: long periods of exploratory commits ("Fix BE" appears many times), punctuated by very large, high-signal commits that change the fundamental shape of the system.
 
-The project went from "reset + core agent" to "46 native constraint kinds + production-grade sandbox + dual web/desktop distribution" in roughly 16 days of calendar time, with extremely high commit density.
+## Speculation and open questions
 
-## Summary of eras
+- The exact motivation for the May 15 full rewrite is not recorded in commit messages. It appears to have been a conscious decision to start fresh rather than evolve an earlier prototype.
+- The rapid release tagging in late May (v0.2 through v3.0.10) suggests the team was simultaneously trying to stabilize a desktop product for real users while the core AI architecture was still undergoing major surgery.
+- The decision to adopt the full Harness operating system (with durable SQLite layer, intake classification, traces, and backlog) on the same day as the largest capability expansion (46 constraints) is striking. It implies the team had reached a point where "more features" without process would become unsustainable.
 
-| Era | Dates | Character |
-|-----|-------|-----------|
-| The Great Reset | 2026-05-15 | Total rewrite. Modern architecture (Next.js + Local Agent + sandbox + Python bridge) established in a single foundational commit. |
-| Constraint Expansion & Hardening | 2026-05-16 → 2026-05-30 | Daily iteration on translator, validator, prompts, and skeleton. Incremental addition of new constraint kinds. Bot-assisted fixes appear. |
-| The Big Bang + The Purge | 2026-05-31 | Single commit adds 17 constraint kinds (now 46 total). Same window sees deletion of 17.5k-line repomix artifact and significant gitignore expansion. |
-| Stabilization (ongoing) | After 2026-05-31 | "Fix BE" commits, CI/dataset test improvements, Windows packaging, continued prompt and validator refinement. |
+The current HEAD (`2ca87b44`) represents a system that has finally stabilized the core loop (6 stages + deterministic validation + bounded repair + sandbox), added the majority of the domain-specific constraint vocabulary it needs for Vietnamese school timetabling, and put a professional operating harness underneath the development process.
 
-The project is still young in absolute terms (its entire public history fits in May 2026), but it has already undergone one of the most intense early growth phases imaginable: a complete reset followed immediately by the addition of 17 new, fully-checked scheduling constraint kinds in a single commit, while simultaneously cleaning house of massive generated artifacts.
-
-This combination of aggressive feature expansion and deliberate repository hygiene in the first three weeks of recorded history is the defining characteristic of Tack Timetable's lore so far.
+What comes next is likely refinement, performance work on the solver, more constraint kinds discovered in real usage, and the long tail of making the UI and explanation of violations first-class parts of the product.

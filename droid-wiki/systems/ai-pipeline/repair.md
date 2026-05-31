@@ -1,139 +1,52 @@
 # Repair Stage
-
 Active contributors: Duy
 
-## Purpose
+The Repair stage implements a violation-driven repair loop that feeds failure context (violations or compile/runtime errors) back into the Coder/Validator cycle under strict budgets. It is the final safety net that allows the agent to self-correct within hard limits instead of failing immediately on the first invalid solver.
 
-The Repair stage is the sixth and final step in the Local Agent pipeline (when it is needed). Its job is to react to failures from the Coder or the Validator/Executor and produce actionable fixes that can be fed back into the next Coder attempt.
+## Core Functions
 
-There are two distinct repair paths, each with its own round limit:
+- `runRepairTurn` (src/features/timetable/ai/repair.ts): Calls the repair LLM (modelRepair override) with the current Plan, constraint code, list of Violations (or compileOrRunError), and expects a structured JSON response containing `summary`, `patches[]`, and `assumptions[]`. Uses `prompts/repair.system.md`.
+- `applyRepairPatches` (src/features/timetable/ai/repair.ts): Atomic, overlap-safe patch applicator. Validates all `oldStr` locations on the original source first, detects duplicates (unless `replaceAll`), sorts by offset, checks for overlaps, then stitches the result in a single pass. Throws on missing or ambiguous patches.
 
-- **Runtime / compile repair** — triggered by syntax errors, AST rejection, compile failures inside `code_executor.py`, or runtime crashes/timeouts. Limited to `MAX_RUNTIME_REPAIR_ROUNDS = 1`.
-- **Violation repair** — triggered by hard constraint violations or CP-SAT round-trip failures after a "successful" solver run. Limited to `MAX_VIOLATION_REPAIR_ROUNDS = 2`.
+## Repair Budgets (enforced in local-agent.ts)
 
-The separation exists to prevent token budget explosion: runtime errors are usually quick to diagnose and patch, while violation-driven repairs can require more context and multiple rounds.
+- `MAX_RUNTIME_REPAIR_ROUNDS = 1` — used for executable/compile failures before any schedule was produced.
+- `MAX_VIOLATION_REPAIR_ROUNDS = 2` — used for hard violations or CP-SAT round-trip failures after a successful execution.
+- Total repair LLM calls are further bounded by `MAX_TOTAL_TOOL_CALLS = 15` and the 80 k token cap.
 
-## Location and entry points
+## Loop Integration
 
-- Main logic: `src/features/timetable/ai/repair.ts`
-  - `runRepairTurn(config, payload)` — calls the LLM with violation/compile context and asks for patches.
-  - `applyRepairPatches(source, patches)` — safely applies the returned patches to the previous Coder output.
-- Orchestration: `src/features/timetable/ai/local-agent.ts` (the two repair loops inside `runLocalAgent`).
+Inside `runLocalAgent`:
 
-## Input to `runRepairTurn`
+1. After Coder inner loop (≤3 retries) produces a solver that either fails to execute or produces a schedule with hard violations / round-trip failure:
+   - Runtime failure path increments `runtimeRepairRound` and calls `runRepairTurn` with `compileOrRunError`.
+   - Violation path builds a violation signature (constraintId:kind + round-trip status), detects repeated identical signatures (≥2), and calls `runRepairTurn` with the `Violation[]` list (plus pseudo-violations for uncovered hard constraints).
+2. On success, patches are stored in `pendingRepairPatches`.
+3. On the next Coder iteration, `applyRepairPatches` is attempted atomically before invoking Coder again. If patch application fails, the attempt is counted as a Coder retry.
+4. `previousAttemptSummary` and `WorkspaceBoard` carry the failure digest to the next Coder turn so the coder prompt contains context about previous failures.
+5. Control returns to the Coder/Validator stages; the repair stage itself does not execute code or re-validate.
 
-```ts
-{
-  plan: Plan;
-  constraintCode: string;           // the code that just failed
-  violations: Violation[];          // hard violations (may be empty for runtime errors)
-  compileOrRunError?: string;       // digest of the failure for runtime/compile path
-}
-```
+Repeated-violation detection (same signature across two repair rounds) short-circuits to prevent infinite same-error repair loops.
 
-The payload sent to the model includes:
-- The current `constraint_code` from the Coder
-- A summarized list of hard violations (constraintId, kind, message, sample offending entries)
-- The compile/runtime error digest (if any)
-- The original `plan`
+## Prompt Contract (prompts/repair.system.md v3.0.0)
 
-## Output
+The repair agent is instructed to output only minimal, targeted patches (never full rewrites). Key rules:
+- `oldStr` must be unique (or `replaceAll: true`); otherwise the call fails.
+- Minimal diff only — patches must target the exact violation or error.
+- Special semantics for `subject_consecutive`: only `floor(weeklyPeriods / length)` contiguous blocks are required; remainder may be scheduled singly.
+- On unresolvable cases, return empty `patches` and document assumptions.
 
-`RepairTurnResult`:
+## Safety and Atomicity Guarantees
 
-```ts
-{
-  summary: string;
-  patches: Array<{
-    oldStr: string;
-    newStr: string;
-    reason: string;
-    replaceAll?: boolean;
-  }>;
-  assumptions: string[];
-  rawResponse?: string;
-  usageTokens?: number;
-}
-```
+- Patch application is fully validated before any mutation.
+- Overlap detection prevents destructive interleaving.
+- All repair turns consume the token budget and increment the tool-call counter.
+- If no patches are proposed or budgets are exhausted, the agent terminates with a clear "Coder exhausted" or "Repair exhausted" error.
 
-The `patches` array is the actionable output. Each patch describes a precise string replacement to apply to the previous Coder output before the next attempt.
+## Cross-references
 
-## Safe patch application (`applyRepairPatches`)
+- Orchestration and budgets: [AI Pipeline index](systems/ai-pipeline/index.md)
+- Deterministic validation that produces the violations fed to Repair: [Validator](systems/ai-pipeline/validator.md)
+- Coder stage that receives the repaired code: sibling Coder page (see index for status)
 
-This function is deliberately strict (it was hardened after several subtle bugs):
-
-1. **Validation phase** — For every patch, it searches the *original* source for `oldStr`. It records every occurrence index.
-   - If zero occurrences → error ("oldStr not found").
-   - If multiple occurrences and `replaceAll` is not true → error ("ambiguous, expand context or set replaceAll").
-2. **Overlap detection** — After collecting all replacement segments, it sorts them by start offset and verifies that no two segments overlap.
-3. **Atomic stitching** — It walks the source once, cutting at each validated segment and inserting the corresponding `newStr`. Each patch is applied exactly once at its validated location.
-
-This prevents the classic "patch N changes the text so that patch N+1's oldStr now matches in the wrong place or multiple times" problem.
-
-## How the two repair loops work in the orchestrator
-
-**Runtime / compile repair loop** (outer `while (coderRetry < MAX_CODER_RETRIES)`):
-
-- After a Coder attempt, the code is injected and checked (syntax + optional AST).
-- If execution fails with a compile/runtime error, `shouldRepairExecutableFailure` decides whether to call `runRepairTurn` with `compileOrRunError`.
-- At most 1 runtime repair round is allowed.
-- Successful patches are stored in `pendingRepairPatches` and applied on the *next* Coder attempt (before calling the model again).
-
-**Violation repair loop** (separate counter `violationRepairRound`):
-
-- After a "successful" execution, `validateSchedule` + round-trip are run.
-- If hard violations exist or round-trip failed, the orchestrator calls `runRepairTurn` with the violation list.
-- At most 2 violation repair rounds.
-- The violation signature (hard violation ids + round-trip status) is tracked to detect repeated identical failures and exit early with a clear message.
-
-These two loops are intentionally bounded and separate so that a cascade of runtime fixes cannot consume the entire violation repair budget (and vice versa).
-
-## The Repair prompt
-
-`prompts/repair.system.md` gives the model very specific rules:
-
-- It must output **patches only**, never a full rewrite.
-- `oldStr` should ideally appear exactly once; otherwise the model must either make it unique or set `replaceAll`.
-- There are domain-specific semantics rules (e.g., for `subject_consecutive`, the model must not demand that every period is inside a consecutive block when `weeklyPeriods % length != 0`).
-
-The prompt also tells the model to look at `plan_summary` from the previous Coder turn for context.
-
-## Integration with `WorkspaceBoard` and diagnostics
-
-Every repair action is recorded via `board.addAttempt(...)`:
-- `"repair_patch_applied"`
-- The number of patches and the round number
-
-These attempts appear in the final `LocalAgentFinalResult.attemptHistorySummary` and are visible in the UI progress panel.
-
-The `summary` and `assumptions` from each Repair turn are also stored and can be shown to the user as part of the diagnostic trail.
-
-## Why bounded repair instead of "just ask the model to try again"?
-
-Unlimited retries would:
-- Explode token usage (the prompt grows with every failure context)
-- Hide real modeling problems behind a long chain of micro-patches
-- Make it hard for a human to understand what actually went wrong
-
-The explicit round limits + signature-based early exit for repeated violations force the system to fail fast with a useful error message when the model cannot produce a correct solution within the budget.
-
-## Testing
-
-- `src/features/timetable/ai/repair.test.ts` (if present) or coverage inside `local-agent.test.ts`
-- The atomic patch application logic has explicit unit tests because it was the source of several subtle bugs during development (see comments referencing "fix bug #8").
-- Prompt behavior for repair is covered by `npm run test:prompt`.
-
-## Related pages
-
-- [AI Pipeline index](index.md)
-- [Coder](coder.md) — the stage whose output Repair patches
-- [Validation Stage](validator.md) — the source of the violation lists that trigger repair
-- [Repair prompt](../../../../prompts/repair.system.md)
-- [Patterns and Conventions](../../../how-to-contribute/patterns-and-conventions.md) (bounded loops, typed events, never trust the solver)
-
-## Where to start if you need to change repair behavior
-
-1. Run `gitnexus_impact` on `runRepairTurn` and especially `applyRepairPatches` (the latter has a very large blast radius).
-2. If you change the patch application algorithm, you **must** update or add tests for the atomic stitching + overlap detection logic.
-3. If you relax the round limits, update the constants in `local-agent.ts`, the orchestrator logic, and the documentation.
-4. Any change to the Repair prompt or the violation payload shape affects both the model behavior and the UI diagnostics. Treat it as a cross-cutting change.
+This page intentionally stays focused on the repair loop mechanics. Detailed prompt text lives in `prompts/repair.system.md`; implementation details are in the two functions in `repair.ts` and their call sites in `local-agent.ts`.

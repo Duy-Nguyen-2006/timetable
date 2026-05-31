@@ -755,7 +755,7 @@ def build_custom_constraints(model, slots, data):
                 guard = _build_condition_literal(condition)
                 for then_spec in then_specs:
                     if isinstance(then_spec, dict):
-                        _apply_then_constraint(then_spec)
+                        _apply_then_constraint(then_spec, guard)
 
         elif kind == "custom_dsl":
             # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả

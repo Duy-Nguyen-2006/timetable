@@ -1,112 +1,102 @@
 # By the Numbers
 
-Data collected on 2026-05-31 (current HEAD: `cdac5b52`).
-
-This page gives a quantitative snapshot of the Tack Timetable codebase.
+Data collected on 2026-05-31 (current HEAD: `2ca87b44`).
 
 ## Size
 
-**Total tracked lines (excluding node_modules, .git, release, .next, python-dist, build):** approximately 30,092 lines across all file types.
+**Lines of code (excluding node_modules, .next, release, __pycache__, droid-wiki, package-lock.json):**
 
-**File counts by type (source + docs + config):**
+- TypeScript + TSX: **12,340 lines**
+- Python: **3,304 lines**
+- Markdown (docs + prompts): **4,137 lines**
+- JSON (configs, lockfiles, etc.): **11,019 lines** (note: package-lock.json excluded from the cleaned total below)
+- JavaScript + MJS (Electron, scripts): **343 lines**
+- Other (CSS, SQL, YAML, etc.): remainder of **~21,572 total cleaned lines**
 
-- TypeScript (`.ts` + `.tsx`): 59 files
-- JavaScript (`.js` + `.mjs`): 6 files
-- Python (`.py`): 11 files
-- Markdown (`.md`): 25 files
-- JSON (non-lockfiles): 5 files
-- Other config (Dockerfile, YAML, shell, CSS, HTML): 5 files
+**File counts (git-tracked, excluding generated artifacts):**
 
-**Total "source" files (TS/TSX/JS/MJS + Python):** 76 files
+- Total tracked files: **162**
+- Core source (src/, python/, electron/, scripts/ — excluding tests): **59**
+- Test files (`.test.ts`, `.test.tsx`, `.test.py`): **13**
+- Configuration (package.json, tsconfig, eslint, CI, etc.): **11**
+- Markdown documentation: **66**
+- Python non-test source: **8**
 
-**Test files:** 16 (mix of `.test.ts`/`tsx` using Node's built-in test runner and `pytest` Python tests)
+**Major subsystems (approximate source size):**
 
-### Language breakdown (approximate lines)
+- `src/features/timetable/ai/` — the 6-stage Local Agent (local-agent.ts alone is ~28 kLOC with tests; core logic ~7–8 kLOC of dense TypeScript)
+- `src/features/timetable/TimetableApp.tsx` — main interactive canvas (~3 kLOC)
+- `python/` — execution host + validator engine + skeleton (~3.3 kLOC total Python)
+- `prompts/` + synced public copy — 4 authoritative system prompts that define AI behavior
+- `sandbox/` — Docker and bubblewrap isolation harness
 
-The following chart shows rough distribution based on the largest files and file-type scan (exact numbers vary with every build artifact and lockfile).
+**Packaging artifacts:**
 
-```mermaid
-xychart-beta
-    title "Lines of code by language (approximate)"
-    x-axis [TypeScript, Python, Markdown, JavaScript, Config/Other]
-    y-axis "Lines" 0 --> 20000
-    bar [18500, 4200, 4500, 1500, 1400]
-```
-
-**Notes on the numbers:**
-- TypeScript dominates because the entire 6-stage Local Agent, the main UI canvas (`TimetableApp.tsx` at 2,982 lines), constraint system, and all supporting machinery live in `src/`.
-- Python is smaller but critical: the execution host (`code_executor.py`), the full validator engine for 46 constraint kinds (`validator_engine.py`), the solver skeleton template, and sandbox wrappers.
-- Markdown is inflated by the four large system prompts in `prompts/` plus the wiki and README content.
-- The massive one-time deletion of `repomix-output.xml` (17,546 lines) in the delta since the previous wiki is not reflected in current size.
-
-### Largest source files (top 10 by line count)
-
-| File | Lines | Notes |
-|------|-------|-------|
-| `src/features/timetable/TimetableApp.tsx` | 2,982 | The entire interactive scheduling canvas, assignment editing, quick import, export, and agent UI integration |
-| `src/features/timetable/ai/translator.ts` | 1,297 | Natural language → `ConstraintSpec` translation + fallback parser rules for all 46 kinds |
-| `src/features/timetable/ai/deterministic-validator.ts` | 1,037 | Post-execution deterministic checkers (heavily expanded with the 17 new constraint kinds) |
-| `python/templates/solver_skeleton.py` (and public copy) | 850 each | The audited base CP-SAT model that the Coder completes |
-| `src/features/timetable/ai/translator.test.ts` | 625 | Tests for the translator and constraint parsing |
-| `src/features/timetable/ai/local-agent.ts` | 582 | The 6-stage orchestrator (`runLocalAgent`) with all retry/repair/token-budget logic |
-| `python/validator_engine.py` | 393 | Python-side checkers for every built-in `ConstraintKind` |
-| `src/features/timetable/ai/deterministic-validator.test.ts` | 353 | Validator unit tests |
-| `src/features/timetable/quick-import.ts` | 348 | Quick import text format parser and sample data |
+- Electron builds produce AppImage/deb (Linux) and NSIS/portable (Windows)
+- PyInstaller binary for the Python runner is bundled as an extra resource
 
 ## Activity
 
-- **149 commits** on `master` in the 90 days preceding 2026-05-31.
-- Very high recent churn: between the last wiki generation (commit `82d45e84`) and current HEAD, 18 files changed with +1,913 insertions and -17,617 deletions (the bulk of the deletion was the 17.5k-line `repomix-output.xml` artifact).
-- The most actively edited areas in the recent delta were:
-  - `src/features/timetable/ai/deterministic-validator.ts` (+270 lines) — new checkers for the 17 added constraint kinds
-  - `src/features/timetable/ai/translator.ts` (+194 lines) — translator updates and fallback rules
-  - `public/templates/solver_skeleton.py` (+838 lines) — major expansion of the template the Coder targets
-  - Prompt syncing infrastructure (`public/prompts/*` and `prompts/`)
-  - `src/features/timetable/ai/constraint-spec.ts` (+23 lines, the 17 new `ConstraintKind` values)
-  - `src/features/timetable/ai/local-agent.ts` and repair logic
-  - `.gitignore` (+111 lines) — cleanup of generated and binary artifacts
+**Recent churn (last 90 days / visible history):**
 
-This level of activity (roughly 1.6 commits per day on average over 90 days, with concentrated bursts around constraint system expansion) indicates the project is in an intensive feature-development and hardening phase.
+The largest single delta in the current clone history is the **May 2026 constraint system expansion**:
+
+- Commit `cdac5b5` (2026-05-31): "feat: add 17 new built-in constraint kinds with checkers and fallback parser rules"
+- Follow-on commits on the same day added the constraint registry, persistent Python daemon worker, violations UI, and further validator/skeleton hardening.
+- This added thousands of lines across `deterministic-validator.ts`, `constraint-spec.ts`, `validator_engine.py`, translator fallback rules, and the solver skeleton.
+
+Other notable recent activity:
+
+- Persistent daemon worker in Electron main process (removes per-call Python startup cost)
+- Multiple backend fixes for the python-execute route and repair loop
+- Removal of large generated artifacts (see below)
+
+**Commit volume:**
+
+- ~150+ commits visible in the local history (many "Fix BE" and rapid iteration commits on 2026-05-30/31)
+- Primary author: Duy (and GitHub identity variants); smaller contributions from Claude, Emergent Agent, and containerized Z User during development
 
 ## Bot-attributed commits
 
-In the most recent 50 commits on `master`:
-- 2 commits (4%) were attributed to bots (`qwen.ai[bot]` and similar).
-- 48 commits (96%) were from human developers (primarily "Duy").
+Lower bound only (bots that appear in `Co-authored-by` or commit metadata):
 
-This is a lower bound on AI-assisted work. Inline tools (e.g., Copilot-style suggestions) leave no git signature, and some "Fix BE" or prompt-tuning commits may themselves have been produced with heavy AI assistance. The project culture (documented in `AGENTS.md`) treats AI output as untrusted code that must still pass human review, impact analysis, and full test/lint gates.
+- `factory-droid[bot]` / similar Droid tooling — used for wiki generation runs (visible in remote wiki metadata)
+- `dependabot[bot]`, `github-actions[bot]` — standard dependency and CI automation (expected in any modern repo)
+
+Inline AI assistance (Claude Code, Cursor, etc.) does **not** leave bot co-authorship traces, so the true AI-assisted commit percentage is higher than the bot count alone suggests.
 
 ## Complexity
 
-**Average file size signals:**
-- The UI layer is concentrated: one file (`TimetableApp.tsx`) holds the majority of the interactive scheduling experience.
-- The AI pipeline is spread across many focused modules (`local-agent.ts`, per-stage files, `deterministic-validator.ts`, `skeleton-injector.ts`, etc.), which is healthy for testability and the mandatory impact-analysis workflow.
-- The Python side is intentionally small and auditable: the execution host and validator engine together are only a few hundred lines each.
+**Largest / most critical files (approximate LOC):**
 
-**Deepest / most complex areas (by line count and logical density):**
-- Translator + fallback parser rules (now handling 46 `ConstraintKind`s with Vietnamese-school-specific semantics)
-- Deterministic validator (dual TypeScript + Python implementations that must stay in sync)
-- The `runLocalAgent` orchestrator (token budgeting, two separate repair loops, attempt history, event emission, deadline enforcement)
+- `src/features/timetable/ai/local-agent.ts` — ~28 kLOC (orchestrator + heavy test file)
+- `src/features/timetable/ai/translator.ts` — ~51 kLOC with tests (complex natural language → 46-kind mapping)
+- `src/features/timetable/ai/deterministic-validator.ts` — ~38 kLOC with tests (the heart of post-execution trust)
+- `src/features/timetable/TimetableApp.tsx` — ~3 kLOC (single-file React application with the entire canvas, state machine, and Excel export)
+- `python/code_executor.py` + `validator_engine.py` — the two Python files that actually run and validate untrusted solver code
 
-**Import / call depth:**
-- The agent stages have relatively shallow direct call depth but high fan-out through the typed event system and `WorkspaceBoard` accumulator.
-- `code_executor.py` is the narrow waist between the TypeScript world and the sandboxed Python world.
+**Deepest import / call chains:**
+
+The critical path for a user solve request is:
+
+`TimetableApp` → `runLocalAgent` → (Translator → Planner → Coder → python-bridge → code_executor.py + sandbox) → (Validator + round-trip) → (Repair if needed) → final result
+
+This crosses the TypeScript/Python boundary multiple times and touches ~15–20 distinct modules in a single end-to-end run.
 
 **Exported symbols:**
-- The core public surface of the agent is small: `runLocalAgent`, the per-stage `runXxxTurn` functions, the main types (`AgentInputPayload`, `LocalAgentFinalResult`, `ConstraintSpec`, etc.), and the bridge (`executeGeneratedCode`).
-- The 46 `ConstraintKind` values are the largest single enumerated surface in the system.
 
-## Test-to-code ratio
+- The AI layer exports ~30–40 public types and functions (`AgentInputPayload`, `ConstraintSpec`, `LocalAgentFinalResult`, `runLocalAgent`, etc.).
+- The constraint system alone defines a 46-member union (`ConstraintKind`) plus supporting condition expressions and validation reports.
 
-- 16 dedicated test files for ~76 source files (~21% test files by count).
-- Heavy investment in translator and validator tests (both unit and integration-style prompt behavior tests via `npm run test:prompt`).
-- Python layer has its own pytest suite (`python/tests/`) covering the executor and validator engine.
+**Notable large deletion:**
 
-The project does not publish aggregate coverage percentages in CI, but the presence of dedicated test files for the most complex and safety-critical modules (translator, deterministic-validator, skeleton injector, local-agent) is a positive signal.
+In the history visible to this clone, a **17.5 kLOC `repomix-output.xml`** artifact was added and then deleted in a single cleanup pass. This was the single largest line-count event in the recent lifetime of the repository.
 
----
+## Interpretation notes
 
-**Cross-references:**
-- See [Lore](lore.md) for the historical narrative behind the recent constraint explosion and the May 2026 codebase reset.
-- See [Fun Facts](fun-facts.md) for the story of the 17.5k-line `repomix-output.xml` that briefly existed and was then deleted.
-- The [AI Pipeline](../systems/ai-pipeline/index.md) and [Constraint System](../features/constraint-system.md) pages contain the detailed explanations behind the largest recent changes.
+- The project is **small in surface area** (one primary app, one primary feature) but **high in internal complexity** because the AI agent pipeline, deterministic validation, and sandboxing create a deep stack that must all stay consistent.
+- The May 2026 "17 new constraint kinds" release was the largest single capability expansion to date and touched every layer (prompts, translator, planner, coder, validator in both languages, skeleton, tests, UI violation display).
+- Test-to-code ratio is healthy for the critical paths (many `*.test.ts` files sit next to the agent stages and the validator), but the Python sandbox layer still has relatively light automated coverage compared to the TypeScript side.
+- The dual web + Electron distribution with a bundled PyInstaller binary means that "lines of code" understates the true deployed artifact size.
+
+This snapshot should be refreshed after any major release or large refactor.

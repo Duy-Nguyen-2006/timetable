@@ -4,53 +4,71 @@ Active contributors: Duy
 
 ## Purpose
 
-Tack Timetable's internal architecture is organized into a small number of cooperating systems. These are the core building blocks that do not map 1:1 to user-facing features. They are the "how it works under the hood" layers that the rest of the application depends on.
+Systems are the internal architectural building blocks that power the product but do not map 1:1 to a single user-facing feature. They are the reusable machinery that multiple features depend on.
 
-The three primary systems are:
+In Tack Timetable the primary systems are:
 
-- **AI Pipeline** — the 6-stage Local Agent (Translator, Planner, Coder, Sandbox execution, Validator, Repair) that turns user input into validated schedules.
-- **Python Execution** — the secure host (`code_executor.py`) that receives generated solver code, runs it inside a sandbox, and returns structured results.
-- **Validation** — the deterministic checker engine (dual implementations in TypeScript and Python) that verifies every constraint after the solver runs.
+- The **AI Pipeline** — the 6-stage Local Agent that turns natural-language constraints into validated solver code.
+- The **Python Execution System** — the secure host and sandbox dispatcher that is the only thing allowed to run LLM-generated code.
+- The **Validation System** — the deterministic (non-LLM) checker layer that makes the "AI writes solvers" approach trustworthy.
 
-These systems are deliberately separated from the UI and from each other so that each can be tested, reasoned about, and modified with clear blast-radius boundaries (a requirement reinforced by the project's mandatory GitNexus impact analysis rule).
+These three systems together implement the central value proposition of the product.
 
-## Why "systems" instead of "features"?
+## Directory layout
 
-User-visible capabilities (the interactive scheduling canvas, natural-language constraint entry, Excel export) are documented under [Features](../features/index.md).
+```
+src/features/timetable/ai/          # Entire AI Pipeline (orchestrator + 6 stages)
+python/
+  code_executor.py                  # Secure execution host
+  validator_engine.py               # 46 (currently 35 implemented) constraint checkers
+  templates/solver_skeleton.py
+sandbox/
+  run.py                            # Dispatcher (docker / bwrap / none)
+  executor.py                       # Docker sandbox
+  bubblewrap_executor.py
+electron/main.mjs                   # Persistent Python daemon for desktop
+src/app/api/ai/                     # Server-side fallbacks (python-execute, chat proxy, checks)
+```
 
-The systems layer contains the invisible machinery that makes those features reliable and safe:
-- The AI that writes solver code
-- The sandbox that protects the host from that code
-- The validation layer that refuses to trust the solver output
+## Key subsystems
 
-Understanding the systems layer is essential for anyone who needs to debug agent failures, add new constraint kinds, change execution isolation, or modify the repair loop.
+| System                        | Primary files                                                                 | Responsibility |
+|-------------------------------|---------------------------------------------------------------------------------|----------------|
+| AI Pipeline                   | `src/features/timetable/ai/local-agent.ts` + stage files                        | 6-stage reasoning loop with bounded retries, caching, token budgeting, and typed events |
+| Python Execution              | `python/code_executor.py`, `sandbox/run.py`, `electron/main.mjs`                | Only place LLM-generated solver code is ever executed; sandbox dispatch + daemon |
+| Validation                    | `python/validator_engine.py`, `src/features/timetable/ai/deterministic-validator.ts` | Deterministic hard/soft checking + CP-SAT round-trip for every execution result |
+| Constraint Registry (emerging)| `src/features/timetable/ai/constraint-registry.ts`                              | Central list of implemented checkers and metadata (used by validator and UI) |
 
-## Navigation
+## How the systems relate
 
-- [AI Pipeline](ai-pipeline/index.md) — the six stages, orchestration, token budgeting, bounded retries, and event model.
-  - [Translator Stage](ai-pipeline/translator.md)
-  - [Planner Stage](ai-pipeline/planner.md)
-  - [Coder Stage](ai-pipeline/coder.md)
-  - [Validation Stage](ai-pipeline/validator.md)
-  - [Repair Stage](ai-pipeline/repair.md)
-- [Python Execution](python-execution.md) — the execution host and sandbox contract.
-- [Validation System](validation.md) — the checker implementations in Python and TypeScript.
+```mermaid
+graph TD
+    UI[TimetableApp] --> Agent[AI Pipeline<br/>runLocalAgent]
+    Agent -->|generated code| Exec[Python Execution<br/>code_executor + sandbox]
+    Exec -->|result.json| Agent
+    Agent -->|schedule| Validator[Validation System<br/>TS + Python checkers + round-trip]
+    Validator -->|report + violations| Agent
+    Agent -->|LocalAgentFinalResult| UI
+```
 
-## Cross-cutting concerns
+The AI Pipeline is the conductor. Python Execution and Validation are the two critical engines it calls on every iteration.
 
-All three systems share a few important traits:
+## Integration with features
 
-- **Never trust the LLM or the solver alone** — every piece of generated code is syntax/AST-checked; every solver result is re-validated deterministically.
-- **Narrow, auditable contracts** — `AgentInputPayload` → generated Python fragment → `result.json` + structured `ExecutionResult`.
-- **Observable at every step** — the AI Pipeline emits typed events; the Python executor returns phase, status, truncated stdout/stderr, and error digests.
-- **Security boundary is non-negotiable** — even in development, the default is to refuse raw host execution of LLM-written code.
+- The **Scheduling Wizard** (user-facing) drives the AI Pipeline via `runLocalAgent`.
+- The **Constraint System** (domain model) is interpreted by the AI Pipeline and enforced by the Validation System.
+- All three systems are deliberately isolated from UI concerns so they can be tested, reasoned about, and evolved independently.
 
-## Where to start
+See the individual system pages for deep dives:
 
-If you are new to the internals, read the pages in this order:
+- [AI Pipeline](ai-pipeline/index.md) (with sub-pages for each stage)
+- [Python Execution System](python-execution.md)
+- [Validation System](validation.md)
 
-1. [AI Pipeline](ai-pipeline/index.md) — this is the control center.
-2. [Python Execution](python-execution.md) — how untrusted code is actually run.
-3. [Validation System](validation.md) — why the system can be trusted even when the solver says "optimal".
+## Entry points for modification
 
-Then dive into the individual stages as needed for debugging or extension work.
+- Adding a new reasoning stage → extend the orchestrator in `local-agent.ts` and emit the corresponding lifecycle events.
+- Strengthening the sandbox → modify `sandbox/run.py` or the chosen executor; never bypass the dispatcher.
+- Adding a new deterministic checker → implement in both `python/validator_engine.py` and the TypeScript side, then register it so `hardCoverageComplete` remains accurate.
+
+All changes to these systems should be preceded by GitNexus impact analysis (see [Patterns and conventions](../how-to-contribute/patterns-and-conventions.md)).

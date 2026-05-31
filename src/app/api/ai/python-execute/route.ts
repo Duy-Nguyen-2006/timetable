@@ -125,7 +125,7 @@ function runExecutor(code: string, input: unknown, timeoutMs: number, solverWork
         ) {
           const artifactDir = path.join(process.cwd(), '.ai_results');
           fs.mkdirSync(artifactDir, { recursive: true });
-          const artifactPath = path.join(artifactDir, `result_${Date.now()}.json`);
+          const artifactPath = path.join(artifactDir, `result_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
           fs.writeFileSync(artifactPath, JSON.stringify(partialResult), 'utf8');
           const partialStatus = String((partialResult as any).status).toLowerCase();
           resolve({

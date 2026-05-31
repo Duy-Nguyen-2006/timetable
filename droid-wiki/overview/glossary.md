@@ -2,103 +2,142 @@
 
 Active contributors: Duy
 
-This page defines the project-specific terms used throughout the Tack Timetable codebase and documentation.
+This glossary defines the key concepts and terms used throughout the Tack Timetable codebase and documentation. Terms are grouped by domain for easier navigation.
 
-## AgentInputPayload
+## Core product concepts
 
-The normalized data structure sent from the UI into the Local Agent. It contains days, sessions, period counts, assignments (teacher/subject/class/weeklyPeriods), raw constraint text with severity, and optional metadata (school name, semester). Defined in `src/features/timetable/ai/types.ts`.
+**Tack Timetable**
+The full product name. An AI-assisted timetable (scheduling) generator for Vietnamese schools that combines a Next.js/React frontend, a 6-stage prompt-driven Local Agent, and a sandboxed Python/OR-Tools CP-SAT solver.
 
-## ConstraintKind
+**Scheduling Wizard**
+The main interactive user interface (`src/features/timetable/TimetableApp.tsx`). Users enter assignments, define days/sessions/periods, write natural-language constraints, trigger the AI solve, review the resulting timetable, and export to Excel.
 
-One of 46 enumerated rule types that the system understands natively. Examples include `teacher_block_day`, `teacher_max_per_day`, `subject_consecutive`, `class_no_gaps`, `assignment_spread_days`, `resource_capacity`, `if_then`, and `custom_dsl`. See the full list in `src/features/timetable/ai/constraint-spec.ts`. Each kind has a corresponding deterministic checker in both TypeScript and Python.
+**Quick import text format**
+A compact, human-readable text syntax for bulk-loading teacher–subject–class assignments. Used in the landing page quick-import textarea and parsed by `quick-import.ts`.
 
-## ConstraintSpec
+## AI agent pipeline
 
-The structured representation of a single scheduling rule after translation. Contains `id`, `original` (the user's text), `severity` (hard/soft/info), `kind` (a ConstraintKind), `params`, optional `weight`, `tags`, `notes`, and (for `custom_dsl`) a `pythonPredicate`. This is the canonical form passed through Planner, Coder, Validator, and Repair.
+**Local Agent (or 6-stage pipeline)**
+The orchestrator and staged reasoning system that turns user input into a validated timetable. Implemented in `runLocalAgent` (`src/features/timetable/ai/local-agent.ts`). The six explicit stages are Translator, Planner, Coder, Sandbox execution, Deterministic Validator, and Repair.
 
-## Coder (stage)
+**Translator stage**
+First stage. Converts natural-language constraints (plus required/preferred flags) into structured `ConstraintSpec` objects. Uses `prompts/translator.system.md` plus rule-based fallback parsers. Output: array of up to 46 constraint kinds.
 
-The third stage of the Local Agent. Given a `Plan` and previous failure context, it produces a fragment of Python code (constraint definitions and objective) that will be injected into the solver skeleton. Implemented in `src/features/timetable/ai/coder.ts`. Bounded by `MAX_CODER_RETRIES` (3).
+**Planner stage**
+Second stage. Produces a `Plan`: decision variable declarations, domain size estimates, constraint ordering, reification needs, objective choice, template names, and risk notes. Prompt: `prompts/planner.system.md`.
 
-## DeterministicValidationReport
+**Coder stage**
+Third stage. Emits complete, executable Python solver code by completing the solver skeleton template. Prompt: `prompts/coder.system.md`. Output passes through AST/syntax checks before execution.
 
-The result of running all applicable checkers against a candidate schedule. Contains `ok`, pass/fail flags for base/hard/soft constraints, `hardCoverageComplete`, lists of `violations`, `hardViolations`, `softViolations`, and sets of unchecked constraint IDs. Produced by `validateSchedule` in `src/features/timetable/ai/deterministic-validator.ts` and cross-checked against `python/validator_engine.py`.
+**Sandbox execution**
+Fourth stage (transport + host). The generated Python is sent via `python-bridge.ts` (Electron IPC or HTTP fallback) to `python/code_executor.py`, which runs it inside a sandbox (Docker or bubblewrap). Never executed directly on the host.
 
-## ExecutionResult
+**Deterministic Validator (or Validation stage)**
+Fifth stage. After every solver run the agent executes:
+- TypeScript-side `validateSchedule` + CP-SAT round-trip (`deterministic-validator.ts`, `cp-sat-roundtrip.ts`)
+- Python-side checkers in `validator_engine.py` (all 46 kinds)
+Produces a `DeterministicValidationReport` with hard/soft pass flags, violations, and coverage completeness.
 
-What the Python execution host returns after attempting to run generated solver code. Includes `phase` (compile/run/parse), `ok`, `status` (optimal/feasible/infeasible/unknown/timeout/crashed), `durationMs`, optional `resultData` (the schedule), `errorDigest`, and truncated `stdout`/`stderr`. Defined in `src/features/timetable/ai/types.ts`.
+**Repair stage**
+Sixth stage (conditional). If hard violations or round-trip failures exist and repair budget remains, the agent calls the Repair LLM (prompt: `prompts/repair.system.md`), applies patches, and re-runs Coder + Validator. Hard limits: 1 runtime repair round, 2 violation repair rounds.
 
-## Local Agent (6-stage pipeline)
+**TokenBudgetGuard**
+Utility (`budget-guard.ts`) that tracks cumulative prompt + completion tokens across all LLM calls in a single agent run. Enforces the global cap (`TOKEN_CAP_PER_RUN = 80_000`).
 
-The orchestrator at the center of Tack Timetable. Implemented as `runLocalAgent` in `src/features/timetable/ai/local-agent.ts`. The six stages are Translator, Planner, Coder, Sandbox execution, Validator, and Repair. The loop is bounded by token budget, total tool calls, and per-stage retry limits. It never executes LLM-written code outside a sandbox.
+**WorkspaceBoard**
+In-memory scratchpad (`workspace.ts`) used by the orchestrator to accumulate intermediate artifacts (plans, code, execution results, violation reports) during a run.
 
-## LocalAgentFinalResult
+**AgentLifecycleEvent / stage events**
+Typed events emitted by every stage via the `onEvent` callback. The UI renders them as a live progress list. Phases include `thinking`, `translator`, `planner`, `coding`, `running`, `checking`, `fixing`, `idle`.
 
-The complete object returned to the UI when the agent succeeds. Contains the final `schedule`, two validation reports (deterministic and checker), `violations`, `diagnostics`, `executionErrors`, `validationErrors`, `iisConstraintIds`, `conflictingConstraints`, and `attemptHistorySummary`. Defined in `src/features/timetable/ai/types.ts`.
+## Constraint system
 
-## Planner (stage)
+**ConstraintSpec**
+The canonical structured representation of a single scheduling rule. Contains `id`, `original` (natural language), `kind` (one of 46), `severity` (hard/soft/info), `params`, optional `weight`, `tags`, and (for `custom_dsl`) a `pythonPredicate`.
 
-The second stage of the Local Agent. It analyzes the compressed dataset and the list of `ConstraintSpec`s and produces a `Plan`: estimated decision variable count, constraint ordering, which constraints need reification, objective choice, templates to use, and risks. Implemented in `src/features/timetable/ai/planner.ts`.
+**ConstraintKind**
+Union of 46 literal strings representing built-in constraint types (teacher, subject, class, assignment, session, conditional, and custom). Defined in `constraint-spec.ts`. Each kind has a corresponding deterministic checker in both TypeScript and Python.
 
-## Plan
+**ConstraintSeverity**
+`hard` (must be satisfied; violations make the schedule invalid), `soft` (penalized but allowed), or `info` (diagnostic only).
 
-The structured output of the Planner stage. Includes `decisionVars`, `domainSize`, `constraintOrder`, `reifiedNeeded`, `objective`, `templatesUsed`, `risks`, and optional `objectiveFunction` / `provenPatterns`. Defined in `src/features/timetable/ai/constraint-spec.ts`.
+**ConstraintTag**
+`auto_base` (injected by the system), `user_required`, or `user_preferred`.
 
-## Repair (stage)
+**DeterministicValidationReport**
+Structured result from the validator. Fields include `ok`, `hardConstraintPass`, `softConstraintPass`, `hardCoverageComplete`, `violations`, `hardViolations`, `softViolations`, `uncheckedConstraintIds`, and `iisConstraintIds`.
 
-The final stage of the Local Agent (when needed). When the Validator finds hard violations or the executor reports a runtime/compile failure, the Repair stage generates patches or new context and feeds them back to the Coder. Bounded by `MAX_RUNTIME_REPAIR_ROUNDS` (1) and `MAX_VIOLATION_REPAIR_ROUNDS` (2). Implemented in `src/features/timetable/ai/repair.ts`.
+**Violation**
+A single detected breach of a constraint. Contains `constraintId`, `kind`, human message, and the list of offending `ScheduleEntry` objects.
 
-## Sandbox
+**Round-trip check**
+A validation technique: after the solver returns a schedule, the validator re-encodes that exact schedule as a "forced solution" inside a fresh CP-SAT model and asks whether the solver still considers it feasible. Catches cases where the generated code silently ignored constraints.
 
-The isolation boundary that protects the host when running code generated by the Coder. Two implementations exist:
+**iisConstraintIds (Irreducibly Infeasible Set)**
+Subset of constraint IDs that together make the problem unsatisfiable. Computed by the solver or validator and surfaced to the user/repair stage so it can target the minimal conflicting set.
 
-- Docker (recommended for production): `sandbox/executor.py` builds and runs `timetable-sandbox:latest` with `--network=none`, non-root user, read-only filesystem, and resource limits.
-- bubblewrap (lighter alternative on Linux): `sandbox/bubblewrap_executor.py`.
+## Execution & sandbox
 
-Controlled by the `TT_SANDBOX_MODE` environment variable. The Python execution host (`python/code_executor.py`) always delegates to a sandbox unless explicitly configured otherwise (unsafe dev mode only).
+**Solver skeleton (solver_skeleton.py)**
+The base CP-SAT model template that the Coder stage completes. Contains standard variable declarations, objective scaffolding, and hooks where constraint code is injected. Lives in `python/templates/` and is synced to `public/templates/` at build time.
 
-## ScheduleEntry
+**code_executor.py**
+The single secure host that ever executes solver code generated by the LLM. Receives code + input via a temp job directory, compiles it, dispatches to the sandbox, captures result.json + stdout/stderr, and returns a structured envelope.
 
-A single cell in the output timetable. Contains `class`, `day`, `period`, `subject`, `teacher`, and optional `assignmentId`. Defined in `src/features/timetable/ai/constraint-spec.ts`.
+**Sandbox dispatcher (sandbox/run.py)**
+Chooses the isolation technology based on `TT_SANDBOX_MODE` (or auto-detect):
+- `docker` → `sandbox/executor.py`
+- `bwrap` → `sandbox/bubblewrap_executor.py`
+- `none` → raw subprocess (only if `TT_SANDBOX_ALLOW_UNSAFE=1`)
 
-## Solver skeleton
+**Docker sandbox**
+Strong isolation using a dedicated Docker image (`timetable-sandbox:latest`). Runs with `--network=none`, read-only root, tmpfs workspace, non-root user, CPU/memory limits, and strict capability drops.
 
-The audited base Python model (`python/templates/solver_skeleton.py` and its copy in `public/templates/`) that the Coder completes. It contains the CP-SAT model skeleton, input parsing, the marked insertion point for generated constraints, and the standard output contract (printing `SOLUTION_FOUND` and writing `result.json`). The Coder is instructed never to rewrite the skeleton itself.
+**bubblewrap sandbox (bwrap)**
+Lightweight Linux namespace-based sandbox. Provides new mount + PID namespaces and seccomp filtering. Faster startup than Docker; still prevents host filesystem and most dangerous syscalls.
 
-## Solver status
+**TT_SANDBOX_MODE**
+Environment variable controlling sandbox selection. Recommended values: `docker` (strongest isolation) or `bwrap` (fast on Linux). Default: auto-detect.
 
-The final status reported by the OR-Tools CP-SAT solver after a run: `optimal`, `feasible`, `infeasible`, or `unknown`. The executor and validator may further map or override this (e.g., an "optimal" status with an empty schedule is forced to `infeasible`).
+**ExecutionResult**
+The structured envelope returned from the sandbox host to the TypeScript agent. Contains `phase`, `ok`, `status` (optimal/feasible/infeasible/timeout/crashed), `durationMs`, `resultData` (schedule + metadata), and captured stdout/stderr.
 
-## TokenBudgetGuard
+**Solver status**
+- `optimal` — proven best solution within the model
+- `feasible` — valid solution found but optimality not proven
+- `infeasible` — no solution exists under current hard constraints
+- `timeout_with_solution` — time limit hit but a feasible schedule was returned
+- `timeout`, `crashed`, `unknown` — execution failures
 
-A utility (`src/features/timetable/ai/budget-guard.ts`) that tracks token consumption across all LLM calls in a single agent run and enforces the hard cap (`TOKEN_CAP_PER_RUN = 80_000`). It can consume either reported usage from the provider or fall back to a text-based estimator.
+## Data & domain models
 
-## Translator (stage)
+**AgentInputPayload**
+The normalized payload sent from the UI into `runLocalAgent`. Contains days, sessions, period counts, deleted periods, assignments (`NormalizedAssignment[]`), raw constraints, optional previous schedule, and metadata.
 
-The first stage of the Local Agent. It takes raw natural-language constraint text (plus the dataset context) and produces a list of structured `ConstraintSpec` objects using one of the 46 known `ConstraintKind`s. It has both LLM-driven translation and deterministic fallback parser rules (greatly expanded in the 17-kind addition). Implemented in `src/features/timetable/ai/translator.ts`.
+**ScheduleEntry**
+A single cell in the final timetable: `{ assignmentId?, class, day, period, subject, teacher }`.
 
-## Validator (stage)
+**NormalizedAssignment**
+A single teacher–subject–class triple with its weekly period count. The fundamental unit the solver allocates.
 
-The fifth stage of the Local Agent. After the solver runs, this stage runs `validateSchedule` (TypeScript) and cross-checks against the Python `validator_engine.py` checkers for every hard constraint. It also performs a CP-SAT round-trip verification (`verifyCpSatRoundTrip`) to ensure the returned schedule is internally consistent with the input assignments. Hard violations here trigger the Repair stage.
+**Plan**
+Planner output describing how the Coder should structure the CP-SAT model (decision variables, objective, templates, risks).
 
-## Violation
+**LocalAgentFinalResult**
+The final object returned to the UI after a successful (or partially successful) agent run. Contains the schedule, solver status, full deterministic + checker reports, violations, IIS, conflicting constraints, and attempt history.
 
-A concrete failure of a constraint against a candidate schedule. Contains `constraintId`, `kind`, `message`, and the list of `offendingEntries` (ScheduleEntry objects). Produced by the deterministic validators and included in `DeterministicValidationReport`.
+## Tooling & build
 
-## WorkspaceBoard
+**Prompt sync (sync_prompts.mjs)**
+Build-time script that copies the four authoritative prompt files from `prompts/` into `public/prompts/`. Runs automatically before dev, build, test, and pretest.
 
-An in-memory accumulator (`src/features/timetable/ai/workspace.ts`) used by the Local Agent to keep all intermediate state (constraint specs, compressed dataset, plan, latest generated code, attempt history) in one place so that later stages and the UI can inspect the full trace of a run.
+**Solver skeleton sync (sync_solver_template.mjs)**
+Build-time script that keeps `public/templates/solver_skeleton.py` in sync with the Python-side template.
 
-## Quick import text format
+**Provider smoke test**
+Script (`scripts/provider_smoke_test.ts`) that exercises the configured LLM provider end-to-end. Used in CI when a key is available.
 
-A compact, human-readable text syntax (defined in `src/features/timetable/quick-import.ts`) that lets users paste large assignment tables in one go instead of entering them cell-by-cell in the UI. The format is parsed into `NormalizedAssignment[]` and fed into the agent as part of the `AgentInputPayload`.
+**GitNexus impact analysis**
+Mandatory pre-edit step enforced by `AGENTS.md` / `CLAUDE.md`. Before modifying any symbol, run `gitnexus_impact` (or equivalent) and report blast radius. Renames must use `gitnexus_rename`.
 
----
-
-For deeper explanations of how these concepts interact, see:
-
-- [Architecture](architecture.md) — the five-layer system diagram
-- [AI Pipeline](../systems/ai-pipeline/index.md) — detailed stage behavior
-- [Constraint System](../features/constraint-system.md) — the 46 ConstraintKind values and their semantics
-- [Python Execution](../systems/python-execution.md) — the sandboxed executor contract
-- [Validation System](../systems/validation.md) — the checker implementations in Python and TypeScript
+See also the project [README](../README.md) and the [Architecture](architecture.md) page for context on how these terms fit together.

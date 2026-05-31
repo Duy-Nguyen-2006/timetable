@@ -2,157 +2,118 @@
 
 Active contributors: Duy
 
+The Translator is the first stage of the 6-stage Local Agent pipeline. It converts raw natural language constraints (Vietnamese scheduling rules expressed as required or preferred) into a structured `ConstraintSpec[]` array. It supports 35 `ConstraintKind` values (aspirational target in planning docs was 46) with a hybrid deterministic + LLM approach that minimizes latency and token usage while guaranteeing a safe, complete output even when the model fails.
+
 ## Purpose
 
-The Translator is the first stage of the Local Agent. Its sole job is to read raw natural-language constraint text (in Vietnamese, for this domain) together with the current dataset (teachers, classes, subjects, days, periods) and emit a list of structured `ConstraintSpec` objects, each using one of the 46 known `ConstraintKind` values.
+- Accept `AgentInputPayload.constraints` (free-form Vietnamese text + `required`/`preferred` type + optional weight).
+- Emit normalized `ConstraintSpec[]` carrying one of the 35 known kinds, correct severity, params, weight, tags, and diagnostic notes.
+- Never drop hard constraints: unknown or unparseable hard inputs become `custom_dsl` with `notes: "fallback_parser:UNPARSED_HARD"` rather than being discarded.
+- Feed the deduplicated specs into the Planner stage and the `WorkspaceBoard`.
 
-It is deliberately hybrid:
-- Fast, deterministic fallback parser rules handle the common, unambiguous cases without calling an LLM at all.
-- The language model is only invoked for the remaining ambiguous or complex constraints.
-- If the LLM call fails or returns invalid output, the stage falls back entirely to the deterministic parser.
+Room / capacity constraints are deliberately suppressed at this boundary (turned into `info` `custom_dsl` with `notes: "ignored:room_constraint"`).
 
-This design minimizes latency, token cost, and nondeterminism while still supporting rich, free-form input.
+## How it works (hybrid path)
 
-## Location and entry point
-
-- Main implementation: `src/features/timetable/ai/translator.ts`
-- Exported function: `runTranslatorTurn(config, input, invokeChat?)`
-- Internal test surface: `__translatorInternal` (contains `fallbackFromRuleParser`, `sanitizeSpecs`, period builders, etc.)
-- Prompt: `prompts/translator.system.md` (synced to `public/prompts/translator.system.md` at build/dev time)
-
-## Input
-
-`AgentInputPayload` (see `types.ts`):
-
-- `days`, `sessions`, `periodCounts`, `deletedPeriods`
-- `assignments`: array of `{ id, teacher, subject, class, weeklyPeriods }`
-- `constraints`: array of `{ type: 'required' | 'preferred', text: string, weight? }`
-- Optional `metadata`
-
-The Translator also builds a compact `context` object containing unique teacher/class/subject labels and the active period numbers per day (respecting deletions and session structure).
-
-## Output
-
-`TranslatorTurnResult`:
-
-```ts
-{
-  constraintSpecs: ConstraintSpec[],
-  rawResponse?: string,
-  usageTokens?: number
-}
+```mermaid
+flowchart TD
+    In[AgentInputPayload<br/>raw constraints + dataset] --> Fallback[fallbackFromRuleParser<br/>lib/constraint-parser.ts + 100+ regex rules]
+    Fallback -->|kind !== custom_dsl| Deterministic[Deterministic specs]
+    Fallback -->|unparsed remain custom_dsl| LLM[LLM path only for remainder<br/>prompts/translator.system.md]
+    LLM --> Parse[parseModelJson<br/>fence strip + first-object + control-char repair]
+    Parse --> Zod[Zod schema validation<br/>35-kind enum + ConditionExpr]
+    Deterministic --> Merge[sanitizeSpecs]
+    Zod --> Merge
+    Merge -->|entity validation<br/>auto_base tagging<br/>weekly exact inference<br/>room suppression<br/>re-invoke fallback on LLM mistakes| Sanitized[Sanitized ConstraintSpec[]]
+    Sanitized --> Dedupe[dedupeConstraintSpecs<br/>semantic signature in local-agent.ts]
+    Dedupe --> Out[ConstraintSpec[]<br/>deduped → Planner + board]
 ```
 
-Each `ConstraintSpec` has:
-- `id` (stable identifier like `c1`, `c2`)
-- `original` (exact copy of the user's text)
-- `severity` (`hard` / `soft` / `info`)
-- `kind` (one of 46 `ConstraintKind` values)
-- `params` (kind-specific)
-- Optional `weight`, `tags`, `notes`
+1. **Deterministic first pass** — `fallbackFromRuleParser` (in `translator.ts`) runs on every constraint. It uses `splitFallbackConstraintText` (splits on `;`, `\n`, `và`, `đồng thời`, and special-cases `nếu ... thì`) plus the lower-level `parseConstraint` from `src/lib/constraint-parser.ts`. Many common patterns (block day/period/slot, max consecutive, allowed days/periods, subject pinning, daily limits, if-then, pair_not_same_slot, session_limit, subject_group_*, assignment pinning/spread, etc.) are fully recognized without any LLM call.
+2. **Selective LLM** — Only the originals that produced at least one `custom_dsl` are packaged with rich context (teachers, classes, subjects, days, periods, periodsByDay built from the dataset) and sent to the model via `invokeChat` (temperature 0, `json_schema` response format).
+3. **Robust extraction** — `parseModelJson` (in `parse-model-json.ts`) strips fences, extracts the first top-level object, and repairs embedded control characters before `JSON.parse`. The result is validated with Zod against the exact 35-kind enum and the full `ConstraintSpec` shape.
+4. **Sanitize & enrich** — `sanitizeSpecs`:
+   - Downgrades unknown entities (teacher/class/subject/day) to `custom_dsl` with diagnostic notes.
+   - Suppresses all room-related text → `info` `custom_dsl` + `ignored:room_constraint`.
+   - Tags auto-generated weekly exacts and "every class/subject must have exactly N" patterns as `auto_base`.
+   - Re-invokes the fallback parser on certain LLM outputs that are known to be fragile (e.g., session-scoped blocks, missing periods).
+   - Applies weight from the original input constraint when present.
+5. **Deduplication** (orchestrator) — `dedupeConstraintSpecs` in `local-agent.ts` uses a stable semantic signature (`constraintSignature`) that ignores id and original text. This prevents Planner/Coder bloat from near-duplicate specs produced by mixed deterministic + LLM paths.
 
-## Deterministic fallback parser (the fast path)
+On any error in the LLM branch (network, bad JSON after repair, schema violation), the turn safely returns the pure output of `fallbackFromRuleParser(input)` — the pipeline never loses constraints.
 
-The function `fallbackFromRuleParser` (and its helpers) runs first, before any LLM call.
+## ConstraintKind surface (35 kinds)
 
-It recognizes a large set of common Vietnamese scheduling phrases using:
+See the authoritative definition and grouping in [Constraint System](../features/constraint-system.md). The enum lives in:
 
-- Label matching (teacher names, class names, subject names, day labels/ids)
-- Keyword patterns (`không dạy`, `tối đa`, `liên tiếp`, `nên`, `bắt buộc`, etc.)
-- Number extraction (with special handling for "tiết N" to avoid confusing day numbers with period numbers — see `extractPeriodNumber`)
-- Heuristics for auto-base constraints (`weekly_periods_exact` for every assignment)
+- `src/features/timetable/ai/constraint-spec.ts` — `ConstraintKind` union (exactly 35 literals)
+- `src/features/timetable/ai/constraint-registry.ts` — `CONSTRAINT_REGISTRY` with groups and `hasChecker` flags
 
-Constraints that parse cleanly to a non-`custom_dsl` kind are removed from the LLM prompt entirely. Only the remaining ambiguous text is sent to the model.
+The 17 new kinds added in the coordinated commit that also updated the fallback parser and added deterministic checkers are fully supported by the translator rules (including `if_then` with `ConditionExpr`, `pair_not_same_slot`, `session_limit`, `subject_group_daily_limit`, `subject_min_gap_days`, `subject_daily_max_periods`, `assignment_*`, `teacher_min_per_day`, `teacher_no_gaps`, `teacher_allowed_*`, `class_no_gaps`, `class_subjects_not_same_day`, etc.).
 
-If the LLM call later fails or returns nothing usable, the entire input falls back to this deterministic result.
+## Prompt contract
 
-## LLM path (when needed)
+The single source of truth is `prompts/translator.system.md` (version 3.0.0, synced at build time to `public/prompts/`).
 
-When unparsed constraints remain:
+It contains:
+- The complete 35-row kind table with "when to use" and required params.
+- `ConditionExpr` recursive schema for `if_then`.
+- `subject_consecutive` Rule A semantics (floor division for required consecutive blocks; remainder may be singletons).
+- Strict rules (exact label matching, day ids only, no invention, split independent clauses, weight propagation).
+- Few-shot examples for complex implications and global limits.
 
-1. The current system prompt is fetched from `/prompts/translator.system.md`.
-2. A compact context (teachers, classes, subjects, days, periods, periodsByDay) plus the remaining raw constraints is sent.
-3. The model is asked to return strict JSON matching the `translatorResponseSchema`.
-4. The response is validated with Zod.
-5. Successful specs are merged with the deterministic results (deduplication happens later in the orchestrator).
-6. `sanitizeSpecs` is called to:
-   - Ensure all referenced entities (teacher, subject, class, assignmentId) actually exist in the current dataset.
-   - Drop or mark-invalid specs that reference unknown names.
-   - Automatically tag `weekly_periods_exact` specs that exactly match an assignment's declared weekly load as `auto_base`.
+Changes to this file are treated as first-class behavioral changes and must pass `npm run test:prompt`.
 
-If the LLM call throws or the parsed JSON fails schema validation, the function returns only the deterministic fallback (with empty `rawResponse`).
+## Error handling & safe degradation
 
-## The 46 ConstraintKind values
+- LLM path is best-effort only. Total failure → pure deterministic output.
+- `parseModelJson` failures after all repair attempts throw → caught by the outer `runTranslatorTurn` try/catch → fallback.
+- Entity validation in `sanitizeSpecs` downgrades rather than drops.
+- Hard constraints that remain `custom_dsl` after all passes carry `notes: "fallback_parser:UNPARSED_HARD"` so downstream (Validator, Repair) can surface coverage warnings.
+- No constraints are ever silently dropped.
 
-As of the `cdac5b5` commit, the complete set (defined in `constraint-spec.ts` and mirrored in the translator schema and prompt) is:
+There is no numeric confidence scoring emitted by the current implementation. The design instead provides deterministic-first high-confidence parsing for the vast majority of real-world Vietnamese scheduling language, with LLM only as a safety net for novel phrasing.
 
-Teacher constraints:
-- `teacher_block_day`, `teacher_block_period`, `teacher_block_slot`
-- `teacher_max_per_day`, `teacher_max_consecutive`, `teacher_max_working_days`
-- `teacher_min_per_day`, `teacher_no_gaps`
-- `teacher_allowed_days`, `teacher_allowed_periods`
+## Caching, events, and call site
 
-Subject constraints:
-- `subject_pin_period`, `subject_consecutive`, `subject_max_consecutive`
-- `subject_allowed_days`, `subject_min_gap_days`, `subject_daily_max_periods`
+In `src/features/timetable/ai/local-agent.ts`:
 
-Class constraints:
-- `class_block_day`, `class_block_period`, `class_block_slot`
-- `class_max_per_day`, `class_min_per_day`, `class_no_gaps`
-- `class_no_double_subject_day`, `class_subjects_not_same_day`
+- `pickStageConfig` selects any per-stage model override (`modelTranslator`).
+- Stable cache key for translator includes the full structural input (assignments, constraints, days, sessions, periodCounts, deletedPeriods) + chosen model.
+- On cache hit, `usageTokens` is reported as 0 for budget accounting.
+- After successful translator turn: `stage_completed` event carries `(n specs, m after dedupe)`.
+- Deduplication and auto-base filtering (weekly exacts marked `auto_base` are removed before solver constraints) happen immediately after translator.
+- The resulting specs are stored on the `WorkspaceBoard` and passed (compressed) to Planner.
 
-Assignment constraints:
-- `assignment_pin_slot`, `assignment_block_slot`, `assignment_allowed_slots`
-- `assignment_spread_days`, `weekly_periods_exact`
+The translator turn is the only stage that can legally return zero LLM calls for a non-empty constraint set (when the deterministic parser covers everything).
 
-Conditional and grouping:
-- `if_then`, `pair_not_same_slot`
-- `resource_capacity`, `session_limit`
-- `subject_group`, `subject_group_daily_limit`
+## Key source files
 
-Escape hatch:
-- `custom_dsl` — the model is allowed to emit a `pythonPredicate` string that will be executed later (with AST checks when used as hard).
+All paths are repository-root relative.
 
-The translator prompt (`prompts/translator.system.md`) contains the authoritative table of when to use each kind and which params are required.
-
-## Key implementation details
-
-- **Vietnamese normalization**: `normalizeConstraintText` lowercases, strips diacritics, normalizes "đ"→"d", and collapses whitespace. Used for robust keyword matching.
-- **Day id canonicalization**: Accepts both ids (`mon`, `tue`...) and labels (`Thứ 2`, `Thứ 3`...), plus common abbreviations (`thứ 2`, `thu 2`, `cn`, etc.).
-- **Period extraction safety**: `extractPeriodNumber` looks specifically for "tiết N" / "tiet N" / "period N" patterns so that "thứ 6 tiết 5" does not mistakenly treat the day number as a period.
-- **Auto-base tagging**: `shouldMarkWeeklyAutoBase` detects when a `weekly_periods_exact` constraint exactly restates an assignment's declared weekly load; these are later filtered out before being sent to the solver (they are already implicit).
-- **Sanitization**: `sanitizeSpecs` is the last guard before specs leave the translator. It drops references to entities that no longer exist in the current UI state.
-
-## Error handling and resilience
-
-- LLM failure → silent fallback to deterministic parser (the user still gets *something* rather than a hard error).
-- Invalid JSON from model → same fallback.
-- Entity references that no longer exist in the dataset → dropped or marked during sanitization.
-- Empty result after all filtering → the orchestrator will later report a clear "no executable constraints" situation rather than crashing.
-
-## Testing
-
-- `src/features/timetable/ai/translator.test.ts` exercises the internal helpers (`__translatorInternal`).
-- Prompt behavior is validated by `npm run test:prompt` (which runs `scripts/validate_coder_prompt_models.ts` against the current prompt + model combination).
-- The translator is also exercised indirectly by the broader `local-agent.test.ts` integration scenarios.
+| Repository-root path | Role |
+|----------------------|------|
+| `src/features/timetable/ai/translator.ts` | `runTranslatorTurn`, `fallbackFromRuleParser`, `sanitizeSpecs`, `splitFallbackConstraintText`, Zod schemas, weight/tag handling, hybrid LLM + deterministic merge, context builders (`buildTranslatorPeriods*`) |
+| `prompts/translator.system.md` | Authoritative system prompt (v3.0.0): full ConstraintKind table, ConditionExpr, Rule A semantics, few-shot examples, strict output rules |
+| `src/features/timetable/ai/constraint-spec.ts` | Core domain: `ConstraintKind` (35 values), `ConstraintSpec`, `ConstraintSeverity`, `ConditionExpr`, `ConstraintTag` |
+| `src/features/timetable/ai/local-agent.ts` | Orchestrator call site, stable cache key construction, `dedupeConstraintSpecs` + `constraintSignature`, event emission (`stage_started`/`stage_completed`), budget integration, auto-base filtering before solver |
+| `src/features/timetable/ai/parse-model-json.ts` | `parseModelJson` — fence stripping, first top-level object extraction, control-character repair in strings |
+| `src/lib/constraint-parser.ts` | Low-level `parseConstraint` rule engine (many legacy + new patterns exercised by the high-level fallback) |
+| `src/features/timetable/ai/types.ts` | `TranslatorTurnResult`, `AgentInputPayload`, `ConstraintItemInput`, `LocalAgentConfig` (modelTranslator override) |
+| `src/features/timetable/ai/constraint-registry.ts` | `CONSTRAINT_REGISTRY`, `CHECKED_KINDS` — drives fail-closed behavior for hard constraints without checkers |
 
 ## Related pages
 
-- [AI Pipeline index](index.md) — the six-stage overview and orchestration
-- [Constraint System](../../../features/constraint-system.md) — semantics of all 46 kinds
-- [Planner](planner.md) — the next consumer of the `ConstraintSpec[]` list
-- [Validation Stage](validator.md) — where these specs are later checked against a concrete schedule
-- [Translator prompt](../../../../prompts/translator.system.md) — the actual instructions given to the model (source of truth)
+- [AI Pipeline Overview](systems/ai-pipeline/index.md) — full 6-stage flow, TokenBudgetGuard, repair loops, event model
+- [Constraint System](../features/constraint-system.md) — complete 35-kind enumeration with groups, severity/weight/tags semantics, automatic checkers (TS + Python), natural language parsing overview
+- [Validator Stage](systems/ai-pipeline/validator.md) — how the specs produced here are deterministically checked after execution
+- [Python Execution](systems/python-execution.md) — sandbox context for the overall agent (translator itself never executes code)
 
-## Where to start if you need to change translation behavior
+## Notes & known limitations
 
-1. Run `gitnexus_impact` on the symbols you plan to touch.
-2. If you are adding a new `ConstraintKind`, first add it to:
-   - `src/features/timetable/ai/constraint-spec.ts`
-   - the Zod schema inside `translator.ts`
-   - the JSON schema in the chat payload
-   - the table in `prompts/translator.system.md`
-3. Add the corresponding deterministic parsing rule (or decide it must always go through the LLM).
-4. Add the Python and TypeScript checkers (see [Validation System](../../validation.md)).
-5. Update or add translator unit tests and run `npm run test:prompt`.
-6. Verify that `sanitizeSpecs` correctly handles the new kind's entity references.
+- The "46 kinds" figure in some older planning artifacts was aspirational. The implemented surface with parser rules + deterministic checkers (as of the coordinated cdac5b5 change) is 35.
+- `subject_group` and `custom_dsl` (without executable `pythonPredicate` usage) have no automatic checkers; hard instances of the latter are reported as coverage failures by the validator.
+- Room constraints are intentionally ignored at the translator boundary for scope control; this is documented behavior, not a bug.
+- All changes that affect parsing (new kinds, prompt edits, fallback rule additions, sanitize logic) are behavioral changes and must pass prompt validation + relevant tests.
+
+This page intentionally focuses on the translator stage contract and implementation. Broader pipeline orchestration lives in the AI Pipeline index; constraint semantics and checker details live in the Constraint System page.

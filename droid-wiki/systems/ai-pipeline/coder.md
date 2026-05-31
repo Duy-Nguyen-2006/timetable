@@ -1,160 +1,124 @@
 # Coder Stage
-
 Active contributors: Duy
 
 ## Purpose
 
-The Coder is the third stage of the Local Agent. Its job is to emit a fragment of Python code that defines additional constraints (or objective terms) that the audited solver skeleton does not already handle.
+The Coder stage is the code-generation heart of the 6-stage Local Agent. It receives a `Plan` (from Planner) plus the filtered hard `custom_dsl` constraints and emits a Python snippet (`constraint_code`) that is injected into the solver skeleton to implement those constraints. Only hard `custom_dsl` constraints ever reach the Coder; all built-in kinds and soft constraints are handled by the registry inside the skeleton. The stage is deliberately narrow: it never creates models or slots, never prints, never does I/O, and must respect strict semantics (especially Rule A for `subject_consecutive`).
 
-Crucially, the Coder's scope is **extremely narrow**:
+The public entry point is `runCoderTurn` in `src/features/timetable/ai/coder.ts`. It is invoked from the nested Coder loop inside `runLocalAgent` (`src/features/timetable/ai/local-agent.ts`).
 
-- It only writes code for `custom_dsl` constraints with `severity == "hard"`.
-- All 45 built-in `ConstraintKind` values are handled by a registry inside the solver skeleton.
-- All soft constraints (regardless of kind) are handled by the registry as penalty terms in the objective.
-- If there are no hard `custom_dsl` constraints in the current run, the Coder returns the literal string `"pass"` and an empty coverage list.
+## Core Function — `runCoderTurn`
 
-This design keeps the untrusted LLM output small, auditable, and limited to the truly novel cases that the built-in system was not designed to express.
-
-## Location and entry point
-
-- Implementation: `src/features/timetable/ai/coder.ts`
-- Exported function: `runCoderTurn(config, payload, invokeChat?)`
-- Prompt: `prompts/coder.system.md`
-- Skeleton injection logic: `src/features/timetable/ai/skeleton-injector.ts` (`injectConstraintCode`)
-
-## Input
+Signature (simplified):
 
 ```ts
-{
-  dataset: {
-    classes: string[];
-    days: string[];
-    periods: number[];
-    assignments: Array<{ id, class, subject, teacher, weeklyPeriods }>;
-    constraints: ConstraintSpec[];
-    datasetDigest: { ... };
-  };
-  plan: Plan;
-  previousAttemptSummary?: string;
-}
+async function runCoderTurn(
+  config: AIProviderConfig,
+  payload: {
+    dataset: { ...compressed dataset with constraints... };
+    plan: Plan;
+    previousAttemptSummary?: string;
+  },
+  invokeChat?: ChatInvoke
+): Promise<CoderTurnResult>
 ```
 
-The Coder receives the full dataset (so it can refer to concrete teacher/class/subject names) and the `Plan` from the previous stage (for context on variable modeling and ordering). `previousAttemptSummary` carries error context from the last failed attempt (compile error, runtime failure, or validation violations).
+Behavior:
+- Early exit with a no-op result (`constraint_code: 'pass'`, empty coverage) when there are no hard `custom_dsl` constraints.
+- Loads the system prompt via `fetch('/prompts/coder.system.md')` (falls back to a minimal string on failure).
+- Builds a single user message containing `datasetDigest`, `assignments`, the hard custom constraints, the `plan`, and `previousAttemptSummary`.
+- Calls the chat proxy with `temperature: 0.1`, `max_tokens: 30000`, and a strict `json_schema` for the expected shape.
+- Parses the response with `parseModelJson` + Zod (`coderResponseSchema`).
+- Runs `ensureCoverage(...)` which:
+  - Collects all hard custom ids that must be covered.
+  - For any hard custom id missing from `covered_constraint_ids`, performs a word-boundary regex search in the emitted `constraint_code`.
+  - If the reference is present, auto-adds it to coverage with an `auto_added_coverage:<id>` assumption.
+  - If a hard custom id has no reference at all, throws — the turn fails and triggers a retry.
+- Returns `{ plan_summary, constraint_code, covered_constraint_ids, assumptions, rawResponse?, usageTokens? }`.
 
-## Output
+The returned `constraint_code` is **only the body** that replaces the `# <<< AI_FILL_HERE >>>` marker; it is never a full function or module.
 
-`CoderTurnResult`:
+## Prompt Contract (prompts/coder.system.md, v3.2.0)
 
-```ts
-{
-  plan_summary: string;
-  constraint_code: string;           // the fragment to inject
-  covered_constraint_ids: string[];  // which hard custom_dsl ids this code addresses
-  assumptions: string[];
-  rawResponse?: string;
-  usageTokens?: number;
-}
-```
+The prompt (in Vietnamese + English) is the authoritative behavioral spec. Key rules the model must obey:
 
-The `constraint_code` is **not** a complete Python file. It is a body fragment that will be inserted after the marker `# <<< AI_FILL_HERE >>>` inside the function `build_custom_constraints` in the solver skeleton.
+- **Scope**: Only emit code for `kind == "custom_dsl" && severity == "hard"`. Ignore everything else (built-ins, softs, room constraints that were already dropped by Translator).
+- **Injection site**: The skeleton already extracts `custom_specs = [s for s in constraints if ... custom_dsl and hard]`. The generated code runs **once** after that extraction (outside any per-spec `elif`). The coder must therefore write its own `for spec in custom_specs:` loop.
+- **Data access**: Only `params["naturalLanguage"]` per spec. Never assume variables from outer scope.
+- **Environment**: Use existing `slots[(a["id"], d, p)]`, `model`, `assignments`, `days`, `periods`, `_periods_for(d)`. No imports, no `print`, no file I/O, no new model/slot creation.
+- **Failure**: `raise NotImplementedError(spec["id"])` if a constraint cannot be expressed.
+- **Semantics — Rule A for subject_consecutive**: The built-in already implements the correct floor-division behavior. The coder must **never** emit code that changes this (no forcing every period into a block, no error on remainders).
+- **Output contract** (exact JSON keys):
+  ```json
+  {
+    "plan_summary": string,
+    "constraint_code": string,
+    "covered_constraint_ids": string[],
+    "assumptions": string[]
+  }
+  ```
+- **Self-check** before submit (listed in the prompt): coverage of all listed kinds, hard ids present in `covered_...`, no banned constructs, variable naming matches Translator labels, etc.
 
-## The injection contract
+The prompt file is the source of truth; changes to it are first-class behavioral changes and must be validated with `npm run test:prompt`.
 
-Inside `python/templates/solver_skeleton.py` (and its public copy), the skeleton already contains:
+## Skeleton Injection & Static Safety Gates
 
-```python
-custom_specs = [
-    s for s in constraints
-    if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"
-]
-# <<< AI_FILL_HERE >>>
-pass
-```
+After a successful Coder turn, `runLocalAgent` performs the following in order (`skeleton-injector.ts`):
 
-The Coder's `constraint_code` replaces the `pass` (and the marker comment). The generated code runs **once** for the entire list of hard `custom_dsl` specs.
+1. `loadSolverSkeleton()` — prefers `fetch('/templates/solver_skeleton.py')`; falls back to the dedicated API route. Both `python/templates/solver_skeleton.py` and `public/templates/solver_skeleton.py` are kept in sync at build time.
+2. `injectConstraintCode(skeleton, constraintCode)` — locates the exact marker line `# <<< AI_FILL_HERE >>>` (with surrounding whitespace tolerance), normalizes incoming indentation, strips the coder's common leading indent while preserving relative nesting, and splices the snippet in place. Returns `{ solverCode, injected }`. Failure to find the marker is fatal.
+3. `syntaxCheckPython(fullSolverCode)` — POSTs to `/api/ai/python-syntax-check`; the server runs `py_compile`. Any error aborts the attempt and feeds the digest back as `previousAttemptSummary` for the next retry.
+4. `astCheckPython(constraintCodeOnly)` — only executed when hard `custom_dsl` constraints exist and the coder actually emitted code. POSTs to `/api/ai/python-ast-check`. Rejects obviously dangerous or malformed fragments before any execution.
 
-Therefore the Coder **must** write its own loop:
+These gates run **before** the solver ever reaches the Python host. The Python side (`python/code_executor.py`) still performs its own `py_compile` as a final belt-and-suspenders check.
 
-```python
-for spec in custom_specs:
-    params = spec.get("params", {})
-    # ... handle this spec using params["naturalLanguage"] or other fields
-```
+## Integration Inside the Local Agent
 
-It must **not** assume that variables `spec`, `kind`, or `params` are already in scope from the built-in registry loop.
+In `src/features/timetable/ai/local-agent.ts`:
 
-## Coverage enforcement (`ensureCoverage`)
+- Constant: `const MAX_CODER_RETRIES = 3;`
+- The Coder stage lives inside a nested `while (coderRetry < MAX_CODER_RETRIES)` loop.
+- On every iteration:
+  - Emits `phase: 'coding'`, `stage_started: 'coder'`.
+  - Optionally uses the stage cache (10 min TTL) when there is no `previousAttemptSummary`.
+  - Calls `runCoderTurn` (model may be overridden via `config.modelCoder`).
+  - Injects + runs the two static checks.
+  - Executes via `executeGeneratedCode` (see Python Execution system).
+  - Runs deterministic validation + CP-SAT round-trip.
+  - On any failure (syntax, AST, exec, hard violations after execution) the loop either retries (up to the limit) or hands control to the Repair stage.
+- Repair patches (from `runRepairTurn`) are applied atomically via `applyRepairPatches` **before** the next Coder attempt; a failed patch application itself counts as a retry.
+- `previousAttemptSummary` (digest of the last error/violation) is threaded into the next Coder call so the model sees prior failure context.
+- All turns consume the `TokenBudgetGuard`; tool-call counter is incremented.
+- On clean success (base pass + no hard violations + round-trip ok + full hard coverage) the agent exits with a `LocalAgentFinalResult`.
 
-After the model returns, `ensureCoverage` performs a critical safety check:
+The outer repair budgets (`MAX_RUNTIME_REPAIR_ROUNDS = 1`, `MAX_VIOLATION_REPAIR_ROUNDS = 2`) plus `MAX_TOTAL_TOOL_CALLS = 15` and the 80 k token cap bound the total work even if the inner Coder loop keeps failing.
 
-1. It identifies all hard `custom_dsl` specs that were sent to the Coder.
-2. For each such id, it verifies that the generated `constraint_code` actually contains a reference to that id (using a word-boundary regex, not a naive substring search — this avoids false positives where `c1` matches inside `c10`, `c12`, etc.).
-3. If a hard custom constraint id is **not** referenced in the generated code, the function throws:
+## Safety & Coverage Model
 
-   > `Coder failed to cover hard custom_dsl constraint ${id}: no code reference`
+- Hard-only: soft `custom_dsl` and all non-custom kinds are deliberately excluded from the prompt and from coverage requirements.
+- `ensureCoverage` + word-boundary regex guarantees that every hard custom id either appears in the returned `covered_constraint_ids` or has an unmistakable textual reference in the generated code.
+- The skeleton's own `custom_specs` filter + the single execution of the injected block (outside the built-in `for spec in constraints`) prevents double-counting or accidental shadowing.
+- No generated code can escape the skeleton's variable and model context.
+- All execution is forced through the hardened Python host (never direct on the renderer or Next.js server).
 
-4. This error is caught by the orchestrator in `local-agent.ts`, which treats it as a Coder failure, increments the retry counter, and (on the next attempt) includes the error in `previousAttemptSummary`.
+## Key Source Files
 
-This guard prevents the agent from silently ignoring a hard custom constraint that the user explicitly marked as mandatory.
+| Repository-root path                                      | Role |
+|-----------------------------------------------------------|------|
+| `src/features/timetable/ai/coder.ts`                      | `runCoderTurn`, response schema, `ensureCoverage` enforcement |
+| `prompts/coder.system.md`                                 | Authoritative prompt (v3.2.0) — source of truth for allowed constructs and Rule A |
+| `src/features/timetable/ai/skeleton-injector.ts`          | `loadSolverSkeleton`, `injectConstraintCode`, `syntaxCheckPython`, `astCheckPython` |
+| `python/templates/solver_skeleton.py`                     | Authoritative CP-SAT template (build syncs to `public/templates/`) |
+| `public/templates/solver_skeleton.py`                     | Served to browser for injection |
+| `src/features/timetable/ai/local-agent.ts`                | Orchestration, `MAX_CODER_RETRIES`, retry/repair loops, event emission, caching |
+| `src/features/timetable/ai/types.ts`                      | `CoderTurnResult` and related types |
 
-## The built-in registry (what the Coder must NOT do)
+## Cross-references
 
-The solver skeleton contains a large `if/elif` registry that already implements checkers and CP-SAT constraints for every built-in `ConstraintKind`. The Coder prompt explicitly lists many of them and states:
+- Full pipeline context and Mermaid: [AI Pipeline index](systems/ai-pipeline/index.md)
+- Python sandbox host, daemon, and execution contract: [Python Execution](systems/python-execution.md)
+- Repair stage that feeds patches back into Coder: [Repair](systems/ai-pipeline/repair.md)
+- Planner output consumed by Coder: [Planner](systems/ai-pipeline/planner.md)
+- Deterministic validation that consumes the produced schedule: [Validator](systems/ai-pipeline/validator.md)
 
-> Bạn KHÔNG viết code cho các kind trên.
-
-Similarly:
-
-> MỌI constraint có `severity != "hard"` đều do built-in registry tự xử lý dưới dạng penalty + objective.
-
-The Coder is only allowed to emit code for hard `custom_dsl`. Any attempt to emit code for a built-in kind or a soft constraint is considered incorrect behavior (the prompt and the `ensureCoverage` logic both discourage it).
-
-## LLM call details
-
-- Temperature is low (`0.1`) to encourage precise, mechanical code rather than creative solutions.
-- `cache_control` is enabled (Anthropic prompt caching).
-- Max tokens is generous (30,000) because custom constraint code can be long.
-- The response is forced through a JSON schema (`coderResponseSchema`) requiring `plan_summary`, `constraint_code`, `covered_constraint_ids`, and `assumptions`.
-
-## Integration with the orchestrator
-
-In `local-agent.ts`, the Coder is invoked inside a retry loop (`while (coderRetry < MAX_CODER_RETRIES)`):
-
-1. On the first attempt, `previousAttemptSummary` is empty.
-2. If execution fails (syntax error, AST rejection, compile failure, runtime crash, or validation violations), the orchestrator calls the Repair stage (or directly feeds the error back).
-3. On the next Coder attempt, `previousAttemptSummary` contains a digested version of the failure.
-4. After the Coder returns, the orchestrator:
-   - Applies any pending repair patches from a previous Repair turn.
-   - Injects the (possibly patched) code into the skeleton via `injectConstraintCode`.
-   - Runs syntax check (`syntaxCheckPython`).
-   - If hard custom constraints exist, runs AST check (`astCheckPython`).
-   - Proceeds to execution.
-
-## Assumptions and plan_summary
-
-The `assumptions` array and `plan_summary` are primarily for diagnostics and for feeding context back to the Repair stage on the next round. They are stored in the `WorkspaceBoard` attempt history.
-
-## Testing
-
-- `src/features/timetable/ai/coder.test.ts` covers the response parsing and `ensureCoverage` logic (especially the word-boundary regex fix for ids like `c1` vs `c10`).
-- Prompt behavior is validated by `npm run test:prompt`.
-- End-to-end custom constraint scenarios are exercised in `local-agent.test.ts`.
-
-## Related pages
-
-- [AI Pipeline index](index.md)
-- [Planner](planner.md) — the provider of the `Plan` the Coder receives
-- [Repair](repair.md) — the consumer of Coder output when repair is needed
-- [Skeleton Injector](../skeleton-injector.md) (if a dedicated page is later created)
-- [Coder prompt](../../../../prompts/coder.system.md) — the detailed instructions and rules given to the model
-- [Solver skeleton](../../../../python/templates/solver_skeleton.py) — the audited template the Coder completes
-
-## Where to start if you need to change Coder behavior
-
-1. Run `gitnexus_impact` on `runCoderTurn` and `ensureCoverage`.
-2. If you are relaxing or tightening the allowed scope (e.g., allowing the Coder to emit soft custom constraints or certain built-in overrides), you must:
-   - Update the prompt (`prompts/coder.system.md`)
-   - Update `isAiCodedSpec` and the filtering logic in `runCoderTurn`
-   - Update `ensureCoverage` if the coverage rules change
-   - Update the skeleton registry or the injection site if the contract changes
-3. Any change here has a very large blast radius (it directly affects what untrusted code can be generated and executed). Treat it as a security-sensitive modification.
+This page documents the Coder stage as it exists after the constraint-registry and persistent-daemon changes. Implementation details live in the listed source files; the prompt is the behavioral contract.

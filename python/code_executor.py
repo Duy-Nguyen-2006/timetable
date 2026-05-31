@@ -284,19 +284,26 @@ def daemon() -> None:
         timeout = int(job.get("timeoutSeconds", TIMEOUT_SECONDS))
         job_dir = job.get("jobDir") or None
         solver_workers = job.get("solverWorkers")
-        if solver_workers is not None:
-            _os_mod.environ["SOLVER_WORKERS"] = str(int(solver_workers))
         if not code.strip():
             print(json.dumps({"phase": "parse", "ok": False, "status": "crashed",
                               "durationMs": 0, "errorDigest": "No code in job.",
                               "stdout": "", "stderr": ""}, ensure_ascii=False), flush=True)
             continue
 
+        prev_solver_workers = _os_mod.environ.get("SOLVER_WORKERS")
+        if solver_workers is not None:
+            _os_mod.environ["SOLVER_WORKERS"] = str(int(solver_workers))
         try:
             result = run_user_code(code, timeout, job_dir)
         except Exception:
             result = {"phase": "run", "ok": False, "status": "crashed", "durationMs": 0,
                       "errorDigest": _digest_error(traceback.format_exc()), "stdout": "", "stderr": ""}
+        finally:
+            if solver_workers is not None:
+                if prev_solver_workers is None:
+                    _os_mod.environ.pop("SOLVER_WORKERS", None)
+                else:
+                    _os_mod.environ["SOLVER_WORKERS"] = prev_solver_workers
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
 

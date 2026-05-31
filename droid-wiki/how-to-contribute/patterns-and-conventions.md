@@ -2,155 +2,155 @@
 
 Active contributors: Duy
 
-This page documents the cross-cutting coding patterns and project conventions that every contributor must follow. These rules exist because the system combines a prompt-driven AI agent with untrusted code generation and strict safety requirements.
+This page documents the cross-cutting coding patterns, architectural rules, and team conventions that govern work in the Tack Timetable repository. Many of these rules exist to keep the AI agent pipeline safe, observable, and maintainable.
 
 ## Mandatory impact analysis before every edit
 
-**This is the single most important rule in the project.**
+**Rule (enforced in `AGENTS.md` and `CLAUDE.md`):**
 
-Before you modify any function, class, method, or symbol:
+> Before modifying any function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` (or equivalent `gitnexus_context`) and report the blast radius (direct callers, affected processes, risk level) to the user.
 
-1. Run `gitnexus_impact({ target: "symbolName", direction: "upstream" })` (or the downstream variant if you are analyzing callers).
-2. Review the blast radius: direct callers, affected execution flows, and the risk level returned by GitNexus.
-3. Report the findings (especially if risk is HIGH or CRITICAL) before proceeding with the edit.
+**Additional requirements:**
 
-This rule is stated in `AGENTS.md`, `CLAUDE.md`, and the GitNexus sections embedded in both files. It is not optional.
+- `gitnexus_detect_changes()` must be run before every commit to verify that only expected symbols and execution flows were touched.
+- If impact analysis returns HIGH or CRITICAL risk, the user must be warned before proceeding.
+- Renames must use `gitnexus_rename` — never blind find-and-replace.
+- When exploring unfamiliar code, prefer `gitnexus_query({query: "concept"})` over raw grepping; it returns process-grouped results ranked by relevance.
 
-**Never edit a symbol without first running impact analysis.**  
-**Never ignore HIGH or CRITICAL risk warnings.**
+**Why this rule exists**
 
-For renames, extracts, splits, or refactors, use `gitnexus_rename`. Do not perform manual find-and-replace across the codebase.
+The codebase is heavily interconnected (2482 symbols, 3493 relationships, 69 execution flows at last GitNexus index). A seemingly small change in the validator or translator can affect the entire agent loop, the UI progress display, the repair strategy, and downstream Python checkers. The impact tool makes the call graph explicit.
 
-Before committing, always run `gitnexus_detect_changes()` to verify that your changes only affect the symbols and flows you intended.
+**Resources**
 
-When exploring unfamiliar code, prefer `gitnexus_query({ query: "concept" })` over raw grepping. It returns results grouped by execution flow and ranked by relevance.
+- `gitnexus://repo/timetable/context` — codebase overview
+- `gitnexus://repo/timetable/processes` — all execution flows
+- `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` — how to run and interpret impact analysis
 
-## Bounded agent loops with typed events
+## Bounded, observable agent loops
 
-The Local Agent (`runLocalAgent` in `src/features/timetable/ai/local-agent.ts`) is deliberately bounded. Hard limits prevent runaway token usage, infinite repair loops, or excessive tool calls:
+The Local Agent (`runLocalAgent` in `src/features/timetable/ai/local-agent.ts`) is deliberately constrained:
 
-```ts
-const MAX_CODER_RETRIES = 3;
-const MAX_RUNTIME_REPAIR_ROUNDS = 1;
-const MAX_VIOLATION_REPAIR_ROUNDS = 2;
-const MAX_TOTAL_TOOL_CALLS = 15;
-const TOKEN_CAP_PER_RUN = 80_000;
-```
+| Limit                        | Value | Rationale |
+|-----------------------------|-------|-----------|
+| `MAX_CODER_RETRIES`         | 3     | Prevent infinite repair loops |
+| `MAX_RUNTIME_REPAIR_ROUNDS` | 1     | One chance to fix compile/runtime errors |
+| `MAX_VIOLATION_REPAIR_ROUNDS`| 2    | Two chances to fix hard constraint violations |
+| `MAX_TOTAL_TOOL_CALLS`      | 15    | Hard global cap on LLM invocations |
+| `TOKEN_CAP_PER_RUN`         | 80 k  | Protect against runaway token usage |
 
-Every significant action inside the agent emits a typed event through the `onEvent` callback supplied in `LocalAgentConfig`. The event types are defined in `src/features/timetable/ai/types.ts` (`AgentEvent` union) and include:
+Every stage emits typed events (`stage_started`, `stage_completed`, `violations_found`, `execution_result`, etc.) via the `onEvent` callback. The UI renders these as a live progress list. The orchestrator also maintains a `StageCache` (10-minute TTL) to avoid repeating identical LLM calls inside one run.
 
-- `status`, `phase`
-- `stage_started`, `stage_completed`
-- `violations_found`
-- `execution_result`
-- `final_result`
-- `error`
+**Pattern:** when adding a new stage or changing retry policy, update both the constants and the event emission sites so the UI and tests remain consistent.
 
-The UI (primarily `TimetableApp.tsx`) consumes these events to render the live progress panel with phases such as `thinking`, `translator`, `planner`, `coding`, `running`, `checking`, `fixing`, and `idle`.
+## Security-first execution (non-negotiable)
 
-When adding new stages, retries, or repair logic, you must:
-- Respect the existing bounds (or explicitly justify raising them with impact analysis).
-- Emit the appropriate typed events so the UI and diagnostics remain consistent.
-- Update the attempt history recorded in `WorkspaceBoard`.
+**Core invariant:**
 
-## Security-first execution (sandbox is mandatory)
+> LLM-generated Python is **never** executed directly on the host machine.
 
-**No code written by an LLM is ever executed with the privileges of the user who launched the app.**
+Enforcement points:
 
-This is the foundational security invariant. It is enforced at three points:
+1. `python-bridge.ts` — refuses to run code locally; always routes through IPC (Electron) or the server route `/api/ai/python-execute`.
+2. `python/code_executor.py` — always calls `sandbox.run.run_sandboxed(...)`.
+3. `sandbox/run.py` — dispatches to Docker, bubblewrap, or (only with explicit unsafe flag) raw subprocess.
 
-1. The Coder stage only ever produces a fragment that is injected into the audited solver skeleton (`python/templates/solver_skeleton.py`).
-2. The combined file is syntax-checked (and optionally AST-checked for `custom_dsl`), then passed to `python/code_executor.py`.
-3. `code_executor.py` always delegates execution to a sandbox (`sandbox/executor.py` for Docker or `sandbox/bubblewrap_executor.py`).
+**Sandbox modes** (controlled by `TT_SANDBOX_MODE` or auto-detect):
 
-The production recommendation is `TT_SANDBOX_MODE=docker` (or `bwrap` on Linux servers). The `strict=True` path in the sandbox helpers must not be bypassed in production code.
+- `docker` — strongest isolation (network none, read-only root, limited CPU/RAM, non-root user).
+- `bwrap` — lightweight Linux namespace + seccomp sandbox (fast startup).
+- `none` — raw execution; gated behind `TT_SANDBOX_ALLOW_UNSAFE=1` and intended only for local development.
 
-Even in development, the default behavior refuses to run outside a sandbox unless explicit unsafe environment variables are set (documented in `sandbox/README.md`).
+See `sandbox/README.md` and the [Python Execution System](../systems/python-execution.md) page for details.
 
-When modifying anything in the execution path (`python-bridge.ts`, `code_executor.py`, the sandbox executors, or the Electron IPC handler), treat the change as security-sensitive and run impact analysis on all call sites.
+When modifying execution paths, always preserve the invariant that untrusted code goes through the dispatcher.
 
 ## Prompt-driven behavior (prompts are source of truth)
 
-The four Markdown files in `prompts/` define the actual behavior of the Translator, Planner, Coder, and Repair stages:
+The four files in `prompts/` define the AI's reasoning strategy:
 
-- `prompts/translator.system.md`
-- `prompts/planner.system.md`
-- `prompts/coder.system.md`
-- `prompts/repair.system.md`
+- `translator.system.md`
+- `planner.system.md`
+- `coder.system.md`
+- `repair.system.md`
 
-These files are the **source of truth**. Before every `dev`, `build`, or `test` run, `scripts/sync_prompts.mjs` (invoked via `predev`/`prebuild`/`pretest`) copies them into `public/prompts/` so the browser and server routes can serve the current versions.
+These are **not** documentation — they are executable behavior. Before every `dev`, `build`, `test`, and `pretest`, the project runs `npm run sync:prompts` to copy them into `public/prompts/`. The server-side LLM proxy reads from the public copy.
 
-Changing a prompt is a first-class behavioral change. It requires the same review rigor as changing TypeScript or Python code:
-- Run impact analysis on the stages that consume the prompt.
-- Update or add tests (especially `npm run test:prompt`).
-- Document the intent of the change in the commit message and, when relevant, in the wiki.
+**Conventions:**
 
-Do not edit the copies under `public/prompts/` directly; they will be overwritten by the sync script.
+- Changing a prompt is a first-class behavioral change. Run `npm run test:prompt` (which validates that the prompts still produce valid structured JSON for the current model set).
+- Prompt changes should be accompanied by updates to the corresponding TypeScript types (`ConstraintSpec`, `Plan`, etc.) and deterministic checkers when the output contract changes.
+- Never hard-code model-specific reasoning tricks in TypeScript; put them in the prompt so they can be iterated without code changes.
 
 ## Pragmatic TypeScript at the language boundary
 
-The project enables `strict: true` in `tsconfig.json`, but `eslint.config.mjs` deliberately disables a long list of rules:
+The ESLint configuration (`eslint.config.mjs`) intentionally disables a long list of strict rules:
 
 - `@typescript-eslint/no-explicit-any`
 - `@typescript-eslint/no-unused-vars`
-- `react-hooks/exhaustive-deps`
-- Many others (see the full list in the config)
+- `no-console`, `no-debugger`, `no-empty`, etc.
 
-**Guideline**: Avoid `any` except where code must cross the TypeScript ↔ Python JSON boundary (the `python-bridge.ts` layer, the routes that speak to the executor, and the places that parse `result.json` or construct `input.json`).
+**Rationale:** the codebase frequently crosses the TypeScript ↔ Python JSON boundary. Objects returned from `code_executor.py` (or from LLM JSON parsing) are structurally dynamic. The guideline is:
 
-The relaxation exists because the agent frequently serializes complex nested objects (ConstraintSpec with arbitrary params, Plan objects, ScheduleEntry arrays, etc.) into JSON that the Python side consumes, and vice versa. Insisting on perfect types at every boundary would make the code significantly harder to maintain without adding meaningful safety.
+> Avoid `any` and loose typing everywhere **except** at the Python bridge and immediate deserialization sites.
 
-When you do use `any` or disable a rule locally, add a short comment explaining why (e.g., "Python JSON boundary — see python-bridge.ts").
+When adding new interop code, keep the loose typing localized (ideally in `python-bridge.ts`, `parse-model-json.ts`, or the immediate callers) and restore strict typing as soon as the data has been validated against a known schema.
 
-## Deterministic validation after every solver run (never trust the solver alone)
+## Deterministic validation after every solver run
 
-After every call to `executeGeneratedCode`, the agent **always** runs:
+The agent **never** trusts solver output on faith.
 
-1. `validateSchedule(...)` (TypeScript deterministic checkers for all 46 constraint kinds).
-2. `verifyCpSatRoundTrip(...)` (reconstructs the assignment slots from the returned schedule and verifies consistency with the input).
-3. Merges any `customChecks` results returned by the sandbox (for `custom_dsl` hard constraints).
+After every execution the orchestrator runs:
 
-Only if all hard constraints pass and the round-trip succeeds does the agent consider the result viable. Hard violations or round-trip failures trigger the Repair stage (bounded).
+1. TypeScript-side `validateSchedule` (hard + soft constraint checkers mirrored from Python).
+2. CP-SAT round-trip check (`cp-sat-roundtrip.ts`): re-encode the produced schedule as a forced solution and ask the solver whether it is still feasible.
+3. Python-side checkers in `validator_engine.py` for all 46 `ConstraintKind` values.
 
-This rule exists because OR-Tools (and any solver) can return solutions that satisfy the encoded model but violate the original intent, especially when the Coder has made subtle mistakes in constraint formulation. The deterministic validators are the ground truth.
+Only when `hardConstraintPass && roundTripOk` (or after repair budget is exhausted) does the agent surface a result to the UI.
 
-When adding a new constraint kind, you must implement the checker in both:
-- `python/validator_engine.py`
-- `src/features/timetable/ai/deterministic-validator.ts`
+**Pattern:** when adding a new constraint kind, implement the checker in both `python/validator_engine.py` **and** `src/features/timetable/ai/deterministic-validator.ts` (or the shared registry) so the two sides stay in sync.
 
-and ensure the Translator and fallback parser can produce the new kind.
+## No feature flags — runtime UI configuration instead
 
-## No feature flags (runtime configuration instead)
+The project does not use traditional feature flags or config files for behavioral toggles.
 
-Tack Timetable does not use traditional compile-time or runtime feature flags for product capabilities.
+- Provider selection, per-stage models, and solver profile (`fast` / `balanced` / `deep`) are chosen by the user at runtime in `SettingsModal.tsx`.
+- Timeouts and worker counts are derived from the chosen solver profile plus explicit overrides in the config object.
+- Sandbox mode is controlled by the `TT_SANDBOX_MODE` environment variable (with safe auto-detect defaults).
 
-Provider selection, model choice per stage (Translator/Planner/Coder/Repair), timeouts, and sandbox mode are all configured at runtime through the Settings modal in the UI. These values live in component state or are passed explicitly into `LocalAgentConfig`; they are not persisted to disk by the application itself.
+When adding a new behavioral option, prefer exposing it through the Settings UI (with sensible defaults) rather than a new environment variable or feature flag.
 
-CI uses a few environment-based skip variables (e.g., `SKIP_PROVIDER_SMOKE`), but these are test and release engineering controls, not user-facing feature toggles.
+## Harness operating rules (AGENTS.md + docs/)
 
-If you need to introduce conditional behavior, prefer:
-- Runtime configuration surfaced in the UI (when it is a user choice), or
-- Environment variables clearly documented for operators/CI (when it is an infrastructure concern).
+Before any implementation work:
 
-Avoid adding ad-hoc boolean flags or commented-out code paths.
+1. Classify the request using `docs/FEATURE_INTAKE.md` (tiny / normal / high-risk).
+2. Record the classification with `scripts/bin/harness-cli intake`.
+3. Read the relevant product docs, stories, and decisions.
+4. Check proof status with `scripts/bin/harness-cli query matrix`.
+5. Work only inside the selected lane.
+6. Before finishing, ask whether product truth, validation expectations, or harness friction changed.
+7. Record a trace with `scripts/bin/harness-cli trace` (following `docs/TRACE_SPEC.md` tier requirements).
+8. Run `scripts/bin/harness-cli score-trace` when available.
+9. Record any harness friction with `scripts/bin/harness-cli backlog add`.
 
-## Additional conventions
+The durable layer (SQLite + Rust CLI) is the source of truth for operational state. Markdown docs describe policy; the database stores what actually happened.
 
-- **File references in documentation and comments**: Always use the full path from the repository root inside backticks (e.g., `src/features/timetable/ai/local-agent.ts`, not just `local-agent.ts`). This enables clickable links in the rendered wiki and in many editors.
-- **Testing split**: TypeScript tests use Node's built-in test runner via `tsx --test`. Python tests use pytest. Prompt behavior validation (`npm run test:prompt`) is a required check when prompts or the stages that consume them change.
-- **Commit hygiene**: Run `npm run lint`, `npm test`, and `npm run test:prompt` before committing. Use `gitnexus_detect_changes()` to confirm scope. Never commit secrets (`.env*` files, API keys, etc.).
-- **Scope discipline**: Only change what the task requires. The project guidelines explicitly forbid broad unsolicited refactors.
+## Testing split and expectations
 
-## Where these patterns appear in the code
+- TypeScript: Node built-in test runner via `tsx --test "src/**/*.test.ts"`.
+- Python: pytest in `python/tests/`.
+- Prompt behavior: `npm run test:prompt` (validates JSON contract for the four prompts).
+- Provider smoke (optional): `npm run provider:smoke` (requires key in CI).
+- Dataset API tests: exercised in CI when `LOWPRIZO_API_KEY` is present.
 
-| Pattern | Primary locations |
-|---------|-------------------|
-| Impact analysis + GitNexus rules | `AGENTS.md`, `CLAUDE.md`, and the embedded GitNexus blocks |
-| Bounded loops + typed events | `src/features/timetable/ai/local-agent.ts` (constants, `emit`, `runLocalAgent`), `src/features/timetable/ai/types.ts` (`AgentEvent`) |
-| Sandbox enforcement | `python/code_executor.py`, `sandbox/executor.py`, `sandbox/bubblewrap_executor.py`, `src/features/timetable/ai/python-bridge.ts`, `electron/main.mjs` |
-| Prompt source of truth | `prompts/*.md` + `scripts/sync_prompts.mjs` + `package.json` (pre* scripts) |
-| Pragmatic TypeScript | `tsconfig.json` (strict), `eslint.config.mjs` (relaxed rules), comments at JSON boundaries |
-| Deterministic validation after every run | `src/features/timetable/ai/local-agent.ts` (post-execution block), `src/features/timetable/ai/deterministic-validator.ts`, `python/validator_engine.py` |
-| No feature flags | Absence of flag files/variables; all configurability flows through `SettingsModal.tsx` and `LocalAgentConfig` |
+When adding a new constraint kind or agent stage, add both unit tests (for the pure logic) and an integration test that exercises the full `runLocalAgent` path with a minimal payload.
 
-Follow these patterns consistently. They are what allow the team to evolve a complex, safety-critical AI agent system without losing control of scope, security, or correctness.
+## Commit and PR hygiene
+
+- Never commit real secrets (`.env*` files are ignored).
+- Run `npm run lint`, `npm test`, and `npm run test:prompt` before opening a PR.
+- Use the GitNexus tools to confirm scope before and after changes.
+- PR description should state what changed, what was not attempted, and any harness friction discovered.
+
+These patterns exist to keep the AI pipeline trustworthy, the harness observable, and the contributor workflow safe even when the underlying code is complex and highly interconnected.

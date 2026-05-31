@@ -1,7 +1,6 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import {
   ArrowLeft,
   BookOpen,
@@ -13,14 +12,11 @@ import {
   Download,
   Hash,
   Loader2,
-  Minus,
   Plus,
-  RadioTower,
   RotateCcw,
   AlertTriangle,
   ClipboardList,
   Sparkles,
-  Sun,
   Trash2,
   User,
 } from 'lucide-react'
@@ -31,23 +27,37 @@ import { runLocalAgent } from './ai/local-agent'
 import { SettingsModal } from './SettingsModal'
 import type {
   AIProviderConfig,
-  AgentInputPayload,
   AgentLifecycleEvent,
-  AgentLifecyclePhase,
-  LocalAgentFinalResult,
 } from './ai/types'
-import type { DeterministicValidationReport } from './ai/constraint-spec'
 import { Settings as SettingsIcon } from 'lucide-react'
-
-type TimetableSolveResult = LocalAgentFinalResult
-type SolverRequestPayload = Pick<AgentInputPayload, 'constraints'>
-type AgentProgressStep = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'
-type CachedRun = {
-  id: string
-  createdAt: string
-  inputDigest: string
-  result: TimetableSolveResult
-}
+import type {
+  AgentProgressStep,
+  AssignmentItem,
+  BulkAssignmentError,
+  ConstraintItem,
+  SolverRequestPayload,
+  TimetableAppProps,
+  TimetableSolveResult,
+} from './types'
+import {
+  NO_ACTIVE_PERIOD_MESSAGE,
+  RESULT_NOT_FOUND_MESSAGE,
+  SOLVER_STATUS_LABELS,
+  STEP_LABELS,
+  STEP_ORDER,
+  buildReportRows,
+  toProgressStep,
+} from './solver-ui'
+import { MetricCard, SelectField } from './components/TimetableFields'
+import { SelectPage, PeriodsPage } from './components/SetupPages'
+import { PreviewPage } from './components/PreviewPage'
+import {
+  AI_PROVIDER_STORAGE_KEY,
+  decodeProviderConfig,
+  encodeProviderConfig,
+  readCachedRuns,
+  writeCachedRun,
+} from './cache'
 import {
   classPresetGroups,
   constraintTypeList,
@@ -72,308 +82,12 @@ import {
 import { getCellKey, makeAssignmentKey, normalizeSubjectName, sortAlphabetically } from './utils'
 import { normalizeAssignments } from './utils'
 import { parseQuickImportText } from './quick-import'
-
-const RESULT_NOT_FOUND_MESSAGE = 'Couldnt Find the Solution'
-const NO_ACTIVE_PERIOD_MESSAGE = 'Không còn ô tiết nào để xếp lịch. Vui lòng khôi phục ít nhất một ô tiết ở trang xem trước.'
-const MAX_CACHED_RUNS = 3
-const SOLVER_STATUS_LABELS: Record<string, string> = {
-  optimal: 'Tối ưu',
-  feasible: 'Khả thi',
-  timeout_with_solution: 'Hết giờ có lịch',
-}
-
-const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
-const STEP_LABELS: Record<AgentProgressStep, string> = {
-  thinking: 'Suy nghi',
-  coding: 'Viet code',
-  running: 'Chay thu',
-  checking: 'Kiem tra',
-  fixing: 'Sua loi',
-  idle: 'Idle',
-}
-
-function toProgressStep(phase: AgentLifecyclePhase): AgentProgressStep {
-  switch (phase) {
-    case 'coding':
-    case 'running':
-    case 'checking':
-    case 'fixing':
-      return phase
-    case 'translator':
-    case 'planner':
-    case 'thinking':
-      return 'thinking'
-    case 'idle':
-      return 'idle'
-    default:
-      return 'thinking'
-  }
-}
-
-function buildReportRows(
-  title: string,
-  report: DeterministicValidationReport | null | undefined,
-): string[][] {
-  if (!report) return [[title, 'Không có dữ liệu']]
-
-  const rows: string[][] = [
-    [title, ''],
-    ['Base constraint pass', report.baseConstraintPass ? 'Yes' : 'No'],
-    ['Hard constraint pass', report.hardConstraintPass ? 'Yes' : 'No'],
-    ['Soft constraint pass', report.softConstraintPass ? 'Yes' : 'No'],
-    ['Unchecked constraints', report.uncheckedConstraintIds?.join(' | ') || 'None'],
-  ]
-
-  rows.push([])
-  rows.push(['constraintId', 'kind', 'message', 'offending entries'])
-  report.violations.forEach((check) => {
-    rows.push([
-      check.constraintId,
-      check.kind,
-      check.message,
-      String(check.offendingEntries?.length ?? 0),
-    ])
-  })
-
-  return rows
-}
-
-function MetricCard({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className={`${panelMutedClass} p-3`}>
-      <p className="text-[10px] uppercase tracking-widest text-white/35">{label}</p>
-      <div className="mt-1 text-sm text-white/70">{value}</div>
-    </div>
-  )
-}
-
-type AssignmentItem = {
-  key: string
-  teacher: string
-  subject: string
-  className: string
-  weeklyPeriods: string
-}
-
-type ConstraintItem = {
-  id: string
-  type: keyof typeof constraintTypes
-  text: string
-  weight?: number
-}
-
-type TimetableAppProps = {
-  onBackToLanding?: () => void
-  quickDatasetText?: string | null
-}
-
-type BulkAssignmentError = {
-  line: number
-  rawLine: string
-  parts?: string[]
-  segmentIndex: number
-}
-
-function SelectField({ icon: Icon, label, placeholder, value, options, onChange }) {
-  return (
-    <label className={`${panelClass} block p-4`}>
-      <div className="mb-3 flex items-center gap-2.5">
-        <span className={iconShellClass}>
-          <Icon size={16} strokeWidth={1.5} />
-        </span>
-        <span className="text-sm font-medium text-white">{label}</span>
-      </div>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={inputClass}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-function DayTile({ selected, title, subtitle, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group flex flex-col items-center justify-center rounded-md px-2 py-3 transition-all duration-200 ${
-        selected
-          ? 'bg-[#4DB848] text-[#0a0a0a]'
-          : 'border border-white/[0.06] bg-[#141414] text-white hover:border-white/[0.12] hover:bg-white/[0.04]'
-      }`}
-    >
-      <span className={`text-sm font-semibold leading-none ${selected ? 'text-[#0a0a0a]' : 'text-white'}`}>{subtitle}</span>
-      <span className={`mt-1 text-[10px] leading-none ${selected ? 'text-[#0a0a0a]/50' : 'text-white/30'}`}>{title.replace('Thứ ', '')}</span>
-    </button>
-  )
-}
-
-function SessionTile({ selected, icon, title, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group flex flex-col items-center justify-center gap-2 rounded-md px-4 py-4 transition-all duration-200 ${
-        selected
-          ? 'bg-[#4DB848] text-[#0a0a0a]'
-          : 'border border-white/[0.06] bg-[#141414] text-white hover:border-white/[0.12] hover:bg-white/[0.04]'
-      }`}
-    >
-      <span
-        className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
-          selected
-            ? 'border-[#0a0a0a]/10 bg-[#0a0a0a]/10 text-[#0a0a0a]'
-            : 'border-white/[0.08] bg-white/[0.03] text-[#4DB848] group-hover:bg-white/[0.06]'
-        }`}
-      >
-        <span className="text-xl">{icon}</span>
-      </span>
-      <span className={`text-sm font-semibold ${selected ? 'text-[#0a0a0a]' : 'text-white'}`}>{title}</span>
-    </button>
-  )
-}
-
-function PeriodControl({ session, value, onChange }) {
-  const [rawInput, setRawInput] = useState<string | null>(null)
-
-  const clampValue = (nextValue) => Math.min(12, Math.max(1, nextValue))
-  const displayValue = rawInput ?? String(value)
-  const parsedRawValue = rawInput === null || rawInput === '' ? null : Number(rawInput)
-  const isInvalid =
-    rawInput !== null &&
-    (rawInput === '' ||
-      parsedRawValue === null ||
-      Number.isNaN(parsedRawValue) ||
-      parsedRawValue < 1 ||
-      parsedRawValue > 12 ||
-      !Number.isInteger(parsedRawValue))
-
-  const commitValue = (nextValue) => {
-    const cleanValue = Number.isNaN(nextValue) ? value : clampValue(nextValue)
-    onChange(session.id, cleanValue)
-    setRawInput(null)
-  }
-
-  const handleInputChange = (event) => {
-    const raw = event.target.value
-    setRawInput(raw)
-
-    if (raw === '') {
-      return
-    }
-
-    const num = Number(raw)
-    if (!Number.isNaN(num) && num >= 1 && num <= 12 && Number.isInteger(num)) {
-      onChange(session.id, num)
-    }
-  }
-
-  const handleBlur = () => {
-    if (rawInput === null) {
-      return
-    }
-
-    if (isInvalid) {
-      setRawInput(null)
-      return
-    }
-
-    commitValue(Number(rawInput))
-  }
-
-  const handleKeyDown = (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      handleBlur()
-    }
-  }
-
-  const handleStep = (delta) => {
-    const baseValue = rawInput !== null && !isInvalid && rawInput !== '' ? Number(rawInput) : value
-    commitValue(baseValue + delta)
-  }
-
-  return (
-    <div className={`${panelClass} p-4`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.03] text-[#4DB848] transition">
-            <span className="text-xl">{session.icon}</span>
-          </span>
-          <div>
-            <p className="text-sm font-semibold text-white">{session.label}</p>
-            <p className="text-xs text-white/40">Số tiết tối đa cho buổi này</p>
-          </div>
-        </div>
-
-        <div className={`${panelMutedClass} flex items-center gap-2 p-1.5`}>
-          <button
-            type="button"
-            onClick={() => handleStep(-1)}
-            className="flex h-8 w-8 items-center justify-center rounded border border-white/[0.08] bg-transparent text-white/50 transition hover:bg-white/[0.04]"
-            aria-label={`Giảm số tiết buổi ${session.label}`}
-          >
-            <Minus size={14} strokeWidth={1.5} />
-          </button>
-          <label className="sr-only" htmlFor={`${session.id}-periods`}>
-            Số tiết tối đa buổi {session.label}
-          </label>
-          <input
-            id={`${session.id}-periods`}
-            type="number"
-            min="1"
-            max="12"
-            value={displayValue}
-            onChange={handleInputChange}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
-            className={`h-8 w-16 rounded border text-center text-sm outline-none transition ${
-              isInvalid
-                ? 'border-red-500/60 bg-red-500/[0.06] text-red-400 focus:border-red-400'
-                : 'border-white/[0.08] bg-[#0a0a0a] text-white focus:border-white/20'
-            }`}
-          />
-          <button
-            type="button"
-            onClick={() => handleStep(1)}
-            className="flex h-8 w-8 items-center justify-center rounded border border-white/[0.08] bg-transparent text-white/50 transition hover:bg-white/[0.04]"
-            aria-label={`Tăng số tiết buổi ${session.label}`}
-          >
-            <Plus size={14} strokeWidth={1.5} />
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function InfoField({ icon: Icon, label, placeholder, value, onChange }) {
-  return (
-    <label className={`${panelClass} block p-4`}>
-      <div className="mb-3 flex items-center gap-2.5">
-        <span className={iconShellClass}>
-          <Icon size={16} strokeWidth={1.5} />
-        </span>
-        <span className="text-sm font-medium text-white">{label}</span>
-      </div>
-      <input
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className={inputClass}
-      />
-    </label>
-  )
-}
+import {
+  getBulkAssignmentErrorMessage,
+  parseBulkAssignments,
+  parseLines,
+  renderBulkAssignmentErrorLine,
+} from './assignment-helpers'
 
 export default function App({ onBackToLanding, quickDatasetText }: TimetableAppProps) {
   const [page, setPage] = useState('select')
@@ -415,36 +129,6 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [isFirstRun, setIsFirstRun] = useState(false)
-
-  const AI_PROVIDER_STORAGE_KEY = 'tack_ai_provider_config'
-  const RUN_CACHE_STORAGE_KEY = 'tack_ai_run_cache'
-  const encodeProviderConfig = (config: AIProviderConfig) =>
-    btoa(unescape(encodeURIComponent(JSON.stringify(config))))
-  const decodeProviderConfig = (raw: string): AIProviderConfig => {
-    try {
-      return JSON.parse(decodeURIComponent(escape(atob(raw)))) as AIProviderConfig
-    } catch {
-      return JSON.parse(raw) as AIProviderConfig
-    }
-  }
-  const readCachedRuns = (): CachedRun[] => {
-    try {
-      const raw = localStorage.getItem(RUN_CACHE_STORAGE_KEY)
-      const parsed = raw ? JSON.parse(raw) : []
-      return Array.isArray(parsed) ? parsed.slice(0, MAX_CACHED_RUNS) : []
-    } catch {
-      return []
-    }
-  }
-  const writeCachedRun = (inputDigest: string, result: TimetableSolveResult) => {
-    try {
-      const nextRuns = [
-        { id: crypto.randomUUID(), createdAt: new Date().toISOString(), inputDigest, result },
-        ...readCachedRuns().filter((run) => run.inputDigest !== inputDigest),
-      ].slice(0, MAX_CACHED_RUNS)
-      localStorage.setItem(RUN_CACHE_STORAGE_KEY, JSON.stringify(nextRuns))
-    } catch {}
-  }
 
   useEffect(() => {
     // Load local AI provider config
@@ -729,12 +413,6 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     )
   }
 
-  const parseLines = (input: string) =>
-    input
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-
   const importTeacher = () => {
     const teacherInputElement = document.getElementById('teacher-input') as HTMLInputElement | HTMLTextAreaElement | null
     const rawInput = teacherInputRef.current?.value ?? teacherInputElement?.value ?? teacherInput
@@ -821,72 +499,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }
 
 
-  const parseBulkAssignments = (text: string): { parsed: AssignmentItem[]; errors: BulkAssignmentError[] } => {
-    const parsed: AssignmentItem[] = []
-    const errors: BulkAssignmentError[] = []
-
-    text.split(/\r?\n/).forEach((rawLine, index) => {
-      if (!rawLine.trim()) return
-
-      const parts = rawLine.split('-').map((part) => part.trim())
-      if (parts.length !== 4) {
-        errors.push({ line: index + 1, rawLine, segmentIndex: -1 })
-        return
-      }
-
-        const [teacher, subject, className, weeklyPeriods] = parts
-        const normalizedClassName = className.toUpperCase()
-        const checks = [
-          { value: teacher, valid: Boolean(teacher) && teacherList.includes(teacher) },
-          { value: subject, valid: Boolean(subject) && subjectList.includes(subject) },
-          { value: className, valid: Boolean(className) && classList.includes(normalizedClassName) },
-          { value: weeklyPeriods, valid: /^\d+$/.test(weeklyPeriods) && Number(weeklyPeriods) > 0 },
-        ]
-        const badIndex = checks.findIndex((check) => !check.valid)
-        if (badIndex !== -1) {
-          errors.push({ line: index + 1, rawLine, parts, segmentIndex: badIndex })
-          return
-        }
-  
-        parsed.push({
-          key: makeAssignmentKey(teacher, subject, normalizedClassName, weeklyPeriods),
-          teacher,
-          subject,
-          className: normalizedClassName,
-          weeklyPeriods,
-        })
-    })
-
-    return { parsed, errors }
-  }
-
-    const getBulkAssignmentErrorMessage = (error: BulkAssignmentError) => {
-      if (!error.parts || error.segmentIndex === -1) return 'Sai format. Đúng: Teacher-Subject-Class-Number.'
-
-      const value = error.parts[error.segmentIndex]?.trim() || 'trống'
-      if (error.segmentIndex === 0) return `Giáo viên ${value} không được nhập ở bước trước, vui lòng nhập lại.`
-      if (error.segmentIndex === 1) return `Môn ${value} không được nhập ở bước trước, vui lòng nhập lại.`
-      if (error.segmentIndex === 2) return `Lớp ${value} không được nhập ở bước trước, vui lòng nhập lại.`
-      return `Số tiết ${value} không hợp lệ, vui lòng nhập số nguyên lớn hơn 0.`
-    }
-
-    const renderBulkAssignmentErrorLine = (error: BulkAssignmentError) => {
-      if (!error.parts || error.segmentIndex === -1) {
-        return <span className="text-red-300 underline decoration-red-400 decoration-2 underline-offset-2">{error.rawLine}</span>
-      }
-  
-      return error.parts.map((part, index) => (
-      <Fragment key={`${error.line}-${index}`}>
-        {index > 0 ? <span className="text-white/30">-</span> : null}
-        <span className={index === error.segmentIndex ? 'text-red-300 underline decoration-red-400 decoration-2 underline-offset-2' : 'text-white/60'}>
-          {part || 'trống'}
-        </span>
-      </Fragment>
-    ))
-  }
-
     const importBulkAssignments = () => {
-      const { parsed, errors } = parseBulkAssignments(bulkAssignmentText)
+      const { parsed, errors } = parseBulkAssignments(bulkAssignmentText, teacherList, subjectList, classList)
       setBulkAssignmentErrors(errors)
       setAssignmentValidationMessage(null)
       if (!parsed.length || errors.length) return
@@ -1234,384 +848,41 @@ const handleDownloadExcel = useCallback(() => {
     <>
     <main className="w-full overflow-x-hidden bg-[#0A0A0A] font-normal text-white">
       {page === 'select' ? (
-        <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
-            <div className={navBarClass}>
-              <button
-                type="button"
-                onClick={onBackToLanding}
-                className={`${navBackClass} ${!onBackToLanding ? navDisabledClass : ''}`}
-                disabled={!onBackToLanding}
-              >
-                <ArrowLeft size={14} strokeWidth={1.5} />
-                Quay lại
-              </button>
-              <button
-                type="button"
-                onClick={() => canContinue && setPage('periods')}
-                disabled={!canContinue}
-                className={`${navNextClass} ${navDisabledClass}`}
-              >
-                Tiếp tục
-                <ChevronRight size={14} strokeWidth={1.5} />
-              </button>
-            </div>
-
-            {quickImportError ? (
-              <div className="mb-4 rounded-md border border-red-400/30 bg-red-500/[0.08] px-4 py-3 text-sm text-red-200">
-                Nhập dữ liệu nhanh thất bại: {quickImportError}
-              </div>
-            ) : null}
-
-            <header className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <div className="mb-4 flex items-center gap-2 text-[11px] font-medium uppercase tracking-widest text-white/30">
-                  <RadioTower size={14} strokeWidth={1.5} />
-                  Thiết lập giảng dạy điện tử
-                </div>
-                <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                  Chọn ngày dạy và buổi dạy
-                </h1>
-                <p className="mt-4 max-w-2xl text-sm text-white/40">
-                  Tích vào các lựa chọn bạn muốn sử dụng. Bỏ tích những mục không cần.
-                </p>
-              </div>
-            </header>
-
-            {/* === AI Provider Configuration - Only on the first page (as requested) === */}
-            <div className="mb-6 rounded-lg border border-white/10 bg-[#111] p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-medium text-white/80">
-                    <SettingsIcon size={16} />
-                    Cấu hình AI Provider
-                  </div>
-                  <p className="mt-1 text-xs text-white/50">
-                    Cần thiết để sử dụng tính năng xếp lịch tự động bằng AI (LLM + OR-Tools)
-                  </p>
-                  {aiProvider ? (
-                    <div className="mt-2 text-xs text-emerald-400">
-                      Đã cấu hình: <span className="font-mono">{aiProvider.model}</span>
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-xs text-amber-400">
-                      Chưa cấu hình — Bắt buộc phải thiết lập trước khi dùng AI
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => setShowSettingsModal(true)}
-                  className="mt-2 w-full rounded-md bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/15 active:bg-white/20 sm:mt-0 sm:w-auto"
-                >
-                  {aiProvider ? 'Thay đổi cấu hình' : 'Cấu hình ngay'}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <section className={`${panelClass} p-4`}>
-                <div className="mb-4 flex items-center gap-2.5">
-                  <span className={iconShellClass}>
-                    <CalendarDays size={16} strokeWidth={1.5} />
-                  </span>
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">Ngày dạy trong tuần</h2>
-                    <p className="text-xs text-white/40">Từ thứ hai đến chủ nhật</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-7 gap-2">
-                  {days.map((day) => (
-                    <DayTile
-                      key={day.id}
-                      selected={selectedDays.includes(day.id)}
-                      title={day.label}
-                      subtitle={day.short}
-                      onClick={() => toggleItem(day.id, setSelectedDays)}
-                    />
-                  ))}
-                </div>
-              </section>
-
-              <section className={`${panelClass} p-4`}>
-                <div className="mb-4 flex items-center gap-2.5">
-                  <span className={iconShellClass}>
-                    <Sun size={16} strokeWidth={1.5} />
-                  </span>
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">Chọn buổi học</h2>
-                    <p className="text-xs text-white/40">Sáng, chiều, tối</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {sessions.map((session) => (
-                    <SessionTile
-                      key={session.id}
-                      selected={selectedSessions.includes(session.id)}
-                      icon={session.icon}
-                      title={session.label}
-                      onClick={() => toggleItem(session.id, setSelectedSessions)}
-                    />
-                  ))}
-                </div>
-              </section>
-
-              <div className={`${panelClass} p-4`}>
-                <p className="text-[11px] font-medium uppercase tracking-widest text-[#4DB848]">Đã chọn</p>
-                <p className="mt-3 text-sm text-white/70">
-                  {selectedDayNames.length ? selectedDayNames.join(', ') : 'Chưa chọn ngày dạy'}
-                </p>
-                <div className="my-3 h-px bg-white/[0.06]" />
-                <p className="text-sm text-white/70">
-                  {selectedSessionNames.length ? selectedSessionNames.join(', ') : 'Chưa chọn buổi học'}
-                </p>
-              </div>
-            </div>
-        </section>
-
+        <SelectPage
+          onBackToLanding={onBackToLanding}
+          canContinue={canContinue}
+          quickImportError={quickImportError}
+          aiProvider={aiProvider}
+          selectedDays={selectedDays}
+          selectedSessions={selectedSessions}
+          selectedDayNames={selectedDayNames}
+          selectedSessionNames={selectedSessionNames}
+          setShowSettingsModal={setShowSettingsModal}
+          setPage={setPage}
+          setSelectedDays={setSelectedDays}
+          setSelectedSessions={setSelectedSessions}
+          toggleItem={toggleItem}
+        />
       ) : page === 'periods' ? (
-        <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
-          <div className={navBarClass}>
-            <button
-              type="button"
-              onClick={() => setPage('select')}
-              className={navBackClass}
-            >
-              <ArrowLeft size={14} strokeWidth={1.5} />
-              Quay lại
-            </button>
-            <button
-              type="button"
-              onClick={() => setPage('final')}
-              className={navNextClass}
-            >
-              Tiếp tục
-              <ChevronRight size={14} strokeWidth={1.5} />
-            </button>
-          </div>
-          <header className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="mb-4 flex items-center gap-2 text-[11px] font-medium uppercase tracking-widest text-white/30">
-                <Hash size={14} strokeWidth={1.5} />
-                Thiết lập số tiết tối đa
-              </div>
-              <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Chọn số tiết tối đa
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm text-white/40">
-                Những ngày và buổi bạn đã chọn được giữ lại. Chỉ các buổi đã chọn mới xuất hiện ở đây.
-              </p>
-            </div>
-            <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>
-              <p className="font-medium text-white">Ngày giảng dạy</p>
-              <p className="mt-2 leading-6">{selectedDayNames.join(', ')}</p>
-            </div>
-          </header>
-
-          <div className="grid flex-1 gap-4 lg:grid-cols-[1fr_0.55fr]">
-            <section className={`${panelClass} p-4`}>
-              <div className="mb-4 flex items-center gap-2.5">
-                <span className={iconShellClass}>
-                  <Hash size={16} strokeWidth={1.5} />
-                </span>
-                <div>
-                  <h2 className="text-sm font-semibold text-white">Các buổi đã chọn</h2>
-                  <p className="text-xs text-white/40">Thiết lập một số tiết tối đa cho mỗi buổi</p>
-                </div>
-              </div>
-
-              <div className="grid gap-3">
-                {selectedSessionData.map((session) => (
-                  <PeriodControl
-                    key={session.id}
-                    session={session}
-                    value={periods[session.id] ?? defaultPeriods[session.id]}
-                    onChange={updatePeriod}
-                  />
-                ))}
-              </div>
-            </section>
-
-            <aside className={`${panelClass} p-4`}>
-              <div className="mb-4 flex items-center gap-2.5">
-                <span className={iconShellClass}>
-                  <Check size={16} strokeWidth={1.5} />
-                </span>
-                <div>
-                  <h2 className="text-sm font-semibold text-white">Thiết lập của bạn</h2>
-                  <p className="text-xs text-white/40">Được lưu từ trang đầu tiên</p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className={`${panelMutedClass} p-4`}>
-                  <p className="text-[11px] font-medium uppercase tracking-widest text-white/50">Ngày học</p>
-                  <p className="mt-2 text-sm text-white/70">{selectedDayNames.join(', ')}</p>
-                </div>
-
-                <div className={`${panelMutedClass} p-4`}>
-                  <p className="text-[11px] font-medium uppercase tracking-widest text-white/50">Số tiết tối đa</p>
-                  <div className="mt-3 space-y-2">
-                    {selectedSessionData.map((session) => (
-                      <div key={session.id} className="flex items-center justify-between gap-3 text-sm text-white/70">
-                        <span>{session.label}</span>
-                        <span className="rounded bg-[#4DB848]/10 border border-[#4DB848]/20 px-2 py-0.5 text-xs font-medium text-[#4DB848]">
-                          {periods[session.id] ?? defaultPeriods[session.id]}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </aside>
-          </div>
-
-        </section>
+        <PeriodsPage
+          selectedDayNames={selectedDayNames}
+          selectedSessionData={selectedSessionData}
+          periods={periods}
+          setPage={setPage}
+          updatePeriod={updatePeriod}
+        />
       ) : page === 'final' ? (
-        <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
-          <div className={navBarClass}>
-            <button
-              type="button"
-              onClick={() => setPage('periods')}
-              className={navBackClass}
-            >
-              <ArrowLeft size={14} strokeWidth={1.5} />
-              Quay lại
-            </button>
-            <button
-              type="button"
-              onClick={() => activePeriodCount > 0 && setPage('details')}
-              disabled={activePeriodCount <= 0}
-              className={`${navNextClass} ${navDisabledClass}`}
-            >
-              Tiếp tục
-              <ChevronRight size={14} strokeWidth={1.5} />
-            </button>
-          </div>
-          <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="mb-4 flex items-center gap-2 text-[11px] font-medium uppercase tracking-widest text-white/30">
-                <CalendarDays size={14} strokeWidth={1.5} />
-                Bảng thời khóa biểu mẫu
-              </p>
-              <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">Xem trước thời khóa biểu điện tử</h1>
-              <p className="mt-3 max-w-3xl text-sm text-white/40">
-                Nhấn vào từng ô tiết học để xóa riêng ô đó theo từng ngày. Nhấn lại để khôi phục.
-              </p>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row lg:items-center">
-              <div className={`${panelClass} px-4 py-2.5 text-sm text-white/50`}>
-                <span className="font-medium text-white">Số tiết đang hoạt động:</span> {activePeriodCount}
-              </div>
-                <button
-                  type="button"
-                  onClick={restoreDeletedPeriods}
-                  className={ghostButtonClass}
-                >
-
-                <RotateCcw size={14} strokeWidth={1.5} />
-                Khôi phục tất cả
-              </button>
-            </div>
-          </header>
-
-          <div className={`${panelClass} flex-1 overflow-hidden p-3 sm:p-4`}>
-            <div className="mb-4 grid gap-3 md:grid-cols-3">
-              {selectedSessionData.map((session) => {
-                const sessionTotal = selectedSpreadsheetDays.reduce(
-                  (total, day) =>
-                    total +
-                    Array.from({ length: periods[session.id] ?? defaultPeriods[session.id] }, (_, index) => index + 1).filter(
-                      (period) => !deletedPeriods[getCellKey(day.id, session.id, period)],
-                    ).length,
-                  0,
-                )
-
-                return (
-                  <div key={session.id} className={`${panelMutedClass} p-4`}>
-                    <p className="text-[11px] font-medium uppercase tracking-widest text-white/50">{session.label}</p>
-                    <p className="mt-2 text-2xl font-semibold text-white">{sessionTotal}</p>
-                    <p className="text-xs text-white/30">ô tiết vẫn đang bật</p>
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="h-full overflow-auto rounded-md border border-white/[0.06] bg-[#141414] text-white">
-              <table className="min-w-[900px] w-full border-separate border-spacing-0 table-fixed text-left text-sm">
-                <thead>
-                  <tr>
-                      <th className="sticky left-0 top-0 z-20 h-10 w-24 border-b border-r border-white/[0.06] bg-[#141414] px-3 text-[11px] font-semibold uppercase tracking-widest text-white/90">
-                        Buổi
-                      </th>
-                      <th className="sticky left-24 top-0 z-20 h-10 w-16 border-b border-r border-white/[0.06] bg-[#141414] px-2 text-center text-[11px] font-semibold uppercase tracking-widest text-white/90">
-                        Tiết
-                      </th>
-                      {selectedSpreadsheetDays.map((day) => (
-                      <th
-                        key={day.id}
-                        className="sticky top-0 z-10 h-12 border-b border-r border-white/[0.06] bg-[#141414] px-3 text-center text-sm font-semibold text-white"
-                      >
-                        {day.tableLabel}
-                      </th>
-                    ))}
-                  </tr>
-              </thead>
-                            <tbody>
-                                  {timetableRows.map((row) => (
-                      <tr key={row.id} className="h-10">
-                        {row.firstInSession ? (
-                          <td rowSpan={row.sessionPeriodCount} className="sticky left-0 z-10 w-24 border-b border-r border-white/[0.06] bg-[#141414] px-3 text-center align-middle">
-                            <span className="text-xs font-semibold text-white">{row.sessionLabel}</span>
-                          </td>
-                        ) : null}
-                        <td className="sticky left-24 z-10 w-16 border-b border-r border-white/[0.06] bg-[#141414] px-2 text-center align-middle">
-                          <span className="text-xs font-semibold text-white">{row.period}</span>
-                        </td>
-                        {selectedSpreadsheetDays.map((day) => {
-                        const cellKey = getCellKey(day.id, row.sessionId, row.period)
-                        const isDeleted = deletedPeriods[cellKey]
-
-                          return (
-                            <td key={cellKey} className="border-b border-r border-white/[0.04] p-1.5">
-                              <button
-                                type="button"
-                                onClick={() => toggleDeletedPeriod(day.id, row.sessionId, row.period)}
-                                className={`group flex h-7 w-full items-center justify-between gap-2 rounded border px-2 text-center text-xs font-medium transition ${
-                                    isDeleted
-                                      ? 'border-green-500/25 bg-green-500/[0.08] text-green-400 hover:bg-green-500/[0.14] hover:border-green-500/35'
-                                      : 'border-white/[0.06] bg-[#141414] text-white/50 hover:border-white/[0.12]'
-
-                                }`}
-                                aria-label={`${isDeleted ? 'Khôi phục' : 'Xóa'} ${day.label} ${row.sessionLabel} tiết ${row.period}`}
-                              >
-                                <span className={isDeleted ? 'mx-auto inline-flex items-center gap-1.5' : 'min-w-0 flex-1'}>
-                                  {isDeleted ? (
-                                    <>
-                                      <RotateCcw size={11} strokeWidth={1.5} />
-                                      Restore
-                                    </>
-                                  ) : (
-                                    row.period
-                                  )}
-                                </span>
-                                  {!isDeleted && (
-                                    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-red-400/60 group-hover:text-red-400">
-                                      <Trash2 size={11} strokeWidth={1.5} />
-                                    </span>
-                                  )}
-
-                              </button>
-                            </td>
-                          )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </section>
+        <PreviewPage
+          activePeriodCount={activePeriodCount}
+          deletedPeriods={deletedPeriods}
+          periods={periods}
+          selectedSessionData={selectedSessionData}
+          selectedSpreadsheetDays={selectedSpreadsheetDays}
+          timetableRows={timetableRows}
+          restoreDeletedPeriods={restoreDeletedPeriods}
+          setPage={setPage}
+          toggleDeletedPeriod={toggleDeletedPeriod}
+        />
           ) : page === 'details' ? (
             <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
             <div className={navBarClass}>

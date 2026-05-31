@@ -1,6 +1,6 @@
 import { TokenBudgetGuard } from './budget-guard';
 import { runCoderTurn } from './coder';
-import type { ConstraintSpec, ScheduleEntry } from './constraint-spec';
+import type { ScheduleEntry } from './constraint-spec';
 import { verifyCpSatRoundTrip } from './cp-sat-roundtrip';
 import { validateSchedule } from './deterministic-validator';
 import { compressPayload, digestError } from './input-compressor';
@@ -11,185 +11,34 @@ import { astCheckPython, injectConstraintCode, loadSolverSkeleton, syntaxCheckPy
 import { runTranslatorTurn } from './translator';
 import type { AgentInputPayload, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { WorkspaceBoard } from './workspace';
+import {
+  MAX_CODER_RETRIES,
+  MAX_RUNTIME_REPAIR_ROUNDS,
+  MAX_TOTAL_TOOL_CALLS,
+  MAX_VIOLATION_REPAIR_ROUNDS,
+  TOKEN_CAP_PER_RUN,
+} from './local-agent-limits';
+import { getCachedStage } from './stage-cache';
+import {
+  buildCoderExhaustedMessage,
+  buildFinalMessage,
+  buildRepeatedViolationMessage,
+  buildViolationSignature,
+  consumeBudget,
+  constraintSignature,
+  dedupeConstraintSpecs,
+  emit,
+  pickStageConfig,
+  resolveSolverRuntime,
+  shouldRepairExecutableFailure,
+  stableHash,
+  normalizeRoundTripMessage,
+} from './local-agent-utils';
 
 export interface RunLocalAgentResult {
   success: boolean;
   finalResult?: LocalAgentFinalResult;
   error?: string;
-}
-
-const MAX_CODER_RETRIES = 3;
-const MAX_RUNTIME_REPAIR_ROUNDS = 1;
-const MAX_VIOLATION_REPAIR_ROUNDS = 2;
-const MAX_TOTAL_TOOL_CALLS = 15;
-const TOKEN_CAP_PER_RUN = 80_000;
-const STAGE_CACHE_MAX_ENTRIES = 20;
-const stageCache = new Map<string, unknown>();
-
-type SolverRuntimeConfig = { timeoutMs: number; workers: number };
-
-function emit(
-  config: LocalAgentConfig,
-  event:
-    | { type: 'status'; message: string; iteration: number; maxIterations?: number }
-    | { type: 'phase'; phase: 'thinking' | 'translator' | 'planner' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'; message: string; iteration: number }
-    | { type: 'stage_started'; stage: string; attempt?: number; message: string }
-    | { type: 'stage_completed'; stage: string; attempt?: number; message: string }
-    | { type: 'violations_found'; count: number; sample?: string[] }
-    | { type: 'execution_result'; attempt: number; result: any }
-    | { type: 'final_result'; result: LocalAgentFinalResult }
-    | { type: 'error'; message: string; fatal?: boolean }
-) {
-  config.onEvent?.(event as any);
-}
-
-function pickStageConfig(
-  config: LocalAgentConfig,
-  stage: 'translator' | 'planner' | 'coder' | 'repair'
-): LocalAgentConfig {
-  const model =
-    stage === 'translator'
-      ? config.modelTranslator
-      : stage === 'planner'
-      ? config.modelPlanner
-      : stage === 'coder'
-      ? config.modelCoder
-      : config.modelRepair;
-  return {
-    ...config,
-    model: model || config.model,
-  };
-}
-
-function stableHash(value: unknown): string {
-  return JSON.stringify(sortObjectDeep(value));
-}
-
-async function getCachedStage<T>(key: string, producer: () => Promise<T>): Promise<{ value: T; hit: boolean }> {
-  if (stageCache.has(key)) {
-    return { value: stageCache.get(key) as T, hit: true };
-  }
-  const value = await producer();
-  stageCache.set(key, value);
-  if (stageCache.size > STAGE_CACHE_MAX_ENTRIES) {
-    const firstKey = stageCache.keys().next().value;
-    if (firstKey) stageCache.delete(firstKey);
-  }
-  return { value, hit: false };
-}
-
-function resolveSolverRuntime(config: LocalAgentConfig): SolverRuntimeConfig {
-  const cpuCount = typeof navigator !== 'undefined' && Number(navigator.hardwareConcurrency) > 0
-    ? Number(navigator.hardwareConcurrency)
-    : 2;
-  const profile = config.solverProfile ?? 'balanced';
-  const defaults: Record<string, SolverRuntimeConfig> = {
-    fast: { timeoutMs: 20_000, workers: Math.max(1, Math.floor(cpuCount / 2)) },
-    balanced: { timeoutMs: 60_000, workers: Math.max(1, cpuCount - 1) },
-    deep: { timeoutMs: 180_000, workers: cpuCount },
-  };
-  const resolved = defaults[profile] ?? defaults.balanced;
-  return {
-    timeoutMs: config.timeoutMs ?? resolved.timeoutMs,
-    workers: Math.min(8, Math.max(1, Math.floor(config.solverWorkers ?? resolved.workers))),
-  };
-}
-
-function buildFinalMessage(status: string | undefined): string {
-  if (status === 'optimal') return 'Đã tạo thời khóa biểu tối ưu.';
-  if (status === 'feasible') return 'Đã tìm được lịch hợp lệ, nhưng chưa chứng minh là tối ưu.';
-  return 'Đã tạo thời khóa biểu thành công.';
-}
-
-function consumeBudget(
-  budget: TokenBudgetGuard,
-  usageTokens: number | undefined,
-  ...fallbackChunks: string[]
-): void {
-  if (typeof usageTokens === 'number' && Number.isFinite(usageTokens) && usageTokens > 0) {
-    budget.consumeUsage(usageTokens);
-  } else {
-    budget.consumeText(...fallbackChunks);
-  }
-  budget.ensureWithinLimit();
-}
-
-function buildViolationSignature(
-  hardViolations: Array<{ constraintId: string; kind: string }>,
-  roundTripOk: boolean,
-  roundTripMessage: string
-): string {
-  const signature = hardViolations
-    .map((violation) => `${violation.constraintId}:${violation.kind}`)
-    .sort()
-    .join('|');
-  const roundTripSignature = roundTripOk
-    ? 'rt:ok'
-    : `rt:fail:${normalizeRoundTripMessage(roundTripMessage)}`;
-  return `${signature}||${roundTripSignature}`;
-}
-
-function normalizeRoundTripMessage(message: string): string {
-  return message
-    .replace(/asg_\d+/g, 'ASG')
-    .replace(/\b\d{3,}\b/g, 'N')
-    .trim();
-}
-
-function buildCoderExhaustedMessage(lastFailureSummary: string): string {
-  const detail = lastFailureSummary.trim();
-  if (!detail) return 'Coder could not produce an executable schedule.';
-  return `Coder could not produce an executable schedule. Last failure: ${detail}`;
-}
-
-function buildRepeatedViolationMessage(sampleMessages: string[]): string {
-  const detail = sampleMessages.filter(Boolean).slice(0, 3).join(' | ');
-  if (!detail) {
-    return 'Không tạo được thời khóa biểu sau khi agent sửa lặp lại cùng một lỗi.';
-  }
-  return `Không tạo được thời khóa biểu sau khi agent sửa lặp lại cùng một lỗi: ${detail}`;
-}
-
-function shouldRepairExecutableFailure(
-  latestConstraintCode: string,
-  lastFailureSummary: string,
-  repairRound: number
-): boolean {
-  return Boolean(
-    latestConstraintCode.trim() &&
-    lastFailureSummary.trim() &&
-    repairRound < MAX_RUNTIME_REPAIR_ROUNDS
-  );
-}
-
-function sortObjectDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortObjectDeep);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => [key, sortObjectDeep(item)])
-  );
-}
-
-function constraintSignature(spec: ConstraintSpec): string {
-  return JSON.stringify({
-    kind: spec.kind,
-    severity: spec.severity,
-    params: sortObjectDeep(spec.params),
-    weight: spec.weight ?? null,
-    pythonPredicate: spec.pythonPredicate ?? null,
-  });
-}
-
-function dedupeConstraintSpecs(specs: ConstraintSpec[]): ConstraintSpec[] {
-  const seen = new Set<string>();
-  return specs.filter((spec) => {
-    const sig = constraintSignature(spec);
-    if (seen.has(sig)) return false;
-    seen.add(sig);
-    return true;
-  });
 }
 
 export async function runLocalAgent(

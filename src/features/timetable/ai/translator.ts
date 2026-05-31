@@ -6,6 +6,25 @@ import type { ConstraintSpec } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
 import { invokeChat, type ChatPayload } from './chat-client';
+import { buildTranslatorPeriods, buildTranslatorPeriodsByDay, periodsForSession } from './translator-periods';
+import {
+  applyConstraintWeight,
+  includesLabel,
+  extractDayId,
+  extractFirstNumber,
+  extractPeriodNumber,
+  inferWeeklyAssignmentId,
+  isAutoBaseConstraintText,
+  isResourceCapacityText,
+  isSessionLimitText,
+  isSubjectGroupDailyLimitText,
+  isSubjectGroupText,
+  markAutoBaseSpec,
+  normalizeConstraintText,
+  parseGlobalClassSubjectDailyLimit,
+  shouldMarkWeeklyAutoBase,
+  splitFallbackConstraintText,
+} from './translator-text';
 
 type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
 
@@ -62,280 +81,6 @@ const translatorResponseSchema = z.object({
 });
 
 const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
-
-function includesLabel(text: string, label: string): boolean {
-  return text.toLocaleLowerCase('vi').includes(label.toLocaleLowerCase('vi'));
-}
-
-function extractFirstNumber(text: string): number | null {
-  const matched = text.match(/\b(\d+)\b/u);
-  if (!matched) return null;
-  const value = Number(matched[1]);
-  return Number.isFinite(value) ? value : null;
-}
-
-// Trích số đứng ngay sau từ "tiết" / "tiet" / "period" — dùng cho
-// parsing câu như "thứ 6 tiết 5" để tránh nhầm số "6" (thứ 6) thành
-// period. (fix bug #14)
-function extractPeriodNumber(text: string): number | null {
-  const matched = text.match(/(?:tiết|tiet|period)\s*(\d+)/iu);
-  if (matched) {
-    const value = Number(matched[1]);
-    if (Number.isFinite(value)) return value;
-  }
-  return null;
-}
-
-function extractDayId(text: string, days: Array<{ id: string; label: string }>): string | null {
-  for (const day of days) {
-    if (includesLabel(text, day.id) || includesLabel(text, day.label)) return day.id;
-  }
-
-  if (/thứ\s*2|thu\s*2/u.test(text)) return 'mon';
-  if (/thứ\s*3|thu\s*3/u.test(text)) return 'tue';
-  if (/thứ\s*4|thu\s*4/u.test(text)) return 'wed';
-  if (/thứ\s*5|thu\s*5/u.test(text)) return 'thu';
-  if (/thứ\s*6|thu\s*6/u.test(text)) return 'fri';
-  if (/thứ\s*7|thu\s*7/u.test(text)) return 'sat';
-  if (/chủ\s*nhật|chu\s*nhat|cn/u.test(text)) return 'sun';
-
-  return null;
-}
-
-function buildTranslatorPeriods(input: AgentInputPayload): number[] {
-  const periodSet = new Set<number>();
-  const periodsByDay = buildTranslatorPeriodsByDay(input);
-
-  for (const periods of Object.values(periodsByDay)) {
-    for (const period of periods) {
-      if (Number.isFinite(period) && period > 0) periodSet.add(period);
-    }
-  }
-
-  return [...periodSet].sort((a, b) => a - b);
-}
-
-function buildTranslatorPeriodsByDay(input: AgentInputPayload): Record<string, number[]> {
-  const periodsByDay: Record<string, number[]> = {};
-  const allDaysHaveDayLevelCount = input.days.every((day) => {
-    const value = Number(input.periodCounts[day.id]);
-    return Number.isFinite(value) && value > 0;
-  });
-  const hasSessionCounts = input.sessions.some((session) => {
-    const value = Number(input.periodCounts[session.id]);
-    return Number.isFinite(value) && value > 0;
-  });
-
-  for (const day of input.days) {
-    const activePeriods: number[] = [];
-    const dayLevelValue = Number(input.periodCounts[day.id]);
-    const dayHasOwnCount = Number.isFinite(dayLevelValue) && dayLevelValue > 0;
-
-    if ((allDaysHaveDayLevelCount || dayHasOwnCount) && !hasSessionCounts) {
-      const deletedPeriods = new Set<number>();
-      for (const [key, isDeleted] of Object.entries(input.deletedPeriods)) {
-        if (!isDeleted) continue;
-        const [keyDay, , keyPeriodRaw] = key.split('-');
-        const keyPeriod = Number(keyPeriodRaw);
-        if (keyDay === day.id && Number.isFinite(keyPeriod)) deletedPeriods.add(keyPeriod);
-      }
-      for (let period = 1; period <= dayLevelValue; period += 1) {
-        if (!deletedPeriods.has(period)) activePeriods.push(period);
-      }
-      periodsByDay[day.id] = activePeriods;
-      continue;
-    }
-
-    let offset = 0;
-    for (const session of input.sessions) {
-      const sessionMax = Number(input.periodCounts[session.id] ?? 0);
-      for (let period = 1; period <= sessionMax; period += 1) {
-        const key = `${day.id}-${session.id}-${period}`;
-        if (!input.deletedPeriods[key]) activePeriods.push(offset + period);
-      }
-      offset += sessionMax;
-    }
-    periodsByDay[day.id] = activePeriods;
-  }
-
-  return periodsByDay;
-}
-
-function periodsForSession(input: AgentInputPayload, sessionId: string): number[] {
-  let offset = 0;
-  for (const session of input.sessions) {
-    const count = Number(input.periodCounts[session.id] ?? 0);
-    const periods = Array.from({ length: Math.max(0, count) }, (_, index) => offset + index + 1);
-    if (session.id === sessionId) return periods;
-    offset += count;
-  }
-  return [];
-}
-
-function normalizeConstraintText(text: string): string {
-  return text
-    .toLocaleLowerCase('vi')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isAutoBaseConstraintText(text: string): boolean {
-  const normalized = normalizeConstraintText(text);
-  const mentionsEvery = /\b(moi|tat ca|all|each)\b/u.test(normalized);
-  const mentionsSlot = /\b(slot|tiet|period)\b/u.test(normalized);
-
-  if (mentionsEvery && /\blop\b/u.test(normalized) && /\b(mon|mon hoc)\b/u.test(normalized) && mentionsSlot) {
-    return true;
-  }
-
-  if (
-    mentionsEvery &&
-    /\bgiao vien\b/u.test(normalized) &&
-    /\b(day|lop)\b/u.test(normalized) &&
-    /(qua 1|hon 1|toi da 1|1 lop)/u.test(normalized) &&
-    mentionsSlot
-  ) {
-    return true;
-  }
-
-  if (
-    mentionsEvery &&
-    /\bassignment\b/u.test(normalized) &&
-    /(dung|du|chinh xac|phai xep)/u.test(normalized) &&
-    /(so tiet|tiet\/tuan|tiet moi tuan)/u.test(normalized)
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function parseGlobalClassSubjectDailyLimit(text: string): { maxPerDay: number } | null {
-  const normalized = normalizeConstraintText(text);
-  const mentionsEvery = /\b(moi|tat ca|all|each)\b/u.test(normalized);
-  const mentionsClass = /\blop\b/u.test(normalized);
-  const mentionsSameSubject = /\bcung\s*(1|mot)?\s*mon\b/u.test(normalized);
-  const mentionsDay = /\bngay\b/u.test(normalized);
-  if (!(mentionsEvery && mentionsClass && mentionsSameSubject && mentionsDay)) {
-    return null;
-  }
-  const m = normalized.match(/(?:khong qua|toi da|hon|qua)\s*(\d+)/u);
-  const maxPerDay = m ? Number(m[1]) : 1;
-  if (!Number.isFinite(maxPerDay) || maxPerDay < 1) return null;
-  return { maxPerDay };
-}
-
-function markAutoBaseSpec(spec: ConstraintSpec): ConstraintSpec {
-  const tags = new Set(spec.tags ?? []);
-  tags.add('auto_base');
-  return {
-    ...spec,
-    severity: 'info',
-    tags: [...tags],
-  };
-}
-
-function isResourceCapacityText(text: string): { subject: string; capacity: number } | null {
-  const normalized = normalizeConstraintText(text);
-  const match = normalized.match(
-    /(.+?)\s+toi\s+da\s+(\d+)\s+lop\s+cung\s+(?:slot|tiet)/iu
-  );
-  if (match) {
-    const subject = match[1].trim();
-    const capacity = Number(match[2]);
-    if (subject && Number.isFinite(capacity) && capacity > 0) return { subject, capacity };
-  }
-  return null;
-}
-
-function isSessionLimitText(text: string): { teacher: string; maxPeriods: number; session: string } | null {
-  const normalized = normalizeConstraintText(text);
-  const match = normalized.match(
-    /(?:moi|tat ca|all|each)\s+giao vien\s+khong\s+day\s+qua\s+(\d+)\s+tiet\s+trong\s+cung\s+1\s+buoi\s+(sang|chieu)/iu
-  );
-  if (match) {
-    const maxPeriods = Number(match[1]);
-    const session = match[2].toLowerCase().includes('sang') ? 'morning' : 'afternoon';
-    if (Number.isFinite(maxPeriods) && maxPeriods > 0) return { teacher: '', maxPeriods, session };
-  }
-  return null;
-}
-
-function isSubjectGroupText(text: string): { name: string; subjects: string[] } | null {
-  const normalized = normalizeConstraintText(text);
-  const match = normalized.match(/mon\s+(.+?)\s+gom\s*:\s*(.+)/iu);
-  if (match) {
-    const name = match[1].trim();
-    const subjects = match[2].split(/[,;]/u).map((s) => s.trim()).filter(Boolean);
-    if (name && subjects.length > 0) return { name, subjects };
-  }
-  return null;
-}
-
-function isSubjectGroupDailyLimitText(text: string): { groupName: string; maxPerDay: number } | null {
-  const normalized = normalizeConstraintText(text);
-  const match = normalized.match(
-    /(?:moi|tat ca|all|each)\s+lop\s+khong\s+duoc\s+co\s+qua\s+(\d+)\s+mon\s+(.+?)\s+trong\s+cung\s+1\s+ngay/iu
-  );
-  if (match) {
-    const maxPerDay = Number(match[1]);
-    const groupName = match[2].trim();
-    if (groupName && Number.isFinite(maxPerDay) && maxPerDay > 0) return { groupName, maxPerDay };
-  }
-  return null;
-}
-
-function splitFallbackConstraintText(text: string): string[] {
-  if (/(nếu|neu)[\s\S]*(thì|thi)/iu.test(text)) {
-    return [text.trim()].filter(Boolean);
-  }
-
-  const hasPredicate = (clause: string) =>
-    /(không|khong|chỉ|chi|phải|phai|tối\s*đa|toi\s*da|max|đúng|dung|chính\s*xác|chinh\s*xac|liên\s*tiếp|lien\s*tiep|cùng|trùng|cung|trung)/iu.test(
-      clause,
-    );
-
-  return text
-    .split(/(?:;|\n|\r|\s+(?:đồng\s+thời|dong\s+thoi)\s+)/iu)
-    .flatMap((segment) => {
-      const clauses: string[] = [];
-      let remainder = segment.trim();
-      while (remainder) {
-        const match = /\s+(?:và)\s+/iu.exec(remainder);
-        if (!match) {
-          clauses.push(remainder);
-          break;
-        }
-
-        const before = remainder.slice(0, match.index).trim();
-        const after = remainder.slice(match.index + match[0].length).trim();
-        if (!hasPredicate(before) || !hasPredicate(after)) {
-          clauses.push(remainder);
-          break;
-        }
-
-        clauses.push(before);
-        remainder = after;
-      }
-      return clauses;
-    })
-    .map((clause) => clause.trim())
-    .filter(Boolean);
-}
-
-function applyConstraintWeight(spec: ConstraintSpec, weight: number | undefined): ConstraintSpec {
-  if (spec.severity !== 'soft') return spec;
-  const safeWeight = Number(weight);
-  if (!Number.isFinite(safeWeight) || safeWeight <= 0) return spec;
-  return {
-    ...spec,
-    weight: safeWeight,
-    params: { ...spec.params, weight: safeWeight },
-  };
-}
 
 function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
   const teacherLabels = [...new Set(input.assignments.map((assignment) => assignment.teacher.label))];
@@ -1131,36 +876,6 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
 
     return weeklySpec;
   });
-}
-
-function inferWeeklyAssignmentId(
-  assignments: AgentInputPayload['assignments'],
-  teacher: string | null,
-  subject: string | null,
-  klass: string | null,
-  weeklyPeriods: number
-): string | null {
-  const matched = assignments.filter((assignment) => {
-    if (teacher && assignment.teacher.label !== teacher) return false;
-    if (subject && assignment.subject.label !== subject) return false;
-    if (klass && assignment.class.label !== klass) return false;
-    return assignment.weeklyPeriods === weeklyPeriods;
-  });
-  return matched.length === 1 ? matched[0].id : null;
-}
-
-function shouldMarkWeeklyAutoBase(
-  spec: ConstraintSpec,
-  assignments: AgentInputPayload['assignments']
-): boolean {
-  if (spec.kind !== 'weekly_periods_exact') return false;
-  const assignmentId = typeof spec.params.assignmentId === 'string' ? spec.params.assignmentId : '';
-  if (!assignmentId) return false;
-  const weeklyPeriods = Number(spec.params.weeklyPeriods ?? NaN);
-  if (!Number.isFinite(weeklyPeriods)) return false;
-  const assignment = assignments.find((item) => item.id === assignmentId);
-  if (!assignment) return false;
-  return assignment.weeklyPeriods === weeklyPeriods;
 }
 
 function loadTranslatorSystemPrompt(): Promise<string> {

@@ -1,137 +1,90 @@
 # Validation Stage
-
 Active contributors: Duy
 
-## Purpose
+Post-execution deterministic validation is the fifth stage inside the 6-stage Local Agent pipeline (`runLocalAgent` in `src/features/timetable/ai/local-agent.ts`). After the sandbox successfully executes generated solver code and returns a schedule, the system runs two independent deterministic (non-LLM) validation passes plus a CP-SAT round-trip feasibility re-check before accepting the result for the UI.
 
-The Validation stage is the fifth step in the Local Agent pipeline. After the generated solver runs (inside the sandbox), the agent **never** accepts the result at face value. Instead, it re-validates every constraint using a separate, deterministic checker library.
+## Core Entry Points
 
-This stage produces two `DeterministicValidationReport`s:
-- One from the TypeScript implementation (`validateSchedule`)
-- One from the Python `validator_engine.py` (for cross-check, especially on `custom_dsl` predicates)
+- TypeScript: `validateSchedule(schedule, constraintSpecs, ctx)` — `src/features/timetable/ai/deterministic-validator.ts`
+- Python reference: `validate_schedule(schedule, constraint_specs, assignments)` — `python/validator_engine.py`
+- CP-SAT round-trip: `verifyCpSatRoundTrip(schedule, assignments, domain)` — `src/features/timetable/ai/cp-sat-roundtrip.ts`
 
-It also runs a CP-SAT round-trip verification to ensure the returned schedule is internally consistent with the input assignments.
+Both layers separate **base constraints** (teacher/class clashes at the same slot + weekly-periods exact match per assignment) from **kind-specific checkers** driven by `ConstraintKind`.
 
-Hard violations or round-trip failures trigger the Repair stage. Success here is what allows the agent to return a `LocalAgentFinalResult` to the UI.
+## Hard vs Soft Violations
 
-## Location and entry points
+`ConstraintSpec` carries `severity: 'hard' | 'soft'`. After collecting all violations:
 
-- TypeScript deterministic validation: `src/features/timetable/ai/deterministic-validator.ts`
-  - Main function: `validateSchedule(schedule, constraints, ctx)`
-  - Round-trip check: `verifyCpSatRoundTrip(...)` in `cp-sat-roundtrip.ts`
-- Python validator engine: `python/validator_engine.py`
-- Orchestration: `src/features/timetable/ai/local-agent.ts` (the post-execution block after `executeGeneratedCode`)
+- `hardViolations` = base violations + any violation whose `constraintId` is a hard spec.
+- `softViolations` = violations belonging only to soft specs.
+- `allHardViolations` (in the agent) further merges hard `custom_dsl` violations reported back from the sandbox via `customChecks`.
 
-## What gets validated
+A schedule is only accepted when:
+- `baseConstraintPass`
+- `allHardViolations.length === 0`
+- `roundTrip.ok`
+- `hardUncheckedConstraintIds.length === 0` (fail-closed coverage)
 
-Every `ConstraintSpec` in the current set is checked, regardless of whether it came from the Translator's LLM path or the deterministic fallback parser.
+Soft violations are recorded but do not block acceptance.
 
-- **Base constraints** — fundamental sanity rules (every scheduled entry must have a valid assignmentId, no duplicate slots for the same assignment, etc.).
-- **Hard constraints** — must be fully satisfied. Any violation is fatal for this attempt.
-- **Soft constraints** — violations are recorded but do not block success; they contribute to the objective.
-- **Custom DSL predicates** — for hard `custom_dsl` specs, the Python-side predicate is executed inside the sandbox and the results (`customChecks`) are merged into the report.
+## Per-Constraint Checkers & Coverage
 
-## DeterministicValidationReport structure
+The TypeScript validator is driven by `CHECKED_KINDS` (from the constraint registry). Any hard constraint whose kind is not in `CHECKED_KINDS` (or is `custom_dsl` without a corresponding sandbox-reported `customChecks` entry) produces an entry in `hardUncheckedConstraintIds`. This forces `hardCoverageComplete = false` and routes the run into the Repair stage with pseudo-violations so the coder knows exactly which constraint IDs still need code.
 
-```ts
-{
-  ok: boolean;
-  baseConstraintPass: boolean;
-  hardConstraintPass: boolean;
-  softConstraintPass: boolean;
-  hardCoverageComplete: boolean;   // true only if EVERY hard constraint had a real checker
-  violations: Violation[];
-  hardViolations: Violation[];
-  softViolations: Violation[];
-  uncheckedConstraintIds: string[];
-  hardUncheckedConstraintIds: string[];  // hard constraints with no checker (fail-closed)
-}
-```
+The Python `validator_engine.py` implements the original/core subset (teacher_block_*, teacher_max_*, subject_pin_*, subject_consecutive, class_no_double_*, weekly_periods_exact, pair_not_same_slot, if_then, session_limit, subject_group_daily_limit) plus the shared base checks. It explicitly skips `resource_capacity` (enforced inside the CP-SAT model) and marks `custom_dsl` as unchecked (the predicate actually runs inside the generated solver).
 
-`hardCoverageComplete` is a critical safety flag. The system is fail-closed: if a hard constraint has no corresponding checker implementation, it is listed in `hardUncheckedConstraintIds` and `ok` will be false.
+## CP-SAT Round-Trip Check
 
-## The 46 checkers
+`verifyCpSatRoundTrip` re-encodes the produced schedule as a forced solution inside a fresh CP-SAT model using the exact same assignments + domain (days/periods). It asks the solver: "Is this assignment still feasible under the original constraints?" This catches cases where the generated solver silently dropped constraints or produced a schedule that only appeared valid because of a modeling bug.
 
-As of the `cdac5b5` commit, the TypeScript validator (`deterministic-validator.ts`) and the Python `validator_engine.py` together implement checkers for all 46 `ConstraintKind` values. The implementations must stay in sync.
+Failure here is treated as a hard violation and fed to Repair.
 
-Key implementation patterns in the TypeScript side:
+## Call Sites in local-agent.ts (the MUST-READ integration)
 
-- Slot maps (`teacherSlotMap`, `classSlotMap`, `assignmentSlotMap`) for O(1) lookups during capacity and blocking checks.
-- `evaluateCondition` for the `if_then` / `ConditionExpr` family (supports `and`/`or`/`not` nesting).
-- Special handling for `weekly_periods_exact`, `subject_consecutive`, `class_no_double_subject_day`, `resource_capacity`, `session_limit`, and the grouping constraints.
-- `customChecks` merging for hard `custom_dsl` predicates that were executed in the sandbox.
+After every successful `executeGeneratedCode`:
 
-The Python side (`validator_engine.py`) contains the authoritative reference implementations for the same logic, plus the interpreter for `pythonPredicate` strings in `custom_dsl` specs.
+1. Post-process schedule to attach unambiguous `assignmentId` values.
+2. Call `validateSchedule(...)` → produces `DeterministicValidationReport` (base/hard/soft pass flags, full violation lists, `uncheckedConstraintIds`, `hardUncheckedConstraintIds`, `hardCoverageComplete`).
+3. Call `verifyCpSatRoundTrip(...)`.
+4. Merge `customChecks` array from sandbox result for `custom_dsl` hard predicates that actually executed inside the generated solver.
+5. Compute `allHardViolations` and the final set of uncovered hard IDs.
+6. Accept only on the four conditions listed above; otherwise populate `deterministicReport` / `checkerReport` / `violations` on the failure path and hand control to the Repair stage (with bounded rounds: 1 runtime repair, 2 violation repair).
 
-## CP-SAT round-trip verification
+On the happy path the final `LocalAgentFinalResult` also carries:
+- `iisConstraintIds: []`
+- `conflictingConstraints: []`
+- `validationErrors: []`
+- `deterministicReport` (the full report)
 
-`verifyCpSatRoundTrip` (in `cp-sat-roundtrip.ts`) performs an independent consistency check:
+These fields are reserved for future IIS / conflict-set extraction and richer diagnostics; they are empty on clean success.
 
-1. From the returned `schedule` entries, it reconstructs which assignment slots were used.
-2. It verifies that the reconstructed usage exactly matches the input assignments' `weeklyPeriods` counts.
-3. It checks that no assignment was scheduled more times than declared, and that all declared periods were covered (unless the solver reported infeasible).
+## Relationship to the Broader Validation System
 
-A round-trip failure is treated as a hard error even if the deterministic constraint checkers passed. This catches cases where the solver produced a schedule that satisfies the encoded model but does not correspond to the original problem (a common symptom of Coder mistakes in constraint formulation).
+This stage is the runtime gate inside the agent loop. The complete static + dynamic validation picture (including standalone usage of the Python engine and the full `DeterministicValidationReport` contract) lives in the sibling page:
 
-## Integration in the agent loop
+- [Validation System](../validation.md)
 
-In `local-agent.ts`, after a successful `executeGeneratedCode` call:
+## Driving Repair
 
-```ts
-const report = validateSchedule(scheduleWithAssignmentIds, deduped, { assignments: ... });
-const roundTrip = verifyCpSatRoundTrip(...);
+Hard violations (plus round-trip failures and uncovered hard constraints) are exactly what the Repair stage consumes:
 
-const customChecks = (execResult.resultData as any).customChecks ?? [];
-// merge customChecks into report...
+- `runRepairTurn` receives the `Violation[]` list (or compile/runtime error).
+- Patches are applied atomically and control returns to the Coder → re-execute → re-validate cycle.
 
-const signature = buildViolationSignature(report.hardViolations, roundTrip.ok, roundTrip.message);
+See: [Repair Stage](repair.md) for budgets, patch safety, and repeated-violation short-circuit logic.
 
-if (!report.ok || !roundTrip.ok) {
-  // violation repair round or runtime repair
-  previousViolationSignature = signature;
-  // ... invoke Repair or retry Coder ...
-}
-```
+## Key Source Files (for this stage)
 
-The `signature` (constraint ids + round-trip status) is used to detect repeated identical failure modes and terminate the repair loop early with a clear diagnostic.
+| Path | Responsibility |
+|------|----------------|
+| `src/features/timetable/ai/local-agent.ts` | All validation call sites, customChecks merge, hard-violation decision, repair loop integration, `hardCoverageComplete` gate |
+| `src/features/timetable/ai/deterministic-validator.ts` | `validateSchedule` + all TS per-kind checkers + fail-closed coverage logic |
+| `src/features/timetable/ai/cp-sat-roundtrip.ts` | `verifyCpSatRoundTrip` implementation |
+| `python/validator_engine.py` | Reference Python checkers (used inside sandboxes for custom predicates and for standalone verification) |
+| `src/features/timetable/ai/constraint-registry.ts` | `CHECKED_KINDS` set that drives which kinds receive deterministic checkers |
+| `src/features/timetable/ai/constraint-spec.ts` | Core types: `DeterministicValidationReport`, `Violation`, `ConstraintSpec`, etc. |
 
-## Why two implementations (TS + Python)?
+## Notes
 
-- The TypeScript side runs in the browser/Electron renderer with zero additional dependencies and provides instant feedback in the UI.
-- The Python side (`validator_engine.py`) is the ground truth for the actual solver execution environment. It is the only place that can execute arbitrary `pythonPredicate` strings from hard `custom_dsl` constraints.
-- Cross-checking the two reports increases confidence that a "solved" timetable is genuinely correct.
-
-## Error handling and diagnostics
-
-- Unchecked hard constraints → `hardCoverageComplete = false` → `ok = false` → repair or failure.
-- Round-trip failure → treated as hard error → repair or failure.
-- Custom predicate execution errors inside the sandbox are captured in `customChecks` and surfaced as `executionErrors` in the final result.
-
-All of this information flows into `LocalAgentFinalResult` (`violations`, `deterministicReport`, `checkerReport`, `executionErrors`, `validationErrors`, `iisConstraintIds`, `conflictingConstraints`).
-
-## Testing
-
-- `src/features/timetable/ai/deterministic-validator.test.ts` — extensive unit tests for the TypeScript checkers.
-- `python/tests/test_validator_engine.py` — pytest coverage for the Python engine.
-- `cp-sat-roundtrip.test.ts` — round-trip verification tests.
-- End-to-end scenarios in `local-agent.test.ts`.
-
-## Related pages
-
-- [AI Pipeline index](index.md)
-- [Validation System](../validation.md) — deeper dive into the Python validator engine and the dual-implementation strategy
-- [Constraint System](../../../features/constraint-system.md) — the 46 kinds and their semantics
-- [Repair](repair.md) — what happens when this stage finds hard violations
-- [Python Execution](../python-execution.md) — the sandboxed environment that also runs custom predicates
-
-## Where to start if you need to add or change a checker
-
-1. Run `gitnexus_impact` on the checker functions and on `validateSchedule`.
-2. Add the new `ConstraintKind` to `constraint-spec.ts` (if it does not exist yet).
-3. Implement the checker in both:
-   - `src/features/timetable/ai/deterministic-validator.ts`
-   - `python/validator_engine.py`
-4. Update the Translator (prompt + fallback parser) if the new kind should be producible from natural language.
-5. Add unit tests on both sides.
-6. Verify that `hardCoverageComplete` logic still works (the new kind must be recognized as having a checker).
-7. Consider whether the new kind needs special handling in `verifyCpSatRoundTrip` or in the Coder skeleton registry.
+- `iisConstraintIds` and `conflictingConstraints` are carried in the final result envelope for future extraction of Irreducible Inconsistent Subsystems / minimal conflict sets from the CP-SAT solver. They are not yet populated by the current validator/round-trip layer.
+- When adding a new `ConstraintKind`, the pattern is: add to the union + registry, implement the checker in both TS and (where appropriate) Python, update translator fallback + coder/repair prompts, and ensure the new kind is either marked `hasChecker: true` or explicitly handled via code generation inside the solver.
