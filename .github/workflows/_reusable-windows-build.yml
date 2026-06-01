@@ -47,6 +47,10 @@ jobs:
         shell: pwsh
         run: npm ci
 
+      - name: Prune transient npm rename dirs in node_modules
+        shell: pwsh
+        run: node scripts/prune-transient.mjs
+
       - name: Cache Python executor binary
         id: cache-executor
         uses: actions/cache@v4
