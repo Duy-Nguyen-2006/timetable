@@ -108,6 +108,11 @@ jobs:
         shell: pwsh
         run: node scripts/smoke-openrouter.mjs
 
+      - name: Datasets parser smoke (datasets.txt)
+        if: ${{ hashFiles('scripts/smoke-datasets.ts') != '' && hashFiles('datasets.txt') != '' }}
+        shell: pwsh
+        run: npx tsx scripts/smoke-datasets.ts
+
       - name: Build if available
         if: ${{ hashFiles('package.json') != '' }}
         shell: pwsh
