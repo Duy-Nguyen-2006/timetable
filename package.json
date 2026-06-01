@@ -93,6 +93,7 @@
       "public/**/*",
       "package.json"
     ],
+    "afterPack": "scripts/electron-builder-after-pack.cjs",
     "extraResources": [
       {
         "from": "python-dist/code_executor",
