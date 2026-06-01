@@ -354,7 +354,40 @@ app.whenReady().then(() => {
         HOSTNAME: hostname,
         NODE_ENV: 'production',
       },
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let serverStdout = ''
+    let serverStderr = ''
+
+    serverProcess.stdout?.on('data', (chunk) => {
+      serverStdout += chunk.toString()
+      if (serverStdout.length > 8192) serverStdout = serverStdout.slice(-8192)
+      console.log('[NEXT-STANDALONE]', chunk.toString().trim())
+    })
+
+    serverProcess.stderr?.on('data', (chunk) => {
+      serverStderr += chunk.toString()
+      if (serverStderr.length > 8192) serverStderr = serverStderr.slice(-8192)
+      console.error('[NEXT-STANDALONE ERROR]', chunk.toString().trim())
+    })
+
+    serverProcess.on('error', (err) => {
+      console.error('[NEXT-STANDALONE] Failed to spawn Next server:', err)
+      notifyRenderer('app:server-error', {
+        message: `Không khởi động được server nội bộ: ${err.message}`,
+      })
+    })
+
+    serverProcess.on('exit', (code, signal) => {
+      if (code !== 0) {
+        console.error(`[NEXT-STANDALONE] Server exited with code ${code}, signal ${signal}`)
+        console.error('Last stdout (tail):', serverStdout.slice(-2000))
+        console.error('Last stderr (tail):', serverStderr.slice(-2000))
+        notifyRenderer('app:server-error', {
+          message: `Server nội bộ đã thoát bất thường (code ${code}). Xem console để biết chi tiết.`,
+        })
+      }
     })
 
     const url = `http://${hostname}:${port}`

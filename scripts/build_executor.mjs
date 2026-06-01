@@ -23,7 +23,38 @@ function fail(message) {
 
 if (!existsSync(entry)) fail(`Missing entrypoint: ${entry}`)
 
-const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3')
+// --- Resolve Python: env override → .venv-build → .venv → system ---
+function findPython() {
+  if (process.env.PYTHON) {
+    console.log(`[build_executor] Using PYTHON env: ${process.env.PYTHON}`)
+    return process.env.PYTHON
+  }
+
+  // Prefer project-local venvs over system Python
+  const candidates = [
+    path.join(root, '.venv-build', 'bin', 'python'),
+    path.join(root, '.venv', 'bin', 'python'),
+    process.platform === 'win32' ? 'python' : 'python3',
+  ]
+
+  for (const candidate of candidates) {
+    // Skip absolute paths that don't exist on disk
+    if (path.isAbsolute(candidate) && !existsSync(candidate)) continue
+
+    const probe = spawnSync(candidate, ['-m', 'PyInstaller', '--version'], {
+      encoding: 'utf8',
+      timeout: 5000,
+    })
+    if (probe.status === 0) {
+      console.log(`[build_executor] Auto-detected Python: ${candidate}`)
+      return candidate
+    }
+  }
+
+  return candidates[candidates.length - 1] // last resort, will fail below with a clear message
+}
+
+const python = findPython()
 
 // Verify pyinstaller is importable in the chosen interpreter.
 const check = spawnSync(python, ['-m', 'PyInstaller', '--version'], { encoding: 'utf8' })
@@ -33,6 +64,16 @@ if (check.status !== 0) {
   )
 }
 console.log(`[build_executor] PyInstaller ${String(check.stdout).trim()} via ${python}`)
+
+const ortoolsCheck = spawnSync(python, ['-c', 'import ortools; print(ortools.__version__)'], {
+  encoding: 'utf8',
+})
+if (ortoolsCheck.status !== 0) {
+  fail(
+    `ortools not available for "${python}". Install with: ${python} -m pip install pyinstaller ortools`
+  )
+}
+console.log(`[build_executor] ortools ${String(ortoolsCheck.stdout).trim()} via ${python}`)
 
 const sep = process.platform === 'win32' ? ';' : ':'
 // Bundle the python sources the executor imports at runtime (sandbox/, templates).

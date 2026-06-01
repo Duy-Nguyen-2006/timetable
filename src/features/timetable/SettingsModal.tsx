@@ -90,15 +90,25 @@ export function SettingsModal({
         }),
       });
 
-      const payload = await res.json().catch(() => null);
-      const message = payload?.message as string | undefined;
-      const details = payload?.details as string | undefined;
+      const raw = await res.text();
+      let payload: { ok?: boolean; message?: string; details?: string } | null = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = null;
+      }
 
-      if (payload?.ok) {
+      const message = payload?.message;
+      const details = payload?.details;
+
+      if (res.ok && payload?.ok) {
         setTestResult(message ?? '✅ Kết nối thành công!');
         toast({ title: 'Kết nối thành công', description: 'Bạn có thể lưu cấu hình.' });
       } else {
-        const composed = [message ?? '❌ Test thất bại.', details].filter(Boolean).join('\n');
+        const fallback = raw
+          ? `HTTP ${res.status}: ${raw.slice(0, 400)}`
+          : `HTTP ${res.status}: Không có phản hồi từ server nội bộ.`;
+        const composed = [message ?? '❌ Test thất bại.', details ?? fallback].filter(Boolean).join('\n');
         setTestResult(composed);
       }
     } catch (e: any) {

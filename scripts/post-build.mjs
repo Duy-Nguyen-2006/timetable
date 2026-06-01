@@ -25,6 +25,30 @@ if (existsSync(publicDir)) {
   console.log('[post-build] copied public assets into standalone runtime.');
 }
 
+const nextServerRuntimeDir = path.join('node_modules', 'next', 'dist', 'compiled', 'next-server');
+const sourceNextServerRuntimeDir = path.join(process.cwd(), nextServerRuntimeDir);
+const standaloneNextServerRuntimeDir = path.join(standaloneDir, nextServerRuntimeDir);
+const requiredNextServerRuntimeFiles = [
+  'app-route.runtime.prod.js',
+  'app-route.runtime.prod.js.map',
+  'app-route-experimental.runtime.prod.js',
+  'app-route-experimental.runtime.prod.js.map',
+  'app-route-turbo.runtime.prod.js',
+  'app-route-turbo.runtime.prod.js.map',
+  'app-route-turbo-experimental.runtime.prod.js',
+  'app-route-turbo-experimental.runtime.prod.js.map',
+];
+
+if (existsSync(sourceNextServerRuntimeDir)) {
+  mkdirSync(standaloneNextServerRuntimeDir, { recursive: true });
+  for (const filename of requiredNextServerRuntimeFiles) {
+    const source = path.join(sourceNextServerRuntimeDir, filename);
+    if (!existsSync(source)) continue;
+    cpSync(source, path.join(standaloneNextServerRuntimeDir, filename));
+  }
+  console.log('[post-build] ensured Next app-route runtimes in standalone runtime.');
+}
+
 const TRANSIENT_DIR = /^[A-Za-z0-9._-]+-[0-9a-f]{16}$/u;
 function pruneTransient(root) {
   if (!existsSync(root)) return;
