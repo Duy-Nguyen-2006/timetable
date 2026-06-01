@@ -56,6 +56,7 @@ import {
   persistProviderConfig,
 } from './ai/provider-storage'
 import {
+  buildRunCacheDigest,
   readCachedRuns,
   writeCachedRun,
 } from './ai/run-cache'
@@ -131,6 +132,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [isFirstRun, setIsFirstRun] = useState(false)
   const [solverRuntimeNotice, setSolverRuntimeNotice] = useState<string | null>(null)
+  const [secureStorageNotice, setSecureStorageNotice] = useState<string | null>(null)
 
   const pushSolverRuntimeMode = (mode: AIProviderConfig['solverRuntimeMode']) => {
     try {
@@ -149,6 +151,12 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
         if (config) {
           setAiProvider(config)
           pushSolverRuntimeMode(config.solverRuntimeMode)
+          const hasSecureBridge = Boolean((window as any).electron?.secureStore?.isAvailable)
+          const secureAvailable = hasSecureBridge ? await (window as any).electron.secureStore.isAvailable() : true
+          const localFallback = typeof window !== 'undefined' && Boolean(window.localStorage.getItem('tack_ai_provider_config'))
+          if (!secureAvailable || localFallback) {
+            setSecureStorageNotice('API key có thể đang được lưu không mã hóa vì máy/renderer chưa hỗ trợ secure storage. Hãy cân nhắc không lưu key trên máy này.')
+          }
         } else {
           setIsFirstRun(true)
         }
@@ -733,7 +741,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           constraints: requestConstraints,
           ...(aiResult?.schedule?.length ? { previousSchedule: aiResult.schedule } : {}),
         }
-        const inputDigest = JSON.stringify(agentInput)
+        const inputDigest = buildRunCacheDigest(agentInput, aiProvider)
         const cachedRun = readCachedRuns().find((run) => run.inputDigest === inputDigest)
         if (cachedRun) {
           setAiResult(cachedRun.result)
@@ -1952,6 +1960,19 @@ const handleDownloadExcel = useCallback(() => {
                         </div>
                       )}
 
+                      {secureStorageNotice && (
+                        <div className="mb-4 flex items-start justify-between gap-3 rounded-md border border-amber-400/30 bg-amber-400/[0.06] px-4 py-3 text-xs text-amber-200">
+                          <span>{secureStorageNotice}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSecureStorageNotice(null)}
+                            className="shrink-0 text-amber-200/70 hover:text-amber-100"
+                          >
+                            Đóng
+                          </button>
+                        </div>
+                      )}
+
                       {aiLoading && (
                         <div className="mb-4 rounded-md border border-white/[0.08] bg-[#0a0a0a] p-4">
                           {/* Header with timer */}
@@ -2352,9 +2373,14 @@ const handleDownloadExcel = useCallback(() => {
           if (!open && isFirstRun && !aiProvider) setShowSettingsModal(true);
         }}
         initialConfig={aiProvider || undefined}
-        onSave={(config) => {
+        onSave={async (config) => {
           setAiProvider(config);
-          void persistProviderConfig(config);
+          const result = await persistProviderConfig(config);
+          setSecureStorageNotice(
+            result.secure
+              ? null
+              : 'API key đang được lưu không mã hóa vì máy/renderer chưa hỗ trợ secure storage. Hãy cân nhắc không lưu key trên máy này.',
+          );
           pushSolverRuntimeMode(config.solverRuntimeMode);
           setIsFirstRun(false);
         }}

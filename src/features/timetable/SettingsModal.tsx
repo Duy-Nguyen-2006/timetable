@@ -13,7 +13,7 @@ interface SettingsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialConfig?: Partial<AIProviderConfig>;
-  onSave: (config: AIProviderConfig) => void;
+  onSave: (config: AIProviderConfig) => void | Promise<void>;
   requireValid?: boolean; // first-run mode
 }
 
@@ -58,6 +58,7 @@ export function SettingsModal({
   const [solverProfile, setSolverProfile] = useState<SolverProfile>(initialConfig?.solverProfile || 'balanced');
   const [solverRuntimeMode, setSolverRuntimeMode] = useState<SolverRuntimeMode>(initialConfig?.solverRuntimeMode || 'bundled');
   const [isTesting, setIsTesting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -107,7 +108,7 @@ export function SettingsModal({
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmedBaseURL = normalizeBaseURL(baseURL.trim());
     const trimmedKey = apiKey.trim();
     const trimmedModel = model.trim();
@@ -132,19 +133,24 @@ export function SettingsModal({
       return;
     }
 
-    onSave({
-      provider: inferProvider(trimmedBaseURL, trimmedModel),
-      baseURL: trimmedBaseURL,
-      apiKey: trimmedKey,
-      model: trimmedModel,
-      modelTranslator: modelTranslator.trim() || undefined,
-      modelPlanner: modelPlanner.trim() || undefined,
-      modelCoder: modelCoder.trim() || undefined,
-      modelRepair: modelRepair.trim() || undefined,
-      solverProfile,
-      solverRuntimeMode,
-    });
-    onOpenChange(false);
+    setIsSaving(true);
+    try {
+      await onSave({
+        provider: inferProvider(trimmedBaseURL, trimmedModel),
+        baseURL: trimmedBaseURL,
+        apiKey: trimmedKey,
+        model: trimmedModel,
+        modelTranslator: modelTranslator.trim() || undefined,
+        modelPlanner: modelPlanner.trim() || undefined,
+        modelCoder: modelCoder.trim() || undefined,
+        modelRepair: modelRepair.trim() || undefined,
+        solverProfile,
+        solverRuntimeMode,
+      });
+      onOpenChange(false);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -282,8 +288,8 @@ export function SettingsModal({
               Hủy
             </Button>
           )}
-          <Button onClick={handleSave}>
-            Lưu cấu hình
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? 'Đang lưu...' : 'Lưu cấu hình'}
           </Button>
         </div>
 
