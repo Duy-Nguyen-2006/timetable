@@ -16,13 +16,17 @@ export async function invokeChat(
   payload: ChatPayload
 ): Promise<{ content?: string; usage?: ChatUsage }> {
   const { apiKey, ...rest } = payload;
+
   const response = await fetch('/api/ai/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Provider-Key': apiKey,
     },
-    body: JSON.stringify(rest),
+    body: JSON.stringify({
+      ...rest,
+      apiKey, // internal server fallback; never forward this field except as Authorization bearer
+    }),
   });
 
   const body = (await response.json().catch(() => null)) as {
@@ -33,7 +37,9 @@ export async function invokeChat(
   };
 
   if (!response.ok || !body?.ok) {
-    throw new Error(body?.error || `Chat API failed with status ${response.status}`);
+    const err = body?.error || `Chat API failed with status ${response.status}`;
+    // Distinguish internal config, provider body rejection, and auth for UI/repair loops
+    throw new Error(err);
   }
 
   return {

@@ -113,9 +113,34 @@ export async function POST(request: Request) {
         )
       }
 
+      // FIX 4: minimal chat/completions smoke (no json_schema) to prove request shape works
+      const chatSmokeRes = await fetchWithTimeout(`${baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'Return OK' }],
+          max_tokens: 2,
+          temperature: 0,
+        }),
+      })
+
+      if (!chatSmokeRes.ok) {
+        const errorText = await chatSmokeRes.text()
+        return NextResponse.json(
+          {
+            ok: false,
+            message: '❌ API key và model hợp lệ nhưng chat completion thất bại (request body có thể không tương thích).',
+            details: `HTTP ${chatSmokeRes.status} ${chatSmokeRes.statusText}: ${errorText.slice(0, 400)}`,
+          },
+          { status: 200 },
+        )
+      }
+
       return NextResponse.json({
         ok: true,
-        message: '✅ Kết nối thành công! API key OpenRouter hợp lệ và model tồn tại.',
+        message: '✅ Kết nối thành công! API key OpenRouter hợp lệ, model tồn tại và chat completion hoạt động.',
       })
     }
 

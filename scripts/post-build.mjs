@@ -9,6 +9,19 @@ if (missing.length > 0) {
   console.warn(`[post-build] Missing optional artifacts: ${missing.join(', ')}`);
 }
 
+const requiredPrompts = [
+  'public/prompts/coder.system.md',
+  'public/prompts/planner.system.md',
+  'public/prompts/repair.system.md',
+  'public/prompts/translator.system.md',
+];
+const missingPrompts = requiredPrompts.filter((p) => !existsSync(p));
+if (missingPrompts.length > 0) {
+  console.error(`[post-build] CRITICAL: Missing prompt files required for AI pipeline: ${missingPrompts.join(', ')}`);
+  console.error('[post-build] The AppImage will fail to generate timetables without these prompts.');
+  process.exit(1);
+}
+
 const standaloneDir = path.join(process.cwd(), '.next', 'standalone');
 const standaloneNextDir = path.join(standaloneDir, '.next');
 mkdirSync(standaloneNextDir, { recursive: true });

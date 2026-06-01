@@ -19,7 +19,7 @@ implemented until tests or validation evidence exist.
 
 | Story | Contract | Unit | Integration | E2E | Platform | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TBD | Add rows when story packets are created | no | no | no | no | planned | none |
+| FIX-001 | AppImage stability: dual apiKey transport, provider 400 retry+compat, safe tokens, OR chat smoke, daemon JSON hygiene (bwrap+redirect+tolerant parser), distinguishable errors | yes (helpers + error builders) | partial (route retry, provider smoke, python daemon) | dev smoke with real provider | AppImage required (manual) | implemented | See docs/stories/FIX-001-appimage-provider-daemon-stability/validation.md; harness story FIX-001 |
 
 ## Evidence Rules
 

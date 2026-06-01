@@ -136,7 +136,7 @@ def run_with_bubblewrap(
         cmd.extend(["--ro-bind", interp_binds[0], interp_binds[1]])
     cmd.extend(interp_argv)
 
-    print(f"[Bubblewrap] Running {file_path.name} in lightweight sandbox...")
+    print(f"[Bubblewrap] Running {file_path.name} in lightweight sandbox...", file=sys.stderr)
 
     try:
         result = subprocess.run(

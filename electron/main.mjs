@@ -91,24 +91,48 @@ function spawnDaemon(spec) {
 
   worker.stdout.on('data', (chunk) => {
     daemonStdout += chunk.toString()
-    const newlineIdx = daemonStdout.indexOf('\n')
-    if (newlineIdx === -1) return
-    const line = daemonStdout.slice(0, newlineIdx).trim()
-    daemonStdout = daemonStdout.slice(newlineIdx + 1)
-    if (!daemonPending) return
-    const { resolve, timer } = daemonPending
-    daemonPending = null
-    clearTimeout(timer)
-    try {
-      const parsed = JSON.parse(line)
-      let resultData
-      if (parsed.resultPath && fs.existsSync(parsed.resultPath)) {
-        try { resultData = JSON.parse(fs.readFileSync(parsed.resultPath, 'utf8')) } catch { /* ignore */ }
+
+    while (true) {
+      const newlineIdx = daemonStdout.indexOf('\n')
+      if (newlineIdx === -1) return
+
+      const line = daemonStdout.slice(0, newlineIdx).trim()
+      daemonStdout = daemonStdout.slice(newlineIdx + 1)
+
+      if (!line) continue
+
+      if (!line.startsWith('{')) {
+        console.warn('[PYTHON-DAEMON NON-JSON]', line)
+        continue
       }
-      resolve({ ...parsed, ...(resultData ? { resultData } : {}) })
-    } catch (e) {
-      resolve({ ok: false, status: 'crashed', durationMs: 0,
-        errorDigest: `[MAIN] Failed to parse daemon output: ${e.message}` })
+
+      if (!daemonPending) continue
+
+      const { resolve, timer } = daemonPending
+      daemonPending = null
+      clearTimeout(timer)
+
+      try {
+        const parsed = JSON.parse(line)
+        let resultData
+        if (parsed.resultPath && fs.existsSync(parsed.resultPath)) {
+          try {
+            resultData = JSON.parse(fs.readFileSync(parsed.resultPath, 'utf8'))
+          } catch {
+            /* ignore */
+          }
+        }
+        resolve({ ...parsed, ...(resultData ? { resultData } : {}) })
+      } catch (e) {
+        resolve({
+          ok: false,
+          status: 'crashed',
+          durationMs: 0,
+          errorDigest: `[MAIN] Failed to parse daemon output: ${e.message}`,
+        })
+      }
+
+      return
     }
   })
 
@@ -175,6 +199,73 @@ async function waitForServer(url, timeoutMs = 15000) {
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
   return false
+}
+
+async function verifyApiRoutes(baseUrl) {
+  const routes = [
+    { path: '/prompts/coder.system.md', name: 'coder prompt' },
+    { path: '/templates/solver_skeleton.py', name: 'solver skeleton' },
+  ]
+  const issues = []
+  for (const route of routes) {
+    try {
+      const res = await fetch(`${baseUrl}${route.path}`)
+      if (!res.ok) issues.push(`${route.name} (HTTP ${res.status})`)
+    } catch (err) {
+      issues.push(`${route.name} (${err.message})`)
+    }
+  }
+  if (issues.length > 0) {
+    console.warn('[STARTUP-CHECK] Missing assets in standalone:', issues.join(', '))
+    notifyRenderer('app:server-error', {
+      message: `Cảnh báo: Một số tài nguyên AI không khả dụng: ${issues.join(', ')}. Pipeline có thể hoạt động không ổn định.`,
+    })
+  }
+  return issues.length === 0
+}
+
+async function prewarmApiRoutes(baseUrl) {
+  const routes = [
+    '/api/provider/test',
+    '/api/ai/chat',
+    '/api/ai/python-execute',
+    '/api/ai/python-syntax-check',
+    '/api/ai/python-ast-check',
+    '/api/ai/solver-skeleton',
+    '/prompts/coder.system.md',
+    '/prompts/planner.system.md',
+    '/prompts/translator.system.md',
+    '/prompts/repair.system.md',
+    '/templates/solver_skeleton.py',
+  ]
+  const start = Date.now()
+  await Promise.allSettled(
+    routes.map((route) =>
+      fetch(`${baseUrl}${route}`, { method: 'GET' }).catch(() => {})
+    )
+  )
+  console.log(`[WARM-UP] API routes pre-warmed in ${Date.now() - start}ms`)
+}
+
+function prewarmPythonDaemon() {
+  const dockerAvailable = false
+  const spec = resolveSpawnSpec({
+    mode: currentRuntimeMode,
+    isDev,
+    isPackaged: app.isPackaged,
+    appDir: __dirname,
+    resourcesPath: process.resourcesPath,
+    platform: process.platform,
+    dockerAvailable,
+  })
+  if (!fs.existsSync(spec.command)) {
+    console.warn('[WARM-UP] Python executor binary not found, skipping daemon pre-warm')
+    return
+  }
+  const worker = ensureDaemon(spec)
+  if (worker) {
+    console.log('[WARM-UP] Python daemon pre-spawned')
+  }
 }
 
 function createWindow(url) {
@@ -392,7 +483,21 @@ app.whenReady().then(() => {
     })
 
     const url = `http://${hostname}:${port}`
-    void waitForServer(url).then(() => createWindow(url))
+    void waitForServer(url).then(async (ready) => {
+      if (!ready) {
+        console.error('[STARTUP] Next.js standalone server did not become ready in time.')
+        notifyRenderer('app:server-error', {
+          message: 'Server nội bộ không khởi động được. Vui lòng thử khởi động lại ứng dụng.',
+        })
+        return
+      }
+      createWindow(url)
+      prewarmPythonDaemon()
+      await Promise.all([
+        verifyApiRoutes(url),
+        prewarmApiRoutes(url),
+      ])
+    })
   }
 })
 

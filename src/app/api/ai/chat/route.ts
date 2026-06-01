@@ -135,6 +135,41 @@ function extractResponseContent(payload: unknown): { content: string; usage: Rec
   return { content, usage };
 }
 
+function stripCacheControlFromMessages(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((message) => {
+    if (!message || typeof message !== 'object') return message;
+    const { cache_control, ...rest } = message as Record<string, unknown>;
+    return rest;
+  });
+}
+
+function buildCompatibilityRetryBody(
+  provider: ProviderType,
+  requestBody: Record<string, unknown>
+): Record<string, unknown> {
+  const next = { ...requestBody };
+
+  if (provider === 'openai-responses') {
+    delete next.text;
+    const rawMax = Number(next.max_output_tokens ?? 4000);
+    next.max_output_tokens = Math.min(
+      Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 4000,
+      12000
+    );
+    return next;
+  }
+
+  delete next.response_format;
+  next.messages = stripCacheControlFromMessages(next.messages);
+  const rawMax = Number(next.max_tokens ?? 4000);
+  next.max_tokens = Math.min(
+    Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 4000,
+    12000
+  );
+  return next;
+}
+
 function parseSsePayload(raw: string): { content: string; usage: Record<string, unknown> | null } | null {
   const lines = raw.split(/\r?\n/u);
   let sawDataLine = false;
@@ -248,9 +283,13 @@ export async function POST(request: Request) {
     const model = String(body.model ?? '').trim();
     const messages = Array.isArray(body.messages) ? body.messages : [];
 
-    if (!baseURL || !apiKey || !model || messages.length === 0) {
+    const apiKeyReceived = Boolean(apiKey);
+    if (!baseURL || !apiKeyReceived || !model || messages.length === 0) {
       return NextResponse.json(
-        { ok: false, error: 'Missing baseURL/apiKey/model/messages' },
+        {
+          ok: false,
+          error: `Internal chat config missing: baseURL/model/messages/apiKeyReceived=${apiKeyReceived}`,
+        },
         { status: 400 }
       );
     }
@@ -258,7 +297,15 @@ export async function POST(request: Request) {
     const cacheEnabled = Boolean((body.cache_control as { enable?: boolean } | undefined)?.enable);
     const provider = resolveProviderShared(body.provider, baseURL, model);
     const chatRequest = buildChatRequest(provider, baseURL, model, messages, body, cacheEnabled);
-    const response = await fetchWithRetry(chatRequest.url, {
+
+    // Diagnostics (safe, no apiKey)
+    const baseHost = (() => { try { return new URL(baseURL).host; } catch { return 'unknown'; } })();
+    const usedResponseFormat = Boolean(chatRequest.requestBody.response_format || (chatRequest.requestBody as any).text?.format);
+    const maxTokensUsed = Number(
+      (chatRequest.requestBody as any).max_tokens ?? (chatRequest.requestBody as any).max_output_tokens ?? 4000
+    );
+
+    let response = await fetchWithRetry(chatRequest.url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -269,7 +316,32 @@ export async function POST(request: Request) {
       body: JSON.stringify(chatRequest.requestBody),
     });
 
-    const raw = await response.text();
+    let raw = await response.text();
+    let usedRetry = false;
+
+    if (!response.ok && (response.status === 400 || response.status === 422)) {
+      // Compatibility retry: strip json_schema / text.format, clamp tokens, drop cache_control + anthropic header
+      const retryBody = buildCompatibilityRetryBody(provider, chatRequest.requestBody);
+      const retryResponse = await fetchWithRetry(chatRequest.url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          // deliberately omit extra headers like anthropic-beta on retry
+        },
+        cache: 'no-store',
+        body: JSON.stringify(retryBody),
+      });
+      const retryRaw = await retryResponse.text();
+      if (retryResponse.ok) {
+        response = retryResponse;
+        raw = retryRaw;
+        usedRetry = true;
+      } else {
+        // Both failed; fall through with original response/raw for error details below
+      }
+    }
+
     if (!response.ok) {
       let details = '';
       try {
@@ -278,10 +350,30 @@ export async function POST(request: Request) {
       } catch {
         details = raw;
       }
+
+      const status = response.status;
+      let errorMsg: string;
+      if (status === 401 || status === 403) {
+        errorMsg = `Provider auth rejected (HTTP ${status}). Check API key for ${provider} at ${baseHost}.`;
+      } else if (status === 400 || status === 422) {
+        errorMsg = `Provider rejected request body (HTTP ${status}, not auth/key). provider=${provider} host=${baseHost} model=${model} response_format=${usedResponseFormat} max_tokens=${maxTokensUsed}${usedRetry ? ' (retry also failed)' : ''}. ${details.slice(0, 300)}`;
+      } else {
+        errorMsg = `Provider HTTP ${status} ${response.statusText}: ${details.slice(0, 400)}`;
+      }
+
       return NextResponse.json(
         {
           ok: false,
-          error: `Provider HTTP ${response.status} ${response.statusText}: ${details.slice(0, 400)}`,
+          error: errorMsg,
+          diagnostics: {
+            provider,
+            host: baseHost,
+            model,
+            status,
+            usedResponseFormat,
+            maxTokensUsed,
+            retried: usedRetry,
+          },
         },
         { status: 500 }
       );
@@ -296,11 +388,15 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({
+    const successPayload: any = {
       ok: true,
       content: parsed.content,
       usage: parsed.usage,
-    });
+    };
+    if (usedRetry) {
+      successPayload.diagnostics = { retriedForCompatibility: true, provider, host: baseHost, model };
+    }
+    return NextResponse.json(successPayload);
   } catch (error) {
     return NextResponse.json(
       {
@@ -318,4 +414,6 @@ export const __chatInternal = {
   resolveProvider: resolveProviderShared,
   buildChatRequest,
   parseProviderResponse,
+  stripCacheControlFromMessages,
+  buildCompatibilityRetryBody,
 };

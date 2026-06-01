@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import ast
+import contextlib
 import json
 import py_compile
 import runpy
@@ -373,7 +374,8 @@ def daemon() -> None:
         if solver_workers is not None:
             _os_mod.environ["SOLVER_WORKERS"] = str(int(solver_workers))
         try:
-            result = run_user_code(code, timeout, job_dir)
+            with contextlib.redirect_stdout(sys.stderr):
+                result = run_user_code(code, timeout, job_dir)
         except Exception:
             result = {"phase": "run", "ok": False, "status": "crashed", "durationMs": 0,
                       "errorDigest": _digest_error(traceback.format_exc()), "stdout": "", "stderr": ""}
