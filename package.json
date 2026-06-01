@@ -84,6 +84,8 @@
     "directories": {
       "output": "release"
     },
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
     "files": [
       "electron/**/*.mjs",
       "electron/**/*.cjs",
