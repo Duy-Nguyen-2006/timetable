@@ -8,9 +8,9 @@ on:
 
 jobs:
   build:
-    uses: ./.github/workflows/_reusable-windows-build.yml
     permissions:
       contents: write
+    uses: ./.github/workflows/_reusable-windows-build.yml
     with:
       artifact_name: windows-release
       publish_release: ${{ startsWith(github.ref, 'refs/tags/v') }}
