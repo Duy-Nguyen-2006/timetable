@@ -1,0 +1,113 @@
+name: Windows CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      smoke_command:
+        description: "Optional custom command to start the app for the readiness probe"
+        required: false
+        default: ""
+      run_package:
+        description: "Also build the Windows installer (NSIS)"
+        type: boolean
+        default: true
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "electron/**"
+      - "python/**"
+      - "sandbox/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - "requirements.txt"
+      - ".github/workflows/windows-ci.yml"
+      - ".github/workflows/_reusable-windows-build.yml"
+  pull_request:
+    branches: [master]
+
+env:
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+  OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENAI_BASE_URL: https://openrouter.ai/api/v1
+  MODEL_NAME: deepseek/deepseek-v4-flash
+  AI_MODEL: deepseek/deepseek-v4-flash
+  LLM_MODEL: deepseek/deepseek-v4-flash
+  GITHUB_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+  GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+  CI: "true"
+
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.TEST_GH_TOKEN }}
+          persist-credentials: false
+
+      - name: Validate electron main syntax (fail fast)
+        shell: pwsh
+        run: node --check electron/main.mjs
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify required secrets present
+        shell: pwsh
+        run: |
+          if (-not $env:OPENROUTER_API_KEY) {
+            Write-Error "Missing secret OPENROUTER_API_KEY"
+            exit 1
+          }
+          Write-Host "Secrets check: OK"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: npm ci
+
+      - name: OpenRouter connectivity probe
+        shell: pwsh
+        run: node scripts/smoke-openrouter.mjs
+
+      - name: Datasets parser smoke (datasets.txt)
+        shell: pwsh
+        run: npx tsx scripts/smoke-datasets.ts
+
+      - name: Build
+        shell: pwsh
+        run: npm run build
+
+      - name: Test
+        shell: pwsh
+        run: npm test
+
+      - name: HTTP readiness probe (next start)
+        shell: pwsh
+        run: node scripts/smoke-http.mjs
+        env:
+          SMOKE_START_COMMAND: ${{ github.event.inputs.smoke_command }}
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-logs
+          path: |
+            windows-smoke.log
+            *.log
+          if-no-files-found: ignore
+
+  windows-package:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_package == 'true' }}
+    uses: ./.github/workflows/_reusable-windows-build.yml
+    with:
+      artifact_name: windows-installer
+      publish_release: false
