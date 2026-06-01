@@ -8,27 +8,22 @@ on:
         required: false
         default: ""
 
+env:
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+  OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENAI_BASE_URL: https://openrouter.ai/api/v1
+  MODEL_NAME: deepseek/deepseek-v4-flash
+  AI_MODEL: deepseek/deepseek-v4-flash
+  LLM_MODEL: deepseek/deepseek-v4-flash
+  GITHUB_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+  GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+  CI: "true"
+
 jobs:
   windows-smoke:
     runs-on: windows-latest
     timeout-minutes: 20
-
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
-
-      OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      OPENAI_BASE_URL: https://openrouter.ai/api/v1
-
-      MODEL_NAME: deepseek/deepseek-v4-flash
-      AI_MODEL: deepseek/deepseek-v4-flash
-      LLM_MODEL: deepseek/deepseek-v4-flash
-
-      GITHUB_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
-      GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
-
-      CI: "true"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,60 +31,25 @@ jobs:
           token: ${{ secrets.TEST_GH_TOKEN }}
           persist-credentials: false
 
+      - name: Validate electron main syntax (fail fast)
+        shell: pwsh
+        run: node --check electron/main.mjs
+
       - name: Show environment info
         shell: pwsh
         run: |
           Write-Host "OS:"
           Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsArchitecture | Format-List
-
           Write-Host "Node:"
           try { node --version } catch { Write-Host "node not installed yet" }
-
           Write-Host "NPM:"
           try { npm --version } catch { Write-Host "npm not installed yet" }
 
       - name: Setup Node
-        if: ${{ hashFiles('package.json') != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Detect package manager
-        if: ${{ hashFiles('package.json') != '' }}
-        shell: pwsh
-        run: |
-          if (Test-Path "pnpm-lock.yaml") {
-            "PKG=pnpm" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          elseif (Test-Path "yarn.lock") {
-            "PKG=yarn" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          else {
-            "PKG=npm" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
-
-      - name: Install dependencies
-        if: ${{ hashFiles('package.json') != '' }}
-        shell: pwsh
-        run: |
-          corepack enable
-
-          if (Test-Path "pnpm-lock.yaml") {
-            Write-Host "Detected pnpm"
-            pnpm install --frozen-lockfile
-          }
-          elseif (Test-Path "yarn.lock") {
-            Write-Host "Detected yarn"
-            yarn install --immutable
-          }
-          elseif (Test-Path "package-lock.json") {
-            Write-Host "Detected npm ci"
-            npm ci
-          }
-          else {
-            Write-Host "Detected npm install"
-            npm install
-          }
+          cache: npm
 
       - name: Verify required secrets present
         shell: pwsh
@@ -98,77 +58,39 @@ jobs:
             Write-Error "Missing secret OPENROUTER_API_KEY"
             exit 1
           }
-          if (-not $env:GITHUB_TOKEN) {
-            Write-Host "Note: TEST_GH_TOKEN not set. Continuing without GitHub auth."
-          }
           Write-Host "Secrets check: OK"
 
+      - name: Install dependencies
+        shell: pwsh
+        run: npm ci
+
       - name: OpenRouter connectivity probe
-        if: ${{ hashFiles('scripts/smoke-openrouter.mjs') != '' }}
         shell: pwsh
         run: node scripts/smoke-openrouter.mjs
 
       - name: Datasets parser smoke (datasets.txt)
-        if: ${{ hashFiles('scripts/smoke-datasets.ts') != '' && hashFiles('datasets.txt') != '' }}
         shell: pwsh
         run: npx tsx scripts/smoke-datasets.ts
 
-      - name: Build if available
-        if: ${{ hashFiles('package.json') != '' }}
+      - name: Build
         shell: pwsh
-        run: |
-          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
-          if ($pkgJson.scripts.build) {
-            Write-Host "Running build..."
-            if ($env:PKG -eq "pnpm")      { pnpm run build }
-            elseif ($env:PKG -eq "yarn")  { yarn build }
-            else                          { npm run build }
-          }
-          else {
-            Write-Host "No build script found. Skipping."
-          }
+        run: npm run build
 
-      - name: Test if available
-        if: ${{ hashFiles('package.json') != '' }}
+      - name: Test
         shell: pwsh
-        run: |
-          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
-          if ($pkgJson.scripts.test) {
-            Write-Host "Running tests..."
-            if ($env:PKG -eq "pnpm")      { pnpm run test }
-            elseif ($env:PKG -eq "yarn")  { yarn test }
-            else                          { npm run test }
-          }
-          else {
-            Write-Host "No test script found. Skipping."
-          }
+        run: npm test
 
       - name: Run smoke command
-        if: ${{ hashFiles('package.json') != '' }}
         shell: pwsh
         run: |
           $custom = "${{ github.event.inputs.smoke_command }}"
-          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
-
           if ($custom -and $custom.Trim().Length -gt 0) {
             $cmd = $custom
-          }
-          elseif ($pkgJson.scripts.smoke) {
-            $cmd = "$env:PKG run smoke"
-          }
-          elseif ($pkgJson.scripts.start) {
-            $cmd = "$env:PKG run start"
-          }
-          elseif ($pkgJson.scripts.dev) {
-            $cmd = "$env:PKG run dev"
-          }
-          else {
-            Write-Host "No smoke/start/dev script found. Install/build/test already passed."
-            exit 0
+          } else {
+            $cmd = "npm run start"
           }
 
           Write-Host "Running smoke command: $cmd"
-
           $logFile = "windows-smoke.log"
 
           $process = Start-Process `
@@ -177,7 +99,10 @@ jobs:
             -PassThru `
             -WindowStyle Hidden
 
-          Start-Sleep -Seconds 30
+          $deadline = (Get-Date).AddSeconds(30)
+          while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+          }
 
           if ($process.HasExited) {
             $code = $process.ExitCode
@@ -213,19 +138,6 @@ jobs:
   windows-package:
     runs-on: windows-latest
     timeout-minutes: 45
-
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
-      OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      OPENAI_BASE_URL: https://openrouter.ai/api/v1
-      MODEL_NAME: deepseek/deepseek-v4-flash
-      AI_MODEL: deepseek/deepseek-v4-flash
-      LLM_MODEL: deepseek/deepseek-v4-flash
-      GITHUB_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
-      GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
-      CI: "true"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -233,15 +145,22 @@ jobs:
           token: ${{ secrets.TEST_GH_TOKEN }}
           persist-credentials: false
 
+      - name: Validate electron main syntax (fail fast)
+        shell: pwsh
+        run: node --check electron/main.mjs
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install Python deps (ortools + pyinstaller)
         shell: pwsh
@@ -251,14 +170,17 @@ jobs:
 
       - name: Install JS deps
         shell: pwsh
-        run: |
-          if (Test-Path "package-lock.json") { npm ci } else { npm install }
+        run: npm ci
 
-      - name: Validate electron main syntax
-        shell: pwsh
-        run: node --check electron/main.mjs
+      - name: Cache Python executor binary
+        id: cache-executor
+        uses: actions/cache@v4
+        with:
+          path: python-dist
+          key: pyexec-${{ runner.os }}-${{ hashFiles('requirements.txt', 'python/code_executor.py', 'python/validator_engine.py', 'sandbox/**', 'scripts/build_executor.mjs') }}
 
       - name: Build Python executor (code_executor.exe)
+        if: steps.cache-executor.outputs.cache-hit != 'true'
         shell: pwsh
         run: npm run build:executor:win
 

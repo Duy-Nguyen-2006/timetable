@@ -9,28 +9,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const datasetsPath = resolve(repoRoot, "datasets.txt");
 
-const raw = readFileSync(datasetsPath, "utf8");
-const normalized = raw.replace(/\r\n?/g, "\n");
+const raw = readFileSync(datasetsPath, "utf8").replace(/\r\n?/g, "\n");
 
+const parts = raw.split(/^(DATASET\s+\d+)\s*$/m);
 const blocks: { name: string; body: string }[] = [];
-const re = /^DATASET\s+\d+\s*$/m;
-let rest = normalized;
-let header: string | null = null;
-
-while (true) {
-  const match = rest.match(re);
-  if (!match) {
-    if (header !== null) {
-      blocks.push({ name: header, body: rest.trim() });
-    }
-    break;
-  }
-  const idx = match.index!;
-  if (header !== null) {
-    blocks.push({ name: header, body: rest.slice(0, idx).trim() });
-  }
-  header = match[0].trim();
-  rest = rest.slice(idx + match[0].length);
+for (let i = 1; i < parts.length; i += 2) {
+  blocks.push({ name: parts[i].trim(), body: parts[i + 1]?.trim() ?? "" });
 }
 
 if (blocks.length === 0) {
