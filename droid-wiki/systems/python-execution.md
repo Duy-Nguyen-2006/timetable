@@ -49,7 +49,7 @@ Only the files and directories relevant to secure Python execution are listed (p
 | `run_user_code`            | `python/code_executor.py`                            | Create temp workspace, copy or create `input.json`, write `solver_generated.py`, run `py_compile`, invoke `sandbox/run.py:run_sandboxed`, enforce single `SOLUTION_FOUND` marker, parse `result.json`, map raw status, write capped `.ai_results/` artifact, return structured envelope (`phase`, `ok`, `status`, `durationMs`, `resultSummary`, `errorDigest`, `stdout`, `stderr`, optional `resultPath`/`resultData`). |
 | `daemon`                   | `python/code_executor.py`                            | Persistent newline-JSON worker mode (read jobs from stdin, write results to stdout). Used by Electron desktop for low-latency repeated solves within one session. Respects per-job `solverWorkers` override. |
 | `run_sandboxed`            | `sandbox/run.py`                                     | Auto-detect (`_auto_mode`) or env-selected dispatch (`TT_SANDBOX_MODE`) to Docker, bwrap, or (unsafe) raw subprocess. Always annotates result with `sandbox` field. |
-| `run_in_sandbox`           | `sandbox/executor.py`                                | Build (if needed) and run the `timetable-sandbox:latest` image with maximum hardening. Enforces workspace-only visibility, no network, resource limits, non-root execution. |
+| `run_in_sandbox`           | `sandbox/executor.py`                                | Build (if needed) and run the Docker image with maximum hardening. Image tag defaults to `tack-timetable-solver:latest` and can be overridden via `TT_DOCKER_IMAGE`. Enforces workspace-only visibility, no network, resource limits, non-root execution. |
 | `run_with_bubblewrap`      | `sandbox/bubblewrap_executor.py`                     | Execute via `bwrap` with new mount/PID namespaces, seccomp filter, minimal bind mounts (workspace + Python packages only). Faster startup than Docker; Linux-only. |
 | `executeGeneratedCode`     | `src/features/timetable/ai/python-bridge.ts`         | Public API called by the 6-stage Local Agent. Detects Electron vs web context and routes accordingly. Never executes Python itself. |
 | `python:executeCode` IPC   | `electron/main.mjs` + `preload.ts`                   | Desktop transport surface. Manages the long-lived daemon worker or falls back to per-call spawn. Writes `input.json` to a temp job dir before invoking the binary. |
@@ -112,7 +112,45 @@ Key runtime behaviors:
 - **Architecture** — The security model ("AI never runs its own code on the host") and the five-layer diagram are described in [overview/architecture.md](../overview/architecture.md).
 - **Full AI pipeline context** — The 6-stage loop (Translator → Planner → Coder → Sandbox execution → Deterministic Validator → Repair) is documented in [systems/ai-pipeline/index.md](../ai-pipeline/index.md).
 - **Solver skeleton & validation** — Generated code must conform to `python/templates/solver_skeleton.py`. Post-execution validation uses both `validator_engine.py` (Python) and `deterministic-validator.ts` (TypeScript) + CP-SAT round-trip.
-- **Build / packaging** — The Electron builder bundles the PyInstaller `code_executor` binary (from `python-dist/`) plus Python source fallback. The same `code_executor.py` source is used by the web server route.
+- **Build / packaging** — The Electron builder bundles the PyInstaller `code_executor` binary (from `python-dist/`) plus Python source fallback. The same `code_executor.py` source is used by the web server route. The renderer can switch between bundled / Docker / system Python via `window.electron.solverRuntime.setMode`; the resolver lives in `electron/solver-runtime.mjs`.
+
+## Runtime mode abstraction (Electron)
+
+`electron/solver-runtime.mjs` is a small pure-function module that decides how to spawn the executor for the current job. The renderer chooses one of three modes via the secure-stored `AIProviderConfig.solverRuntimeMode`:
+
+| Mode      | Spawn target                                                  | When it is useful                                       |
+|-----------|--------------------------------------------------------------|--------------------------------------------------------|
+| `bundled` | PyInstaller binary at `python-dist/<platform>/code_executor` | Default. No system Python, ships with the app.        |
+| `docker`  | `docker run --rm tack-timetable-solver:latest`                | Hardest isolation. Requires Docker engine running. Image tag is overridable via `TT_DOCKER_IMAGE`. |
+| `system`  | `python3 python/code_executor.py`                              | Developer mode (the source is on disk and editable).  |
+
+`resolveSpawnSpec` returns a `{ command, args, env, fallbackReason? }` object. When `mode === 'docker'` but the live Docker probe (`electron/docker-check.mjs`) reports `usable === false`, the resolver silently falls back to bundled and emits a one-time `solver-runtime:notice` IPC event to the renderer (`AGENT_NOTICE` in the UI) so the user knows what actually ran.
+
+The probe runs `docker info` once per app session, caches the result, and surfaces a localized fallback message via `dockerFallbackMessage(reason)` if Docker is selected but unreachable. Selecting `bundled` or `system` skips the probe entirely.
+
+## Production guard for unsafe sandbox
+
+`sandbox/run.py` will refuse the `none` (raw subprocess) mode unless **both** `TT_SANDBOX_BACKEND=none` and `TT_SANDBOX_ALLOW_UNSAFE=1` are set. `python/tests/test_sandbox_production_guard.py` asserts this guard so a missing env var fails CI rather than silently downgrading to host execution.
+
+`scripts/post-build.mjs` runs after every Next build and now exits non-zero (instead of just warning) when the bundled `code_executor` binary is missing from `python-dist/<platform>/`. This blocks accidental release builds that would later fall back to host Python at solve time.
+
+## In-process syntax and AST gates
+
+`code_executor.py` exposes two static pre-gates that run inside the same sandboxed runtime as solver execution:
+
+- `check_syntax_only(code)` — writes the candidate code to a temp file and runs `py_compile` to surface compile errors before any sandbox spin-up.
+- `check_ast_safety(code)` — parses the code, walks the AST, and rejects:
+  - Any `import` / `from ... import ...` statement (the solver template provides everything the model is allowed to use).
+  - Calls or attribute access matching `FORBIDDEN_AST_NAMES` (`open`, `exec`, `eval`, `__import__`, `compile`, `input`, `breakpoint`, `globals`, `locals`, `vars`, `print`).
+  - Dunder access listed in `FORBIDDEN_AST_ATTRS` (`__import__`, `__builtins__`, `__class__`, `__bases__`, `__subclasses__`, `__mro__`).
+  - Loads of names that are not locally bound and not in `ALLOWED_AST_LOAD_NAMES`. The allowlist contains the solver-template variables (`model`, `slots`, `data`, `assignments`, `days`, `periods`, `periods_by_day`, `constraints`, `custom_specs`, `schedule`) plus a fixed set of safe builtins.
+
+These gates are invoked via two transports:
+
+- **Electron**: `electron/preload.ts` exposes `window.electron.python.syntaxCheck` and `window.electron.python.astCheck`. The renderer's `src/features/timetable/ai/skeleton-injector.ts` prefers this bridge over HTTP. `electron/main.mjs` dispatches the request through `runExecutorCheck` which talks to the existing daemon (using a `type: 'syntax-check' | 'ast-check'` discriminator) or falls back to a one-shot `code_executor --syntax-check` / `--ast-check` spawn. No Next.js server needed.
+- **Web**: same `skeleton-injector.ts` falls back to `/api/ai/python-syntax-check` and `/api/ai/python-ast-check`, which spawn `python3 python/code_executor.py` with the same flags.
+
+Both gates run before the agent ever asks the sandbox to execute the generated solver, so the failure cost is one `py_compile` + one AST walk rather than a full Docker / bwrap startup.
 
 ## Entry points for modification
 
@@ -131,7 +169,7 @@ All code references below use full repo-root paths.
 |-----------------------------------------------------------|-------------|------|
 | `python/code_executor.py`                                 | ~350        | The sole secure host that executes LLM-generated solver code. Implements `run_user_code`, `daemon` mode, py_compile gate, `result.json` contract, artifacting, and status mapping. |
 | `sandbox/run.py`                                          | ~130        | Sandbox dispatcher. Selects Docker, bubblewrap, or (unsafe) raw mode. Auto-detects when `TT_SANDBOX_MODE` is unset. |
-| `sandbox/executor.py`                                     | ~300        | Docker sandbox implementation. Builds `timetable-sandbox:latest` on demand. Enforces `--network=none`, read-only root, non-root user, capability drops, resource limits, workspace-only mount. |
+| `sandbox/executor.py`                                     | ~300        | Docker sandbox implementation. Builds the configured image (`TT_DOCKER_IMAGE`, default `tack-timetable-solver:latest`) on demand. Enforces `--network=none`, read-only root, non-root user, capability drops, resource limits, workspace-only mount. |
 | `sandbox/bubblewrap_executor.py`                          | ~150        | Lightweight Linux bwrap sandbox. New mount + PID namespaces + seccomp. Binds only workspace and Python package roots. |
 | `sandbox/Dockerfile`                                      | ~40         | Minimal hardened image (python:3.11-slim + ortools) used by the Docker sandbox path. |
 | `sandbox/README.md`                                       | ~200        | Historical motivation and operational guidance for the sandboxing strategy. |

@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-05-31T23:55:00Z",
-  "commitHash": "cb55d90085b09f94180f95715b82cf5e70666a97",
+  "generatedAt": "2026-06-01T01:19:00Z",
+  "commitHash": "6f571326df7f4d512ed471a1cc740389bc6b2805",
   "branch": "master",
-  "pageCount": 30,
+  "pageCount": 31,
   "topLevelSections": [
     "overview",
     "by-the-numbers",
@@ -11,6 +11,7 @@
     "how-to-contribute",
     "systems",
     "features",
+    "security",
     "reference",
     "maintainers"
   ],
@@ -40,6 +41,7 @@
     "features/index.md",
     "features/scheduling-wizard.md",
     "features/constraint-system.md",
+    "security.md",
     "reference/index.md",
     "reference/configuration.md",
     "reference/data-models.md",

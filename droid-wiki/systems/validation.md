@@ -133,6 +133,7 @@ The validator is also what populates `deterministicReport` / `checkerReport` / `
 ## Standalone Verification and Testing
 
 - `python/tests/test_validator_engine.py` — pytest tests for core behaviors (subject_consecutive remainder rule, class_no_double custom maxPerDay, ignore resource_capacity + check supported limits).
+- `python/tests/test_validator_fixtures.py` and `src/features/timetable/ai/validator-fixtures.test.ts` — both validators consume the same JSON fixtures under `tests/fixtures/validator/`. Each fixture contains a schedule plus the expected pass/fail outcome, so any drift between the Python and TypeScript implementations fails CI immediately. Add a fixture to cover both paths whenever a new constraint kind lands.
 - The engine can be imported directly for external scripts or debugging of constraint semantics without running the full agent.
 
 ## Key Source Files

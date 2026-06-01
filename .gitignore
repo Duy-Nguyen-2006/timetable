@@ -89,6 +89,13 @@ zig-out/
 
 # Local build binaries
 scripts/bin/
+
+# Smoke test artifacts
+.smoke-bin/
+.smoke-home/
+.smoke-logs/
+.venv-build-executor/
+release/
 # Harness durable layer
 harness.db
 harness.db-wal
