@@ -82,19 +82,6 @@ jobs:
         shell: pwsh
         run: npm run build
 
-      - name: Strip transient npm rename dirs from standalone
-        shell: pwsh
-        run: |
-          $root = ".next/standalone"
-          if (Test-Path $root) {
-            Get-ChildItem -Path $root -Recurse -Directory -Force -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -match '^[A-Za-z0-9._-]+-[0-9a-f]{16}$' } |
-              ForEach-Object {
-                Write-Host "Removing transient: $($_.FullName)"
-                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-              }
-          }
-
       - name: Package Windows installer (electron-builder)
         shell: pwsh
         run: npm run package:win

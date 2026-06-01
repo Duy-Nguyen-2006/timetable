@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -8,6 +8,40 @@ const missing = required.filter((p) => !existsSync(p));
 if (missing.length > 0) {
   console.warn(`[post-build] Missing optional artifacts: ${missing.join(', ')}`);
 }
+
+const TRANSIENT_DIR = /^[A-Za-z0-9._-]+-[0-9a-f]{16}$/u;
+function pruneTransient(root) {
+  if (!existsSync(root)) return;
+  let stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (TRANSIENT_DIR.test(entry.name)) {
+        try {
+          rmSync(full, { recursive: true, force: true });
+          console.log(`[post-build] removed transient npm dir: ${full}`);
+        } catch (error) {
+          console.warn(`[post-build] failed to remove ${full}: ${error?.message ?? error}`);
+        }
+        continue;
+      }
+      try {
+        if (statSync(full).isDirectory()) stack.push(full);
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+pruneTransient(path.join(process.cwd(), '.next', 'standalone'));
 
 // Verify the bundled code_executor binary exists for the current platform (#25).
 // On Windows the binary is code_executor.exe.
