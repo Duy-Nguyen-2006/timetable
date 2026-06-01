@@ -4,6 +4,7 @@ import type { ConstraintSpec, Plan } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, CoderTurnResult } from './types';
 import { invokeChat, type ChatPayload } from './chat-client';
+import { normalizeConstraintCodeBody } from './skeleton-injector';
 
 type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
 
@@ -153,9 +154,11 @@ export async function runCoderTurn(
 
   const response = await invokeChat(chatPayload);
   const parsed = coderResponseSchema.parse(parseModelJson(response.content));
+  const constraintCode = normalizeConstraintCodeBody(parsed.constraint_code);
   return ensureCoverage(
     {
       ...parsed,
+      constraint_code: constraintCode,
       rawResponse: response.content,
       usageTokens: response.usage?.total_tokens,
     },

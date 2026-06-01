@@ -5,11 +5,11 @@
 export const PROMPT_VERSIONS = {
   translator: '3.0.0',
   planner: '3.0.0',
-  coder: '3.2.0',
+  coder: '3.2.1',
   repair: '3.0.0',
 } as const;
 
-export const SOLVER_TEMPLATE_VERSION = '1.4.0';
+export const SOLVER_TEMPLATE_VERSION = '1.4.1';
 
 export const CONSTRAINT_REGISTRY_VERSION = '1.2.0';
 

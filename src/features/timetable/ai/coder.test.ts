@@ -114,3 +114,27 @@ test('ensureCoverage - throws when code has no evidence of handling id', async (
     /no code reference/
   );
 });
+
+test('runCoderTurn normalizes fenced constraint code before coverage and injection', async () => {
+  const response = JSON.stringify({
+    plan_summary: 'ok',
+    constraint_code: '```python\nfor spec in custom_specs:\n    # c1\n    pass\n```',
+    covered_constraint_ids: [],
+    assumptions: [],
+  });
+  const result = await runCoderTurn(
+    { baseURL: '', apiKey: 'x', model: 'm' },
+    {
+      dataset: {
+        classes: [], days: [], periods: [], assignments: [],
+        constraints: [constraint('custom_dsl', 'hard')],
+        datasetDigest: { classCount: 0, teacherCount: 0, dayCount: 0, periodCount: 0, totalAssignments: 0 },
+      },
+      plan: emptyPlan,
+    },
+    fakeChat(response)
+  );
+
+  assert.equal(result.constraint_code, 'for spec in custom_specs:\n    # c1\n    pass');
+  assert.deepEqual(result.covered_constraint_ids, ['c1']);
+});
