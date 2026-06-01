@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electron', {
   python: {
     executeCode: (code: string, input: any, timeoutMs: number, solverWorkers?: number) =>
       ipcRenderer.invoke('python:executeCode', code, input, timeoutMs, solverWorkers),
+    syntaxCheck: (code: string) => ipcRenderer.invoke('python:syntaxCheck', code),
+    astCheck: (code: string) => ipcRenderer.invoke('python:astCheck', code),
   },
   solverRuntime: {
     setMode: (mode: string) => ipcRenderer.invoke('solver-runtime:set', mode),

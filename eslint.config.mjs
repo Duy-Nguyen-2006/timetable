@@ -44,6 +44,11 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
+  files: ["electron/**/*.cjs"],
+  rules: {
+    "@typescript-eslint/no-require-imports": "off",
+  },
+}, {
   ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "release/**", "next-env.d.ts", "examples/**", "skills"]
 }];
 

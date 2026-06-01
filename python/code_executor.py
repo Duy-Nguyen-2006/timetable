@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import ast
 import json
 import py_compile
 import runpy
@@ -52,6 +53,9 @@ def _default_timeout() -> int:
 
 TIMEOUT_SECONDS = _default_timeout()
 MAX_STDOUT_LINES = 100
+FORBIDDEN_AST_NAMES = {"open", "exec", "eval", "__import__", "compile", "input", "breakpoint", "globals", "locals", "vars", "print"}
+FORBIDDEN_AST_ATTRS = {"__import__", "__builtins__", "__class__", "__bases__", "__subclasses__", "__mro__"}
+ALLOWED_AST_LOAD_NAMES = {"model", "slots", "data", "assignments", "days", "periods", "periods_by_day", "constraints", "custom_specs", "schedule", "len", "range", "int", "str", "set", "list", "dict", "tuple", "frozenset", "sum", "min", "max", "sorted", "reversed", "round", "divmod", "zip", "map", "filter", "enumerate", "isinstance", "bool", "float", "abs", "all", "any", "ValueError", "NotImplementedError"}
 
 
 def _truncate_output(text: str, max_lines: int = MAX_STDOUT_LINES) -> str:
@@ -79,6 +83,55 @@ def _map_status(raw: str) -> str:
     if status in {"UNKNOWN"}:
         return "unknown"
     return "unknown"
+
+
+def check_syntax_only(code: str) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="tt_syntax_check_") as temp_dir:
+        solver_path = Path(temp_dir) / "solver_syntax_check.py"
+        solver_path.write_text(code, encoding="utf-8")
+        try:
+            py_compile.compile(str(solver_path), doraise=True)
+            return {"ok": True}
+        except (py_compile.PyCompileError, SyntaxError) as exc:
+            return {"ok": False, "error": _digest_error(str(exc))}
+
+
+def check_ast_safety(code: str) -> dict[str, Any]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return {"ok": False, "error": f"SyntaxError: {exc}"}
+
+    errors: list[str] = []
+    local_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Param)):
+            local_names.add(node.id)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            targets = [node.target]
+            while targets:
+                target = targets.pop()
+                if isinstance(target, ast.Name):
+                    local_names.add(target.id)
+                elif isinstance(target, (ast.Tuple, ast.List)):
+                    targets.extend(target.elts)
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            errors.append(f"Forbidden import at line {node.lineno}")
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+            if name in FORBIDDEN_AST_NAMES:
+                errors.append(f"Forbidden call '{name}' at line {node.lineno}")
+        elif isinstance(node, ast.Attribute):
+            if node.attr in FORBIDDEN_AST_ATTRS:
+                errors.append(f"Forbidden attribute '{node.attr}' at line {node.lineno}")
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            if node.id not in ALLOWED_AST_LOAD_NAMES and node.id not in local_names and not node.id.startswith("_"):
+                errors.append(f"Unknown name '{node.id}' at line {node.lineno}")
+
+    return {"ok": not errors, "error": "; ".join(errors) if errors else None}
 
 
 def run_user_code(code: str, timeout: int, job_dir: str | None = None) -> dict[str, Any]:
@@ -300,9 +353,16 @@ def daemon() -> None:
             continue
 
         code = job.get("code", "")
+        job_type = job.get("type", "execute")
         timeout = int(job.get("timeoutSeconds", TIMEOUT_SECONDS))
         job_dir = job.get("jobDir") or None
         solver_workers = job.get("solverWorkers")
+        if job_type == "syntax-check":
+            print(json.dumps(check_syntax_only(code), ensure_ascii=False), flush=True)
+            continue
+        if job_type == "ast-check":
+            print(json.dumps(check_ast_safety(code), ensure_ascii=False), flush=True)
+            continue
         if not code.strip():
             print(json.dumps({"phase": "parse", "ok": False, "status": "crashed",
                               "durationMs": 0, "errorDigest": "No code in job.",
@@ -355,7 +415,11 @@ def run_solver_self_exec() -> int:
 if __name__ == "__main__":
     if "--run-solver" in sys.argv:
         sys.exit(run_solver_self_exec())
-    if "--daemon" in sys.argv:
+    if "--syntax-check" in sys.argv:
+        print(json.dumps(check_syntax_only(sys.stdin.read()), ensure_ascii=False))
+    elif "--ast-check" in sys.argv:
+        print(json.dumps(check_ast_safety(sys.stdin.read()), ensure_ascii=False))
+    elif "--daemon" in sys.argv:
         daemon()
     else:
         main()

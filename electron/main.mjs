@@ -133,7 +133,7 @@ function ensureDaemon(spec) {
   return daemonWorker
 }
 
-function runWithDaemon(spec, code, timeoutSeconds, solverWorkers, jobDir) {
+function runWithDaemon(spec, code, timeoutSeconds, solverWorkers, jobDir, type = 'execute') {
   return new Promise((resolve) => {
     const worker = ensureDaemon(spec)
     if (!worker) {
@@ -150,15 +150,27 @@ function runWithDaemon(spec, code, timeoutSeconds, solverWorkers, jobDir) {
     }, timeoutMs + 5000)
 
     daemonPending = { resolve, timer }
-    const job = JSON.stringify({ code, timeoutSeconds, solverWorkers, jobDir })
+    const job = JSON.stringify({ type, code, timeoutSeconds, solverWorkers, jobDir })
     worker.stdin.write(job + '\n')
   })
 }
 
 function resolvePreloadPath() {
-  const jsPreload = path.join(__dirname, 'preload.js')
-  if (fs.existsSync(jsPreload)) return jsPreload
-  return path.join(__dirname, 'preload.ts')
+  return path.join(__dirname, 'preload.cjs')
+}
+
+async function waitForServer(url, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url)
+      if (response.ok) return true
+    } catch {
+      /* server not ready yet */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return false
 }
 
 function createWindow(url) {
@@ -187,9 +199,10 @@ function cleanupJobDir(jobDir) {
   }
 }
 
-function spawnPerCall(spec, code, jobDir, timeoutMs, timeoutSeconds, workerCount) {
+function spawnPerCall(spec, code, jobDir, timeoutMs, timeoutSeconds, workerCount, modeFlag = null) {
   return new Promise((resolve) => {
-    const child = spawn(spec.command, [...spec.baseArgs, String(timeoutSeconds)], {
+    const args = modeFlag ? [...spec.baseArgs, modeFlag] : [...spec.baseArgs, String(timeoutSeconds)]
+    const child = spawn(spec.command, args, {
       cwd: jobDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -264,6 +277,32 @@ ipcMain.handle('secure-store:save-provider', async (_event, config) => saveProvi
 ipcMain.handle('secure-store:load-provider', async () => loadProvider())
 ipcMain.handle('secure-store:clear-provider', async () => clearProvider())
 
+async function runExecutorCheck(type, code, timeoutMs = 10000) {
+  const timeoutSeconds = resolveTimeoutSeconds(timeoutMs)
+  const dockerAvailable = await getDockerAvailability()
+  const spec = resolveCurrentSpec(dockerAvailable)
+  const jobDir = path.join(app.getPath('temp'), `tack-check-${Date.now()}`)
+  fs.mkdirSync(jobDir, { recursive: true })
+  try {
+    const daemonResult = await runWithDaemon(spec, code, timeoutSeconds, undefined, jobDir, type)
+    if (daemonResult !== null) return daemonResult
+    return await spawnPerCall(
+      spec,
+      code,
+      jobDir,
+      timeoutMs,
+      timeoutSeconds,
+      1,
+      type === 'syntax-check' ? '--syntax-check' : '--ast-check'
+    )
+  } finally {
+    cleanupJobDir(jobDir)
+  }
+}
+
+ipcMain.handle('python:syntaxCheck', async (_event, code) => runExecutorCheck('syntax-check', code))
+ipcMain.handle('python:astCheck', async (_event, code) => runExecutorCheck('ast-check', code))
+
 // IPC for Python execution (used by local AI agent)
 ipcMain.handle('python:executeCode', async (_event, code, input, timeoutMs = 360000, solverWorkers = undefined) => {
   const timeoutSeconds = resolveTimeoutSeconds(timeoutMs)
@@ -304,16 +343,15 @@ app.whenReady().then(() => {
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
         PORT: String(port),
         NODE_ENV: 'production',
       },
       stdio: 'ignore',
     })
 
-    // Give the server a moment to start
-    setTimeout(() => {
-      createWindow(`http://localhost:${port}`)
-    }, 2500)
+    const url = `http://localhost:${port}`
+    void waitForServer(url).then(() => createWindow(url))
   }
 })
 

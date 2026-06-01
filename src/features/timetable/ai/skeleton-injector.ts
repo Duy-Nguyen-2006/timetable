@@ -48,8 +48,24 @@ export function injectConstraintCode(
   };
 }
 
+type PythonCheckBridge = {
+  syntaxCheck?: (code: string) => Promise<{ ok?: boolean; error?: string }>
+  astCheck?: (code: string) => Promise<{ ok?: boolean; error?: string }>
+}
+
+function pythonCheckBridge(): PythonCheckBridge | null {
+  if (typeof window === 'undefined') return null
+  return ((window as any).electron?.python ?? null) as PythonCheckBridge | null
+}
+
 export async function syntaxCheckPython(code: string): Promise<{ ok: boolean; error?: string }> {
   try {
+    const bridge = pythonCheckBridge()
+    if (bridge?.syntaxCheck) {
+      const result = await bridge.syntaxCheck(code)
+      return { ok: Boolean(result.ok), error: result.error }
+    }
+
     const response = await fetch('/api/ai/python-syntax-check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -80,6 +96,12 @@ export async function syntaxCheckPython(code: string): Promise<{ ok: boolean; er
 
 export async function astCheckPython(code: string): Promise<{ ok: boolean; error?: string }> {
   try {
+    const bridge = pythonCheckBridge()
+    if (bridge?.astCheck) {
+      const result = await bridge.astCheck(code)
+      return { ok: Boolean(result.ok), error: result.error }
+    }
+
     const response = await fetch('/api/ai/python-ast-check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
