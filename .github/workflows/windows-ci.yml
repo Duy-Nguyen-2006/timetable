@@ -27,22 +27,20 @@ on:
   pull_request:
     branches: [master]
 
-env:
-  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
-  OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-  OPENAI_BASE_URL: https://openrouter.ai/api/v1
-  MODEL_NAME: deepseek/deepseek-v4-flash
-  AI_MODEL: deepseek/deepseek-v4-flash
-  LLM_MODEL: deepseek/deepseek-v4-flash
-  GITHUB_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
-  GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
-  CI: "true"
-
 jobs:
   windows-smoke:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+      OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_BASE_URL: https://openrouter.ai/api/v1
+      MODEL_NAME: deepseek/deepseek-v4-flash
+      AI_MODEL: deepseek/deepseek-v4-flash
+      LLM_MODEL: deepseek/deepseek-v4-flash
+      GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+      CI: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -111,3 +109,4 @@ jobs:
     with:
       artifact_name: windows-installer
       publish_release: false
+    secrets: inherit
