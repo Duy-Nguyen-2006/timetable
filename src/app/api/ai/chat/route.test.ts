@@ -50,6 +50,27 @@ test('provider resolver routes direct GPT-5 style models to Responses API', () =
   );
 });
 
+test('provider resolver auto-heals legacy generic-chat config for direct OpenAI Responses models', () => {
+  assert.equal(
+    __chatInternal.resolveProvider('generic-chat-completion-api', 'https://api.openai.com/v1', 'gpt-5.5'),
+    'openai-responses'
+  );
+  assert.equal(
+    __chatInternal.resolveProvider('generic-chat-completion-api', 'https://api.openai.com/v1', 'gpt-4o-mini'),
+    'openai-responses'
+  );
+  // Không can thiệp khi base URL không phải OpenAI direct
+  assert.equal(
+    __chatInternal.resolveProvider('generic-chat-completion-api', 'https://openrouter.ai/api/v1', 'openai/gpt-5'),
+    'generic-chat-completion-api'
+  );
+  // Không can thiệp khi model không thuộc Responses API
+  assert.equal(
+    __chatInternal.resolveProvider('generic-chat-completion-api', 'https://api.openai.com/v1', 'gpt-3.5-turbo'),
+    'generic-chat-completion-api'
+  );
+});
+
 test('buildChatRequest uses chat completions for OpenRouter', () => {
   const request = __chatInternal.buildChatRequest(
     'openrouter',
