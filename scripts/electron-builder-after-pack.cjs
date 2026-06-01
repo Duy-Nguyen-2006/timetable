@@ -18,7 +18,6 @@ function pruneTransient(root) {
       continue;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
       const full = path.join(dir, entry.name);
       if (TRANSIENT_DIR.test(entry.name)) {
         try {
@@ -29,10 +28,11 @@ function pruneTransient(root) {
         }
         continue;
       }
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       try {
         if (statSync(full).isDirectory()) stack.push(full);
       } catch {
-        // ignore
+        // broken symlink - skip
       }
     }
   }

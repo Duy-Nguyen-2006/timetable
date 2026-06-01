@@ -86,6 +86,16 @@ jobs:
         shell: pwsh
         run: npm run build
 
+      - name: Strip nested .next/node_modules from standalone
+        shell: pwsh
+        run: |
+          $junk = ".next/standalone/.next/node_modules"
+          if (Test-Path $junk) {
+            Write-Host "Removing $junk"
+            Remove-Item -LiteralPath $junk -Recurse -Force
+          }
+          node scripts/prune-transient.mjs
+
       - name: Package Windows installer (electron-builder)
         shell: pwsh
         run: npm run package:win
