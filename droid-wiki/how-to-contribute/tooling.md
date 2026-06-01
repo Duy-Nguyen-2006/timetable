@@ -20,7 +20,7 @@ Key characteristics:
   - Linux: `npm run dist:linux` (AppImage + deb)
 - **Python executor bundling**: the secure runner (`python/code_executor.py`) is compiled to a single binary via PyInstaller in CI and placed into `python-dist/`. The binary plus the original `.py` source are shipped as extra resources inside the Electron app.
 
-See the release workflow (`.github/workflows/release-windows.yml`) for the end-to-end Windows packaging pipeline on tag push.
+See the release workflow (`.github/workflows/release-windows.yml`) and the dedicated Windows CI pipeline (`.github/workflows/windows-ci.yml` + reusable `_reusable-windows-build.yml`) for the full Windows smoke + NSIS packaging flow (runs on every `master` push/PR and supports manual `workflow_dispatch`).
 
 Cross-link: see [Development Workflow](development-workflow.md) for the day-to-day local development commands and pre-commit expectations.
 
@@ -45,9 +45,19 @@ These scripts are intentionally minimal and deterministic. Changing a prompt or 
 - Implementation: `scripts/provider_smoke_test.ts`
 - Purpose: minimal end-to-end connectivity and basic chat-completion smoke against an OpenAI-compatible provider (defaults to OpenRouter + deepseek/deepseek-v4-flash).
 - Required environment: `OPENROUTER_API_KEY` (or equivalent base URL + key). The script exits non-zero on any failure and prints a compact JSON status report.
-- Usage in CI: guarded by `SKIP_PROVIDER_SMOKE=1` or missing `LOWPRIZO_API_KEY` secret (see `.github/workflows/ci.yml`).
+- Usage in CI: guarded by `SKIP_PROVIDER_SMOKE=1` or missing `LOWPRIZO_API_KEY` secret (see `.github/workflows/ci.yml` and `windows-ci.yml`).
 
 This harness is intentionally tiny — it only verifies that the provider can be reached and returns a well-formed response. It is not a substitute for full agent integration tests.
+
+## Windows + dataset smoke matrix (June 2026)
+
+New dedicated smoke scripts live under `scripts/` and participate in the Windows CI pipeline (`.github/workflows/windows-ci.yml`):
+
+- `scripts/smoke-datasets.ts` — parses every `DATASET` block in `datasets.txt` through `parseQuickImportText` and fails if any assignment/class list is empty. Fast sanity gate for quick-import format drift.
+- `scripts/smoke-http.mjs` — exercises the live dev server (or packaged build) for provider connectivity and `/api/ai/python-execute`.
+- `scripts/smoke-openrouter.mjs` — direct OpenRouter reachability + model list check (used for cross-org smoke before Windows packaging).
+
+These are invoked automatically in the reusable Windows build job and can be triggered manually via `workflow_dispatch` with a custom `smoke_command`. They are developer/CI-only tools, not user-facing features. See [Getting started — Windows packaging](overview/getting-started.md#windows-nsis--portable) for the full flow.
 
 ## Prompt model validation
 

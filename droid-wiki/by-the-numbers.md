@@ -1,26 +1,24 @@
 # By the Numbers
 
-Data collected on 2026-05-31 (current HEAD: `cb55d90`).
+Data collected on 2026-06-01 (current HEAD: `80d40b2`).
 
 ## Size
 
-**Lines of code (excluding node_modules, .next, release, __pycache__, droid-wiki, package-lock.json):**
+**Lines of code (excluding node_modules, .next, release, __pycache__, droid-wiki, package-lock.json, python-dist):**
 
-- TypeScript + TSX: **12,340 lines**
-- Python: **3,304 lines**
-- Markdown (docs + prompts): **4,137 lines**
-- JSON (configs, lockfiles, etc.): **11,019 lines** (note: package-lock.json excluded from the cleaned total below)
-- JavaScript + MJS (Electron, scripts): **343 lines**
-- Other (CSS, SQL, YAML, etc.): remainder of **~21,572 total cleaned lines**
+- TypeScript + TSX: **13,397 lines**
+- Python: **2,028 lines**
+- Markdown (docs + prompts): **4,595 lines**
+- JavaScript + MJS + CJS (Electron + scripts): **1,181 lines**
+- Other (CSS, SQL, YAML, shell, etc.): remainder of **~25,307 total cleaned lines**
 
 **File counts (git-tracked, excluding generated artifacts):**
 
-- Total tracked files: **162**
-- Core source (src/, python/, electron/, scripts/ — excluding tests): **59**
-- Test files (`.test.ts`, `.test.tsx`, `.test.py`): **13**
-- Configuration (package.json, tsconfig, eslint, CI, etc.): **11**
-- Markdown documentation: **66**
-- Python non-test source: **8**
+- Total tracked files: **229**
+- Core source (src/, python/, electron/, scripts/ — excluding tests): **88**
+- Test files (`.test.ts`, `.test.tsx`, `.test.py`): **18**
+- Configuration (package.json, tsconfig, eslint, CI workflows, etc.): **~15**
+- Markdown documentation: **~70+** (including this wiki)
 
 **Major subsystems (approximate source size):**
 
@@ -39,22 +37,25 @@ Data collected on 2026-05-31 (current HEAD: `cb55d90`).
 
 **Recent churn (last 90 days / visible history):**
 
-The largest single delta in the current clone history is the **May 2026 constraint system expansion**:
+Two major eras visible in the current history:
 
-- Commit `cdac5b5` (2026-05-31): "feat: add 17 new built-in constraint kinds with checkers and fallback parser rules"
-- Follow-on commits on the same day added the constraint registry, persistent Python daemon worker, violations UI, and further validator/skeleton hardening.
-- This added thousands of lines across `deterministic-validator.ts`, `constraint-spec.ts`, `validator_engine.py`, translator fallback rules, and the solver skeleton.
+1. **May 2026 — Constraint system expansion + AI pipeline modularization** (largest capability jump):
+   - Added 17+ new built-in `ConstraintKind` values with deterministic checkers and fallback parsing.
+   - Refactored the 6-stage Local Agent into focused modules (`local-agent-limits.ts`, `local-agent-utils.ts`, `stage-cache.ts`, `translator-text.ts`, `translator-periods.ts`, `validator-helpers.ts`, etc.).
+   - Extracted the monolithic `TimetableApp.tsx` (~865 LOC reduction) into `components/PreviewPage.tsx`, `SetupPages.tsx`, `TimetableFields.tsx`.
+   - Touched nearly every layer: prompts, translator, planner, coder, validator (TS + Python), skeleton, UI violations display, and tests.
 
-Other notable recent activity:
-
-- Persistent daemon worker in Electron main process (removes per-call Python startup cost)
-- Multiple backend fixes for the python-execute route and repair loop
-- Removal of large generated artifacts (see below)
+2. **June 2026 — Windows CI + desktop hardening cycle** (current HEAD `80d40b2`):
+   - First-class Windows smoke + packaging pipeline (`.github/workflows/windows-ci.yml` + reusable `_reusable-windows-build.yml`, three new smoke scripts under `scripts/`).
+   - Persistent Python daemon worker in Electron (`electron/main.mjs`) for low-latency repeated solves instead of per-call spawn.
+   - New `preload.cjs` bridge for PyInstaller-bundled builds + in-process Python syntax/AST gates.
+   - Client-side AI run cache (`src/features/timetable/ai/run-cache.ts`) keyed by input digest for instant replay of identical runs.
+   - Sandbox image renamed to `tack-timetable-solver`; multiple CI robustness fixes (cross-env, cache keys, env scoping).
 
 **Commit volume:**
 
-- ~150+ commits visible in the local history (many "Fix BE" and rapid iteration commits on 2026-05-30/31)
-- Primary author: Duy (and GitHub identity variants); smaller contributions from Claude, Emergent Agent, and containerized Z User during development
+- ~180+ commits visible across the two major pushes (May constraint explosion + June Windows/desktop work).
+- Primary author: Duy; heavy agent assistance (Claude, Emergent, Droid tooling) visible in commit messages and co-authorship patterns.
 
 ## Bot-attributed commits
 
@@ -67,30 +68,35 @@ Inline AI assistance (Claude Code, Cursor, etc.) does **not** leave bot co-autho
 
 ## Complexity
 
-**Largest / most critical files (approximate LOC):**
+**Largest / most critical files (current HEAD, cleaned LOC):**
 
-- `src/features/timetable/ai/local-agent.ts` — ~28 kLOC (orchestrator + heavy test file)
-- `src/features/timetable/ai/translator.ts` — ~51 kLOC with tests (complex natural language → 46-kind mapping)
-- `src/features/timetable/ai/deterministic-validator.ts` — ~38 kLOC with tests (the heart of post-execution trust)
-- `src/features/timetable/TimetableApp.tsx` — ~3 kLOC (single-file React application with the entire canvas, state machine, and Excel export)
-- `python/code_executor.py` + `validator_engine.py` — the two Python files that actually run and validate untrusted solver code
+- `src/features/timetable/TimetableApp.tsx` — **2,404 lines** (orchestrator after May 2026 extraction; still the largest single source file)
+- `src/features/timetable/ai/translator.ts` — **1,056 lines** (core natural language → 46-kind mapping logic)
+- `python/templates/solver_skeleton.py` — **910 lines** (authoritative CP-SAT base that generated code extends)
+- `src/features/timetable/ai/deterministic-validator.ts` — **863 lines** (heart of post-execution trust + round-trip)
+- `src/features/timetable/ai/translator.test.ts` — **658 lines** (extensive translator behavior coverage)
+- `src/features/timetable/ai/local-agent.ts` — **553 lines** (orchestrator after modularization split)
+- `python/code_executor.py` — **424 lines** (secure host for LLM-generated solver code)
+- `python/validator_engine.py` — **385 lines** (reference implementation of 46 constraint checkers)
+- `electron/main.mjs` — **368 lines** (desktop lifecycle + persistent daemon worker)
 
 **Deepest import / call chains:**
 
-The critical path for a user solve request is:
+The critical path for a user solve request (post-June 2026 daemon work) is:
 
-`TimetableApp` → `runLocalAgent` → (Translator → Planner → Coder → python-bridge → code_executor.py + sandbox) → (Validator + round-trip) → (Repair if needed) → final result
+`TimetableApp` → `runLocalAgent` (with run-cache lookup) → (Translator → Planner → Coder → python-bridge) → Electron IPC (`python:executeCode` → persistent daemon) or HTTP POST → `code_executor.py` (daemon mode or per-call) + sandbox → (Validator + CP-SAT round-trip) → (Repair if needed) → `writeCachedRun` + final result
 
-This crosses the TypeScript/Python boundary multiple times and touches ~15–20 distinct modules in a single end-to-end run.
+This crosses the TypeScript/Python boundary multiple times and now prefers the long-lived daemon worker for repeated solves within one desktop session.
 
-**Exported symbols:**
+**Exported symbols (stable since May 2026 modularization):**
 
-- The AI layer exports ~30–40 public types and functions (`AgentInputPayload`, `ConstraintSpec`, `LocalAgentFinalResult`, `runLocalAgent`, etc.).
-- The constraint system alone defines a 46-member union (`ConstraintKind`) plus supporting condition expressions and validation reports.
+- AI layer: ~30–40 public types/functions (`AgentInputPayload`, `ConstraintSpec`, `LocalAgentFinalResult`, `runLocalAgent`, `buildRunCacheDigest`, etc.).
+- Constraint system: 46-member `ConstraintKind` union + condition expressions + validation reports.
+- New in June 2026: `run-cache.ts` exports (`RUN_CACHE_STORAGE_KEY`, `buildRunCacheDigest`, `readCachedRuns`, `writeCachedRun`).
 
-**Notable large deletion:**
+**Notable large deletion (historical):**
 
-In the history visible to this clone, a **17.5 kLOC `repomix-output.xml`** artifact was added and then deleted in a single cleanup pass. This was the single largest line-count event in the recent lifetime of the repository.
+A **17.5 kLOC `repomix-output.xml`** artifact was added and removed in a single cleanup pass during the May 2026 push — the largest single line-count event in the visible repo history.
 
 ## Interpretation notes
 

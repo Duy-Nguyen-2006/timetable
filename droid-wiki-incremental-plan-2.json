@@ -1,0 +1,196 @@
+{
+  "wikiGenerationMode": "INCREMENTAL",
+  "reason": "Small delta after Windows CI + desktop daemon work: 19 files changed (+782/-92 net excluding locks and droid-wiki/). Well below 10k threshold. No new subsystems, routes, or ConstraintKinds. Focus on CI/docs, desktop transport, run-cache UX, and refreshed stats.",
+  "baseWikiCommit": "6f571326df7f4d512ed471a1cc740389bc6b2805",
+  "currentHead": "80d40b2b8e33fe5051ac64260240e8f8f00b6d0d",
+  "gitBranch": "master",
+  "changedSourceFiles": [
+    ".github/workflows/_reusable-windows-build.yml",
+    ".github/workflows/release-windows.yml",
+    ".github/workflows/windows-ci.yml",
+    ".gitignore",
+    "electron/main.mjs",
+    "electron/preload.cjs",
+    "electron/preload.ts",
+    "eslint.config.mjs",
+    "package.json",
+    "python/code_executor.py",
+    "sandbox/build.sh",
+    "sandbox/executor.py",
+    "scripts/smoke-datasets.ts",
+    "scripts/smoke-http.mjs",
+    "scripts/smoke-openrouter.mjs",
+    "src/features/timetable/SettingsModal.tsx",
+    "src/features/timetable/TimetableApp.tsx",
+    "src/features/timetable/ai/run-cache.ts",
+    "src/features/timetable/ai/skeleton-injector.ts"
+  ],
+  "deltaSummary": "Infrastructure and UX hardening cycle (June 2026). New first-class Windows CI + packaging pipeline (reusable workflow + three smoke scripts). Desktop Electron now uses persistent Python daemon worker for low-latency solves + new preload.cjs bridge for bundled builds. New client-side run cache (input-digest keyed localStorage) for instant replay of identical AI runs. Minor executor + skeleton-injector robustness. No behavior or security model changes.",
+  "pagesToUpdate": [
+    {
+      "path": "overview/index.md",
+      "title": "Tack Timetable",
+      "rationale": "Directory tree and 'Entry points for modification' list are stale (missing new Windows CI files, smoke scripts, run-cache, preload.cjs). Must reflect current layout after daemon + CI additions.",
+      "relevantSourcePaths": [
+        "README.md",
+        ".github/workflows/windows-ci.yml",
+        ".github/workflows/_reusable-windows-build.yml",
+        "scripts/smoke-datasets.ts",
+        "scripts/smoke-http.mjs",
+        "scripts/smoke-openrouter.mjs",
+        "src/features/timetable/ai/run-cache.ts",
+        "electron/preload.cjs"
+      ]
+    },
+    {
+      "path": "overview/getting-started.md",
+      "title": "Getting started",
+      "rationale": "Install/build/test/run commands, smoke testing, Windows packaging notes, daemon vs per-call execution, and new npm scripts are missing or outdated. Primary user onboarding page.",
+      "relevantSourcePaths": [
+        "package.json",
+        "scripts/README.md",
+        ".github/workflows/windows-ci.yml",
+        "electron/main.mjs",
+        "scripts/smoke-*.ts",
+        "scripts/smoke-*.mjs"
+      ]
+    },
+    {
+      "path": "overview/architecture.md",
+      "title": "Architecture",
+      "rationale": "Desktop vs Web transport section and high-level diagrams should acknowledge the new persistent daemon worker and dual preload (.ts + .cjs) story. No major flow change but accuracy matters.",
+      "relevantSourcePaths": [
+        "electron/main.mjs",
+        "electron/preload.ts",
+        "electron/preload.cjs",
+        "src/features/timetable/ai/python-bridge.ts"
+      ]
+    },
+    {
+      "path": "systems/python-execution.md",
+      "title": "Python Execution",
+      "rationale": "PRIMARY IMPACT for this delta. Daemon mode, preload.cjs bridge, persistent worker lifecycle, job directory handling, and image tag changes must be documented. Directory layout and key abstractions tables are now stale.",
+      "relevantSourcePaths": [
+        "python/code_executor.py",
+        "electron/main.mjs",
+        "electron/preload.cjs",
+        "electron/preload.ts",
+        "sandbox/executor.py",
+        "sandbox/run.py",
+        "src/features/timetable/ai/python-bridge.ts"
+      ]
+    },
+    {
+      "path": "features/scheduling-wizard.md",
+      "title": "Scheduling Wizard",
+      "rationale": "TimetableApp and SettingsModal received small updates (runtime mode descriptions, cache integration). Components/ layout already correct from prior refactor, but wizard behavior section should mention run cache for UX.",
+      "relevantSourcePaths": [
+        "src/features/timetable/TimetableApp.tsx",
+        "src/features/timetable/SettingsModal.tsx",
+        "src/features/timetable/ai/run-cache.ts",
+        "src/features/timetable/solver-ui.ts"
+      ]
+    },
+    {
+      "path": "how-to-contribute/tooling.md",
+      "title": "Tooling",
+      "rationale": "New smoke scripts (smoke-datasets, smoke-http, smoke-openrouter), Windows CI, harness CLI usage, and post-build scripts need to be listed. This page is the developer entry point for automation.",
+      "relevantSourcePaths": [
+        "scripts/README.md",
+        "scripts/smoke-datasets.ts",
+        "scripts/smoke-http.mjs",
+        "scripts/smoke-openrouter.mjs",
+        "scripts/post-build.mjs",
+        "scripts/build_executor.mjs",
+        ".github/workflows/windows-ci.yml"
+      ]
+    },
+    {
+      "path": "security.md",
+      "title": "Security",
+      "rationale": "New attack surface from preload.cjs + persistent daemon worker + Windows packaging. Verify and lightly update the desktop security model section if it describes the old per-call spawn only.",
+      "relevantSourcePaths": [
+        "electron/main.mjs",
+        "electron/preload.cjs",
+        "python/code_executor.py",
+        "sandbox/*"
+      ]
+    },
+    {
+      "path": "by-the-numbers.md",
+      "title": "By the Numbers",
+      "rationale": "ALWAYS REFRESH in incremental mode. Git history, churn hotspots (the 19 files), file counts, language breakdown, and complexity metrics have moved since the last snapshot at 6f57132.",
+      "relevantSourcePaths": [
+        "package.json",
+        "src/**/*",
+        "python/**/*",
+        "electron/**/*",
+        ".github/workflows/*"
+      ]
+    },
+    {
+      "path": "lore.md",
+      "title": "Lore",
+      "rationale": "Optional light update. Add one sentence under the most recent era noting the June 2026 Windows CI + desktop daemon milestone (first-class Windows packaging and persistent Python worker).",
+      "relevantSourcePaths": []
+    },
+    {
+      "path": "systems/ai-pipeline/index.md",
+      "title": "AI Pipeline",
+      "rationale": "Minor directory tree refresh only — new run-cache.ts and pipeline-versions.ts files under ai/. Orchestration and contracts unchanged.",
+      "relevantSourcePaths": [
+        "src/features/timetable/ai/run-cache.ts",
+        "src/features/timetable/ai/pipeline-versions.ts"
+      ]
+    },
+    {
+      "path": "reference/configuration.md",
+      "title": "Configuration",
+      "rationale": "package.json script changes, new smoke-related env expectations, and Windows CI matrix variables should be noted if the page lists developer configuration surface.",
+      "relevantSourcePaths": [
+        "package.json",
+        ".github/workflows/windows-ci.yml"
+      ]
+    },
+    {
+      "path": "reference/dependencies.md",
+      "title": "Dependencies",
+      "rationale": "package.json and requirements.txt drift since last wiki. Low priority but cheap to refresh.",
+      "relevantSourcePaths": [
+        "package.json",
+        "requirements.txt",
+        "package-lock.json"
+      ]
+    }
+  ],
+  "pagesToCreate": [],
+  "pagesToRemove": [],
+  "pagesToCopyUnchanged": [
+    "overview/glossary.md",
+    "how-to-contribute/index.md",
+    "how-to-contribute/development-workflow.md",
+    "how-to-contribute/testing.md",
+    "how-to-contribute/debugging.md",
+    "how-to-contribute/patterns-and-conventions.md",
+    "fun-facts.md",
+    "features/index.md",
+    "features/constraint-system.md",
+    "systems/index.md",
+    "systems/ai-pipeline/planner.md",
+    "systems/ai-pipeline/coder.md",
+    "systems/ai-pipeline/repair.md",
+    "systems/ai-pipeline/translator.md",
+    "systems/ai-pipeline/validator.md",
+    "systems/validation.md",
+    "reference/index.md",
+    "maintainers.md"
+  ],
+  "specialHandling": {
+    "byTheNumbers": "Must be regenerated from current git history and source tree (always in incremental mode).",
+    "lore": "Add at most one sentence under the latest era. Do not rewrite the page.",
+    "crossLinkAudit": "After updates, run a final pass to ensure all 'see also' and relative links still resolve, especially from python-execution and scheduling-wizard to the new CI/smoke artifacts.",
+    "images": "No new screenshots in this delta; preserve any existing images/ from prior wiki."
+  },
+  "executionNotes": "Sub-agents (or direct edits) must preserve existing page structure, tone, and all Mermaid diagrams. Only touch directory trees, file tables, key abstractions (when files moved), and 'Entry points' / 'How it works' when they reference changed paths. Do not rewrite conceptual explanations or security model unless the new daemon/preload surface introduces a genuine new consideration. Use full repo-root paths in all backtick file references.",
+  "generatedAt": "2026-06-01T13:57:00Z"
+}

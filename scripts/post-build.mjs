@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -7,6 +7,22 @@ const missing = required.filter((p) => !existsSync(p));
 
 if (missing.length > 0) {
   console.warn(`[post-build] Missing optional artifacts: ${missing.join(', ')}`);
+}
+
+const standaloneDir = path.join(process.cwd(), '.next', 'standalone');
+const standaloneNextDir = path.join(standaloneDir, '.next');
+mkdirSync(standaloneNextDir, { recursive: true });
+
+const staticDir = path.join(process.cwd(), '.next', 'static');
+if (existsSync(staticDir)) {
+  cpSync(staticDir, path.join(standaloneNextDir, 'static'), { recursive: true });
+  console.log('[post-build] copied .next/static into standalone runtime.');
+}
+
+const publicDir = path.join(process.cwd(), 'public');
+if (existsSync(publicDir)) {
+  cpSync(publicDir, path.join(standaloneDir, 'public'), { recursive: true });
+  console.log('[post-build] copied public assets into standalone runtime.');
 }
 
 const TRANSIENT_DIR = /^[A-Za-z0-9._-]+-[0-9a-f]{16}$/u;

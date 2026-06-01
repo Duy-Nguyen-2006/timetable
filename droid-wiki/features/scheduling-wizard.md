@@ -120,7 +120,9 @@ The wizard is the exclusive caller of the Local Agent from the user interface:
 | `src/features/timetable/constants.ts` | Days, sessions, default periods, constraint type definitions, shared Tailwind classes |
 | `src/features/timetable/utils.ts` | Cell/assignment key helpers and normalization functions used throughout the wizard |
 | `src/features/timetable/ai/local-agent.ts` | The 6-stage pipeline entry point called by `handleGenerate` (see `systems/ai-pipeline/index.md`) |
+| `src/features/timetable/ai/run-cache.ts` | Client-side input-digest keyed cache (localStorage, max 3 entries) for instant replay of identical AI runs. `buildRunCacheDigest` folds provider config + `PIPELINE_VERSIONS`. |
 | `src/features/timetable/ai/types.ts` | Shared TypeScript types for agent payloads, events, and results |
+| `src/features/timetable/solver-ui.ts` | UI formatting helpers, progress step mapping (`toProgressStep`), status labels, and `MAX_CACHED_RUNS` constant. |
 
 ## Related pages
 

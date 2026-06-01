@@ -37,9 +37,9 @@ The product ships as both a web app (Next.js 16 + React 19 standalone) and a des
 │   ├── validator_engine.py     # Deterministic constraint checkers (35 implemented kinds)
 │   └── templates/solver_skeleton.py
 ├── sandbox/                    # Docker + bubblewrap isolation
-├── electron/                   # Desktop main process + preload
-├── scripts/                    # Prompt sync, skeleton sync, smoke tests
-└── .github/workflows/ci.yml
+├── electron/                   # Desktop main process + preload (.ts + .cjs bridge for bundled builds)
+├── scripts/                    # Prompt sync, skeleton sync, smoke tests (datasets, http, openrouter)
+└── .github/workflows/            # CI (windows-ci.yml + reusable Windows build, release workflows)
 ```
 
 ## Key abstractions

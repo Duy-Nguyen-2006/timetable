@@ -97,9 +97,10 @@ All agent logic lives in `src/features/timetable/ai/`. The single public entry p
 
 4. **Sandbox execution** (via `python-bridge.ts`)
    - The bridge decides the transport:
-     - If running inside Electron and the preload exposed `window.electron.python.executeCode` → uses native IPC.
+     - If running inside Electron and the preload exposed `window.electron.python.executeCode` → uses native IPC to the persistent daemon worker (preferred for low-latency repeated solves).
      - Otherwise → POSTs to `/api/ai/python-execute` (server-side spawn of `code_executor.py`).
    - The bridge never executes Python itself.
+   - Two preloads exist for desktop: `preload.ts` (dev / system Python) and `preload.cjs` (PyInstaller-bundled builds). Both expose syntax/AST check gates in addition to execution.
 
 5. **Deterministic Validator** (`deterministic-validator.ts` + `cp-sat-roundtrip.ts`)
    - After every execution the agent runs:

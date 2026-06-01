@@ -149,13 +149,20 @@ Produces artifacts in `release/`.
 npm run package:win
 ```
 
-Requires a Windows environment or cross-compilation setup. The release workflow (`.github/workflows/release-windows.yml`) builds on tag.
+Requires a Windows environment (or runs via CI). The dedicated Windows CI pipeline (`.github/workflows/windows-ci.yml` + reusable `_reusable-windows-build.yml`) handles PyInstaller + electron-builder NSIS packaging on `master` pushes and PRs. Artifacts are uploaded for smoke verification.
+
+Key Windows smoke steps (run automatically in CI, or manually via `workflow_dispatch`):
+- `scripts/smoke-datasets.ts` — validates all `DATASET` blocks in `datasets.txt` against the quick-import parser.
+- `scripts/smoke-http.mjs` — exercises provider connectivity and `/api/ai/python-execute`.
+- `scripts/smoke-openrouter.mjs` — direct OpenRouter reachability + model list check.
 
 The packaging step bundles:
 - The standalone Next.js server
-- The PyInstaller `code_executor` binary (from `python-dist/`)
+- The PyInstaller `code_executor.exe` binary (from `python-dist/`)
 - The Python source as a fallback (`python-src/`)
 - The current solver skeleton and validator engine
+
+See [How to contribute — tooling](how-to-contribute/tooling.md) for the full smoke matrix and harness CLI commands.
 
 ## Sandbox setup (critical for security)
 

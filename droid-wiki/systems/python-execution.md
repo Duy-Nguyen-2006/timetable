@@ -35,8 +35,9 @@ Only the files and directories relevant to secure Python execution are listed (p
   - `Dockerfile` — minimal Python 3.11-slim + ortools image used by the Docker sandbox.
   - `README.md` — historical context and operational guidance for sandbox choices.
 - `electron/`
-  - `main.mjs` — persistent daemon lifecycle (`spawnDaemon`, `ensureDaemon`, `runWithDaemon`), per-call fallback (`spawnPerCall`), job directory creation with `input.json`, `python:executeCode` IPC handler.
-  - `preload.ts` — contextBridge exposure of `window.electron.python.executeCode`.
+  - `main.mjs` — persistent daemon lifecycle (`spawnDaemon`, `ensureDaemon`, `runWithDaemon`), per-call fallback (`spawnPerCall`), job directory creation with `input.json`, `python:executeCode` IPC handler, `resolveCurrentSpec` + Docker probe fallback notices.
+  - `preload.ts` — contextBridge exposure of `window.electron.python.*` (executeCode, syntaxCheck, astCheck) for dev / system-Python paths.
+  - `preload.cjs` — CommonJS bridge for PyInstaller-bundled Electron builds (ESM interop with the frozen Python binary).
 - `src/features/timetable/ai/`
   - `python-bridge.ts` — high-level transport selector used by the Local Agent (`executeGeneratedCode`). Chooses Electron IPC (when preload exposes it) or HTTP POST fallback.
 - `src/app/api/ai/python-execute/`
@@ -52,7 +53,7 @@ Only the files and directories relevant to secure Python execution are listed (p
 | `run_in_sandbox`           | `sandbox/executor.py`                                | Build (if needed) and run the Docker image with maximum hardening. Image tag defaults to `tack-timetable-solver:latest` and can be overridden via `TT_DOCKER_IMAGE`. Enforces workspace-only visibility, no network, resource limits, non-root execution. |
 | `run_with_bubblewrap`      | `sandbox/bubblewrap_executor.py`                     | Execute via `bwrap` with new mount/PID namespaces, seccomp filter, minimal bind mounts (workspace + Python packages only). Faster startup than Docker; Linux-only. |
 | `executeGeneratedCode`     | `src/features/timetable/ai/python-bridge.ts`         | Public API called by the 6-stage Local Agent. Detects Electron vs web context and routes accordingly. Never executes Python itself. |
-| `python:executeCode` IPC   | `electron/main.mjs` + `preload.ts`                   | Desktop transport surface. Manages the long-lived daemon worker or falls back to per-call spawn. Writes `input.json` to a temp job dir before invoking the binary. |
+| `python:executeCode` IPC   | `electron/main.mjs` + `preload.ts` + `preload.cjs`   | Desktop transport surface. Persistent daemon worker (low-latency repeated solves) or per-call fallback. Dual preload: `.ts` for dev, `.cjs` for PyInstaller-bundled builds. Writes `input.json` to a temp job dir. | |
 | `POST /api/ai/python-execute` | `src/app/api/ai/python-execute/route.ts`          | Web/standalone transport. Creates isolated job temp dir, spawns the executor with strict env and timeout handling, validates `resultPath` to prevent traversal, supports best-effort partial result on timeout. |
 
 ## How it works
@@ -174,7 +175,8 @@ All code references below use full repo-root paths.
 | `sandbox/Dockerfile`                                      | ~40         | Minimal hardened image (python:3.11-slim + ortools) used by the Docker sandbox path. |
 | `sandbox/README.md`                                       | ~200        | Historical motivation and operational guidance for the sandboxing strategy. |
 | `electron/main.mjs`                                       | ~280        | Electron main process. Manages persistent `code_executor --daemon` worker, job directory creation, IPC handler for `python:executeCode`, and per-call fallback spawn. |
-| `electron/preload.ts`                                     | ~10         | Exposes the Python execution IPC surface to the renderer via contextBridge. |
+| `electron/preload.ts`                                     | ~10         | Exposes `window.electron.python.*` (executeCode, syntaxCheck, astCheck) for dev / system-Python paths. |
+| `electron/preload.cjs`                                    | ~25         | CommonJS bridge for PyInstaller-bundled builds (ESM interop with frozen Python binary). |
 | `src/features/timetable/ai/python-bridge.ts`              | ~60         | High-level bridge used by the Local Agent. Chooses between Electron IPC and HTTP fallback. |
 | `src/app/api/ai/python-execute/route.ts`                  | ~200        | Next.js API route used by web/standalone distributions. Creates isolated job dirs, spawns the executor, enforces path safety, and supports partial results on timeout. |
 

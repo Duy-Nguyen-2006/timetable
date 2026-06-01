@@ -45,6 +45,7 @@ export async function POST(request: Request) {
     const apiKey = String(body.apiKey ?? '').trim()
     const model = String(body.model ?? '').trim()
     const provider = resolveProvider(body.provider, baseURL, model)
+    const isOpenRouter = provider === 'openrouter' || baseURL.toLowerCase().includes('openrouter.ai')
 
     if (!apiKey) {
       return NextResponse.json(
@@ -53,64 +54,104 @@ export async function POST(request: Request) {
       )
     }
 
-    const modelsRes = await fetchWithTimeout(`${baseURL}/models`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      cache: 'no-store',
-    })
-
-    if (modelsRes.ok) {
-      return NextResponse.json({
-        ok: true,
-        message: '✅ Kết nối thành công! Provider phản hồi endpoint /models.',
-      })
-    }
-
-    if (model) {
-      const useResponses = provider === 'openai-responses'
-      const chatRes = await fetchWithTimeout(`${baseURL}${useResponses ? '/responses' : '/chat/completions'}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify(useResponses
-          ? {
-              model,
-              input: [{ role: 'user', content: 'ping' }],
-              max_output_tokens: 1,
-              store: false,
-            }
-          : {
-              model,
-              messages: [{ role: 'user', content: 'ping' }],
-              max_tokens: 1,
-              temperature: 0,
-            }),
-      })
-
-      if (chatRes.ok) {
-        return NextResponse.json({
-          ok: true,
-          message: `✅ Kết nối thành công! /models không khả dụng nhưng model vẫn gọi được qua ${useResponses ? '/responses' : '/chat/completions'}.`,
-        })
-      }
-
-      const errorText = await chatRes.text()
+    if (!model) {
       return NextResponse.json(
-        {
-          ok: false,
-          message: `❌ Không kết nối được tới model. HTTP ${chatRes.status} ${chatRes.statusText}`,
-          details: errorText.slice(0, 400),
-        },
-        { status: 200 },
+        { ok: false, message: 'Thiếu Model.' },
+        { status: 400 },
       )
     }
 
-    const modelsErrorText = await modelsRes.text()
+    if (isOpenRouter) {
+      const authRes = await fetchWithTimeout(`${baseURL}/auth/key`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        cache: 'no-store',
+      })
+
+      if (!authRes.ok) {
+        const errorText = await authRes.text()
+        return NextResponse.json(
+          {
+            ok: false,
+            message: `❌ API key OpenRouter không hợp lệ. HTTP ${authRes.status} ${authRes.statusText}`,
+            details: errorText.slice(0, 400),
+          },
+          { status: 200 },
+        )
+      }
+
+      const modelsRes = await fetchWithTimeout(`${baseURL}/models`, {
+        method: 'GET',
+        cache: 'no-store',
+      })
+
+      if (!modelsRes.ok) {
+        const errorText = await modelsRes.text()
+        return NextResponse.json(
+          {
+            ok: false,
+            message: `❌ Không tải được danh sách model OpenRouter. HTTP ${modelsRes.status} ${modelsRes.statusText}`,
+            details: errorText.slice(0, 400),
+          },
+          { status: 200 },
+        )
+      }
+
+      const modelsPayload = await modelsRes.json().catch(() => null) as { data?: Array<{ id?: string }> } | null
+      const modelExists = Array.isArray(modelsPayload?.data)
+        ? modelsPayload.data.some((item) => item.id === model)
+        : false
+
+      if (!modelExists) {
+        return NextResponse.json(
+          {
+            ok: false,
+            message: '❌ API key hợp lệ nhưng model không có trong OpenRouter.',
+            details: `Model đang nhập: ${model}`,
+          },
+          { status: 200 },
+        )
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: '✅ Kết nối thành công! API key OpenRouter hợp lệ và model tồn tại.',
+      })
+    }
+
+    const useResponses = provider === 'openai-responses'
+    const chatRes = await fetchWithTimeout(`${baseURL}${useResponses ? '/responses' : '/chat/completions'}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify(useResponses
+        ? {
+            model,
+            input: [{ role: 'user', content: 'ping' }],
+            max_output_tokens: 1,
+            store: false,
+          }
+        : {
+            model,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 1,
+            temperature: 0,
+          }),
+    })
+
+    if (chatRes.ok) {
+      return NextResponse.json({
+        ok: true,
+        message: `✅ Kết nối thành công! API key và model gọi được qua ${useResponses ? '/responses' : '/chat/completions'}.`,
+      })
+    }
+
+    const errorText = await chatRes.text()
     return NextResponse.json(
       {
         ok: false,
-        message: `❌ Không thể xác thực provider. HTTP ${modelsRes.status} ${modelsRes.statusText}`,
-        details: modelsErrorText.slice(0, 400),
+        message: `❌ Không kết nối được tới model. HTTP ${chatRes.status} ${chatRes.statusText}`,
+        details: errorText.slice(0, 400),
       },
       { status: 200 },
     )
