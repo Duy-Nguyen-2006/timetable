@@ -1,6 +1,6 @@
 async function main() {
   const baseURL = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1';
-  const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.LOWPRIZO_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   const model = process.env.OPENROUTER_MODEL ?? 'deepseek/deepseek-v4-flash';
 
   if (process.env.SKIP_PROVIDER_SMOKE === '1') {
@@ -9,7 +9,7 @@ async function main() {
   }
 
   if (!apiKey) {
-    console.log('Provider smoke skipped: no OPENROUTER_API_KEY/LOWPRIZO_API_KEY. Set SKIP_PROVIDER_SMOKE=1 to silence.');
+    console.log('Provider smoke skipped: no OPENROUTER_API_KEY. Set SKIP_PROVIDER_SMOKE=1 to silence.');
     process.exit(0);
   }
 

@@ -11,9 +11,6 @@ on:
         description: "Publish release assets to a GitHub release (only true on tag pushes)"
         type: boolean
         default: false
-    secrets:
-      LOWPRIZO_API_BASE_URL:
-        required: false
 
 jobs:
   build:
@@ -83,8 +80,6 @@ jobs:
 
       - name: Build Next app
         shell: pwsh
-        env:
-          LOWPRIZO_API_BASE_URL: ${{ secrets.LOWPRIZO_API_BASE_URL }}
         run: npm run build
 
       - name: Package Windows installer (electron-builder)

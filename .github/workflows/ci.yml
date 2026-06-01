@@ -26,10 +26,10 @@ jobs:
       - run: npm run build
       - name: Provider smoke tests
         env:
-          LOWPRIZO_API_KEY: ${{ secrets.LOWPRIZO_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           SKIP_PROVIDER_SMOKE: ${{ vars.SKIP_PROVIDER_SMOKE }}
         run: |
-          if [ "$SKIP_PROVIDER_SMOKE" = "1" ] || [ -z "$LOWPRIZO_API_KEY" ]; then
+          if [ "$SKIP_PROVIDER_SMOKE" = "1" ] || [ -z "$OPENROUTER_API_KEY" ]; then
             SKIP_PROVIDER_SMOKE=1 npm run provider:smoke
           else
             npm run dev &
