@@ -339,18 +339,21 @@ app.whenReady().then(() => {
     // Production (packaged AppImage): start the Next.js standalone server
     const serverPath = path.join(process.resourcesPath, 'app.asar.unpacked', '.next', 'standalone', 'server.js')
     const port = 3456
+    // Bind chỉ loopback để app desktop không vô tình listen public interface.
+    const hostname = '127.0.0.1'
 
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         PORT: String(port),
+        HOSTNAME: hostname,
         NODE_ENV: 'production',
       },
       stdio: 'ignore',
     })
 
-    const url = `http://localhost:${port}`
+    const url = `http://${hostname}:${port}`
     void waitForServer(url).then(() => createWindow(url))
   }
 })

@@ -20,7 +20,7 @@ import {
   Trash2,
   User,
 } from 'lucide-react'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
@@ -794,7 +794,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       }
   }
 
-const handleDownloadExcel = useCallback(() => {
+const handleDownloadExcel = useCallback(async () => {
     if (!aiResult || aiResult.status !== 'solved') return
 
     const headerRow: string[] = ['Thứ', 'Tiết']
@@ -832,18 +832,18 @@ const handleDownloadExcel = useCallback(() => {
       })
     })
 
-    const wb = XLSX.utils.book_new()
-    const timetableSheet = XLSX.utils.aoa_to_sheet(rows)
-    timetableSheet['!cols'] = [
-      { wch: 12 },
-      { wch: 6 },
-      ...resultTableClassColumns.flatMap(() => [{ wch: 18 }, { wch: 18 }]),
+    const wb = new ExcelJS.Workbook()
+    const timetableSheet = wb.addWorksheet('Thời khóa biểu')
+    rows.forEach((row) => timetableSheet.addRow(row))
+    timetableSheet.columns = [
+      { width: 12 },
+      { width: 6 },
+      ...resultTableClassColumns.flatMap(() => [{ width: 18 }, { width: 18 }]),
     ]
 
-      const checkerRows = buildReportRows('Checker report', aiResult.checkerReport)
-      const deterministicRows = buildReportRows('Deterministic validation', aiResult.deterministicReport)
-      const diagnosticsRows: string[][] = [
-
+    const checkerRows = buildReportRows('Checker report', aiResult.checkerReport)
+    const deterministicRows = buildReportRows('Deterministic validation', aiResult.deterministicReport)
+    const diagnosticsRows: string[][] = [
       ['Field', 'Value'],
       ['Status', aiResult.solverStatus ?? aiResult.status],
       ['Message', aiResult.message],
@@ -861,12 +861,25 @@ const handleDownloadExcel = useCallback(() => {
       ]),
     ]
 
-      XLSX.utils.book_append_sheet(wb, timetableSheet, 'Thời khóa biểu')
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(checkerRows), 'Checker report')
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(deterministicRows), 'Validation report')
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(diagnosticsRows), 'Diagnostics')
+    const checkerSheet = wb.addWorksheet('Checker report')
+    checkerRows.forEach((row) => checkerSheet.addRow(row))
+    const validationSheet = wb.addWorksheet('Validation report')
+    deterministicRows.forEach((row) => validationSheet.addRow(row))
+    const diagnosticsSheet = wb.addWorksheet('Diagnostics')
+    diagnosticsRows.forEach((row) => diagnosticsSheet.addRow(row))
 
-    XLSX.writeFile(wb, 'thoi-khoa-bieu.xlsx')
+    const buffer = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buffer as ArrayBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'thoi-khoa-bieu.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   }, [aiResult, fixedResultTableSections, resultTableClassColumns, solvedCellMap])
 
     const activePeriodCount = useMemo(

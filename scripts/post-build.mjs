@@ -19,11 +19,20 @@ const candidates = [
 ];
 const hasExecutor = candidates.some((p) => existsSync(p));
 
+// Khi packaging (REQUIRE_EXECUTOR=1), thiếu executor là lỗi cứng vì bundled
+// runtime sẽ fail trên máy người dùng. Khi chạy `npm run build` thuần,
+// chỉ warning để dev local không bị chặn.
+const requireExecutor = process.env.REQUIRE_EXECUTOR === '1';
+
 if (!hasExecutor) {
-  console.warn(
+  const message =
     `[post-build] code_executor binary not found in python-dist (looked for ${binaryName}). ` +
-      `Run "npm run build:executor" before packaging, or the bundled runtime mode will fail.`
-  );
+    `Run "npm run build:executor" before packaging, or the bundled runtime mode will fail.`;
+  if (requireExecutor) {
+    console.error(message);
+    process.exit(1);
+  }
+  console.warn(message);
 } else {
   console.log('[post-build] code_executor binary present.');
 }

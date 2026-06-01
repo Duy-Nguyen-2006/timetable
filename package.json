@@ -28,14 +28,14 @@
     "build:executor:win": "node scripts/build_executor.mjs",
     "build:executor:linux": "node scripts/build_executor.mjs",
     "electron": "electron .",
-    "prepackage:win": "npm run build:executor && npm run build",
+    "prepackage:win": "npm run build:executor && cross-env REQUIRE_EXECUTOR=1 npm run build",
     "package:win": "electron-builder --win --publish never",
-    "prepackage:linux": "npm run build:executor && npm run build",
+    "prepackage:linux": "npm run build:executor && cross-env REQUIRE_EXECUTOR=1 npm run build",
     "package:linux": "electron-builder --linux --publish never",
-    "prepackage:mac": "npm run build:executor && npm run build",
+    "prepackage:mac": "npm run build:executor && cross-env REQUIRE_EXECUTOR=1 npm run build",
     "package:mac": "electron-builder --mac --publish never",
     "predist:linux": "npm run build:executor",
-    "dist:linux": "npm run build && electron-builder --linux AppImage --publish never"
+    "dist:linux": "cross-env REQUIRE_EXECUTOR=1 npm run build && electron-builder --linux AppImage --publish never"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",
@@ -49,6 +49,7 @@
     "@tanstack/react-query": "^5.82.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.460.0",
     "next": "^16.1.1",
     "next-themes": "^0.4.6",
@@ -59,7 +60,6 @@
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^11.1.0",
-    "xlsx": "^0.18.5",
     "zod": "^4.0.2",
     "zustand": "^5.0.6"
   },
