@@ -15,24 +15,29 @@ const START_CMD = process.env.SMOKE_START_COMMAND?.trim() || "";
 const LOG_PATH = resolve(repoRoot, "windows-smoke.log");
 
 const isWin = process.platform === "win32";
-const npmCmd = isWin ? "npm.cmd" : "npm";
-const npxCmd = isWin ? "npx.cmd" : "npx";
 
-let cmd, args;
-if (START_CMD) {
+let cmd, args, useShell;
+if (process.env.SMOKE_START_COMMAND?.trim()) {
   if (isWin) {
     cmd = "cmd.exe";
-    args = ["/c", START_CMD];
+    args = ["/c", process.env.SMOKE_START_COMMAND.trim()];
+    useShell = false;
   } else {
     cmd = "sh";
-    args = ["-c", START_CMD];
+    args = ["-c", process.env.SMOKE_START_COMMAND.trim()];
+    useShell = false;
   }
-} else {
-  cmd = npmCmd;
+} else if (isWin) {
+  cmd = "npm";
   args = ["run", "start", "--", "--port", String(PORT), "--hostname", HOST];
+  useShell = true;
+} else {
+  cmd = "npm";
+  args = ["run", "start", "--", "--port", String(PORT), "--hostname", HOST];
+  useShell = false;
 }
 
-console.log(`[http-smoke] launching: ${cmd} ${args.join(" ")}`);
+console.log(`[http-smoke] launching: ${cmd} ${args.join(" ")} (shell=${useShell})`);
 console.log(`[http-smoke] target: http://${HOST}:${PORT}`);
 console.log(`[http-smoke] log:    ${LOG_PATH}`);
 
@@ -42,6 +47,7 @@ const child = spawn(cmd, args, {
   env: { ...process.env, PORT: String(PORT), HOST, HOSTNAME: HOST },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,
+  shell: useShell,
   detached: false,
 });
 
@@ -55,6 +61,11 @@ let exitInfo = null;
 child.on("exit", (code, signal) => {
   exitedEarly = true;
   exitInfo = { code, signal };
+});
+child.on("error", (err) => {
+  exitedEarly = true;
+  exitInfo = { code: -1, signal: null, err: err?.message || String(err) };
+  console.error(`[http-smoke] spawn error: ${err?.message || err}`);
 });
 
 const probe = async (path) => {

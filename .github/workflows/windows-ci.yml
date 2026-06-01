@@ -103,11 +103,11 @@ jobs:
             *.log
           if-no-files-found: ignore
 
-  # windows-package job temporarily disabled while debugging startup_failure;
-  # restored once the smoke job confirms registration.
-  # windows-package:
-  #   if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_package == 'true' }}
-  #   uses: ./.github/workflows/_reusable-windows-build.yml
-  #   with:
-  #     artifact_name: windows-installer
-  #     publish_release: false
+  windows-package:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.run_package == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/_reusable-windows-build.yml
+    with:
+      artifact_name: windows-installer
+      publish_release: false
