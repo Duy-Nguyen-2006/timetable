@@ -1,0 +1,206 @@
+name: Windows OpenRouter Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      smoke_command:
+        description: "Optional custom command to start/test the app"
+        required: false
+        default: ""
+
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+
+      OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_BASE_URL: https://openrouter.ai/api/v1
+
+      MODEL_NAME: deepseek/deepseek-v4-flash
+      AI_MODEL: deepseek/deepseek-v4-flash
+      LLM_MODEL: deepseek/deepseek-v4-flash
+
+      GITHUB_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
+
+      CI: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.TEST_GH_TOKEN }}
+          persist-credentials: false
+
+      - name: Show environment info
+        shell: pwsh
+        run: |
+          Write-Host "OS:"
+          Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, OsArchitecture | Format-List
+
+          Write-Host "Node:"
+          try { node --version } catch { Write-Host "node not installed yet" }
+
+          Write-Host "NPM:"
+          try { npm --version } catch { Write-Host "npm not installed yet" }
+
+      - name: Setup Node
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Detect package manager
+        if: ${{ hashFiles('package.json') != '' }}
+        shell: pwsh
+        run: |
+          if (Test-Path "pnpm-lock.yaml") {
+            "PKG=pnpm" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          elseif (Test-Path "yarn.lock") {
+            "PKG=yarn" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          else {
+            "PKG=npm" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Install dependencies
+        if: ${{ hashFiles('package.json') != '' }}
+        shell: pwsh
+        run: |
+          corepack enable
+
+          if (Test-Path "pnpm-lock.yaml") {
+            Write-Host "Detected pnpm"
+            pnpm install --frozen-lockfile
+          }
+          elseif (Test-Path "yarn.lock") {
+            Write-Host "Detected yarn"
+            yarn install --immutable
+          }
+          elseif (Test-Path "package-lock.json") {
+            Write-Host "Detected npm ci"
+            npm ci
+          }
+          else {
+            Write-Host "Detected npm install"
+            npm install
+          }
+
+      - name: Verify required secrets present
+        shell: pwsh
+        run: |
+          if (-not $env:OPENROUTER_API_KEY) {
+            Write-Error "Missing secret OPENROUTER_API_KEY"
+            exit 1
+          }
+          if (-not $env:GITHUB_TOKEN) {
+            Write-Host "Note: TEST_GH_TOKEN not set. Continuing without GitHub auth."
+          }
+          Write-Host "Secrets check: OK"
+
+      - name: OpenRouter connectivity probe
+        if: ${{ hashFiles('scripts/smoke-openrouter.mjs') != '' }}
+        shell: pwsh
+        run: node scripts/smoke-openrouter.mjs
+
+      - name: Build if available
+        if: ${{ hashFiles('package.json') != '' }}
+        shell: pwsh
+        run: |
+          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($pkgJson.scripts.build) {
+            Write-Host "Running build..."
+            if ($env:PKG -eq "pnpm")      { pnpm run build }
+            elseif ($env:PKG -eq "yarn")  { yarn build }
+            else                          { npm run build }
+          }
+          else {
+            Write-Host "No build script found. Skipping."
+          }
+
+      - name: Test if available
+        if: ${{ hashFiles('package.json') != '' }}
+        shell: pwsh
+        run: |
+          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($pkgJson.scripts.test) {
+            Write-Host "Running tests..."
+            if ($env:PKG -eq "pnpm")      { pnpm run test }
+            elseif ($env:PKG -eq "yarn")  { yarn test }
+            else                          { npm run test }
+          }
+          else {
+            Write-Host "No test script found. Skipping."
+          }
+
+      - name: Run smoke command
+        if: ${{ hashFiles('package.json') != '' }}
+        shell: pwsh
+        run: |
+          $custom = "${{ github.event.inputs.smoke_command }}"
+          $pkgJson = Get-Content package.json -Raw | ConvertFrom-Json
+
+          if ($custom -and $custom.Trim().Length -gt 0) {
+            $cmd = $custom
+          }
+          elseif ($pkgJson.scripts.smoke) {
+            $cmd = "$env:PKG run smoke"
+          }
+          elseif ($pkgJson.scripts.start) {
+            $cmd = "$env:PKG run start"
+          }
+          elseif ($pkgJson.scripts.dev) {
+            $cmd = "$env:PKG run dev"
+          }
+          else {
+            Write-Host "No smoke/start/dev script found. Install/build/test already passed."
+            exit 0
+          }
+
+          Write-Host "Running smoke command: $cmd"
+
+          $logFile = "windows-smoke.log"
+
+          $process = Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList "/c $cmd > $logFile 2>&1" `
+            -PassThru `
+            -WindowStyle Hidden
+
+          Start-Sleep -Seconds 30
+
+          if ($process.HasExited) {
+            $code = $process.ExitCode
+            Write-Host "Process exited. ExitCode=$code"
+            Write-Host "---- Smoke log ----"
+            if (Test-Path $logFile) { Get-Content $logFile }
+
+            if ($code -ne 0) {
+              Write-Error "Smoke command failed on Windows."
+              exit 1
+            }
+            Write-Host "PASS: Smoke command completed successfully."
+          }
+          else {
+            Write-Host "App still running after 30s. Treating as started OK."
+            Write-Host "---- Smoke log ----"
+            if (Test-Path $logFile) { Get-Content $logFile }
+
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "PASS: App started on Windows and did not crash immediately."
+          }
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-logs
+          path: |
+            windows-smoke.log
+            *.log
+          if-no-files-found: ignore
