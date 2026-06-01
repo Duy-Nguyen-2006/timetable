@@ -30,7 +30,7 @@ from typing import Dict, Any, Optional
 
 
 # Name of the Docker image we will build/use
-SANDBOX_IMAGE = "timetable-sandbox:latest"
+SANDBOX_IMAGE = os.environ.get("TT_DOCKER_IMAGE", "tack-timetable-solver:latest")
 SANDBOX_WORKSPACE_CONTAINER_PATH = "/sandbox_workspace"
 
 

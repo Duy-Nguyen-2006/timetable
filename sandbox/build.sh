@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="timetable-sandbox:latest"
+IMAGE_NAME="${TT_DOCKER_IMAGE:-tack-timetable-solver:latest}"
 
 echo "Building secure sandbox image: $IMAGE_NAME"
 docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
