@@ -117,12 +117,22 @@ function stripFullSkeletonBoilerplate(source: string): string {
   return dedentPythonBlock(takeUntilTemplateReturn(lines.slice(customSpecsIndex + 1)).join('\n'));
 }
 
+const LEAKED_SCHEMA_FIELDS = /^\s*(covered_constraint_ids|plan_summary|assumptions)\s*=/;
+
+function stripLeakedSchemaFields(source: string): string {
+  return source
+    .split('\n')
+    .filter((line) => !LEAKED_SCHEMA_FIELDS.test(line))
+    .join('\n');
+}
+
 export function normalizeConstraintCodeBody(constraintCode: string): string {
   let normalized = normalizeLineEndings(stripMarkdownFence(constraintCode));
   normalized = stripFullSkeletonBoilerplate(normalized);
   normalized = extractBuildCustomConstraintsBody(normalized);
   normalized = stripFullSkeletonBoilerplate(normalized);
   normalized = trimExplanatoryProse(normalized);
+  normalized = stripLeakedSchemaFields(normalized);
   normalized = dedentPythonBlock(stripMarkdownFence(normalized));
   return normalized.trim() ? normalized : 'pass';
 }

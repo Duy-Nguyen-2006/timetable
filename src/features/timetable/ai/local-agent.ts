@@ -8,6 +8,7 @@ import { runPlannerTurn } from './planner';
 import { executeGeneratedCode } from './python-bridge';
 import { applyRepairPatches, runRepairTurn } from './repair';
 import { astCheckPython, injectConstraintCode, loadSolverSkeleton, syntaxCheckPython } from './skeleton-injector';
+import { staticValidateCode } from './static-code-validator';
 import { runTranslatorTurn } from './translator';
 import type { AgentInputPayload, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { WorkspaceBoard } from './workspace';
@@ -244,6 +245,19 @@ export async function runLocalAgent(
 
         board.setLatestConstraintCode(latestConstraintCode);
 
+        const staticErrors = staticValidateCode(latestConstraintCode);
+        if (staticErrors.length > 0) {
+          previousAttemptSummary = `Static validation failed: ${staticErrors.join('; ')}`;
+          board.setErrorDigest(previousAttemptSummary);
+          coderRetry += 1;
+          emit(config, {
+            type: 'error',
+            message: `Static validation failed at attempt ${attempt}: ${previousAttemptSummary}`,
+            fatal: false,
+          });
+          continue;
+        }
+
         const injected = injectConstraintCode(skeleton, latestConstraintCode);
         if (!injected.injected) {
           throw new Error('Solver skeleton marker not found.');
@@ -310,8 +324,16 @@ export async function runLocalAgent(
         lastExecStatus = execResult.status;
 
         if (!execResult.ok || !execResult.resultData) {
-          previousAttemptSummary = execResult.errorDigest || 'Solver execution failed.';
-          board.setErrorDigest(previousAttemptSummary);
+          const codeSnippet = latestConstraintCode.split('\n').slice(0, 50).join('\n');
+          previousAttemptSummary = [
+            `Error: ${execResult.errorDigest || 'Solver execution failed.'}`,
+            `Code that failed (first 50 lines):`,
+            codeSnippet,
+            `---`,
+            `Fix the error above. Do NOT use variables outside the allowed set.`,
+            `Allowed: model, slots, data, assignments, days, periods, periods_by_day, constraints, custom_specs, schedule`,
+          ].join('\n');
+          board.setErrorDigest(execResult.errorDigest || 'Solver execution failed.');
           coderRetry += 1;
           continue;
         }

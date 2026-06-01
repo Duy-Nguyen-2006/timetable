@@ -757,6 +757,115 @@ def build_custom_constraints(model, slots, data):
                     if isinstance(then_spec, dict):
                         _apply_then_constraint(then_spec, guard)
 
+        elif kind == "teacher_prefer_consecutive":
+            teacher = params.get("teacher")
+            if not teacher:
+                continue
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in days:
+                day_periods = _periods_for(d)
+                day_slots = _slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in day_periods)
+                if len(day_slots) < 2:
+                    continue
+                total = model.NewIntVar(0, len(day_slots), f"tpc_total_{teacher}_{d}")
+                model.Add(total == sum(day_slots))
+                first_var = model.NewIntVar(0, len(day_periods), f"tpc_first_{teacher}_{d}")
+                last_var = model.NewIntVar(0, len(day_periods), f"tpc_last_{teacher}_{d}")
+                for idx, p in enumerate(day_periods):
+                    p_slots = _slot_vars(_slot_var(a, d, p) for a in teacher_asgs)
+                    if not p_slots:
+                        continue
+                    has_class = model.NewBoolVar(f"tpc_has_{teacher}_{d}_{p}")
+                    model.Add(sum(p_slots) >= 1).OnlyEnforceIf(has_class)
+                    model.Add(sum(p_slots) == 0).OnlyEnforceIf(has_class.Not())
+                    model.Add(first_var <= idx).OnlyEnforceIf(has_class)
+                    model.Add(last_var >= idx).OnlyEnforceIf(has_class)
+                span = model.NewIntVar(0, len(day_periods), f"tpc_span_{teacher}_{d}")
+                model.Add(span == last_var - first_var + 1)
+                model.Add(span <= total)
+
+        elif kind == "class_max_subjects_per_day":
+            target_class = params.get("class")
+            max_subjects = int(params.get("maxSubjects", 99))
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                all_subjects = list({a["subject"] for a in assignments if a["class"] == c})
+                for d in days:
+                    present_vars = []
+                    for subj in all_subjects:
+                        asgs = [a for a in assignments if a["class"] == c and a["subject"] == subj]
+                        sv = _slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))
+                        if not sv:
+                            continue
+                        present = model.NewBoolVar(f"cms_{c}_{subj}_{d}")
+                        model.Add(sum(sv) >= 1).OnlyEnforceIf(present)
+                        model.Add(sum(sv) == 0).OnlyEnforceIf(present.Not())
+                        present_vars.append(present)
+                    if len(present_vars) > max_subjects:
+                        model.Add(sum(present_vars) <= max_subjects)
+
+        elif kind == "teacher_min_gap":
+            teacher = params.get("teacher")
+            min_gap = int(params.get("minGap", 1))
+            if not teacher or min_gap <= 0:
+                continue
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in days:
+                day_periods = _periods_for(d)
+                for i in range(len(day_periods)):
+                    for j in range(i + 1, min(i + min_gap + 1, len(day_periods))):
+                        if day_periods[j] - day_periods[i] > min_gap:
+                            break
+                        if day_periods[j] - day_periods[i] < min_gap + 1:
+                            p1, p2 = day_periods[i], day_periods[j]
+                            vars1 = _slot_vars(_slot_var(a, d, p1) for a in teacher_asgs)
+                            vars2 = _slot_vars(_slot_var(a, d, p2) for a in teacher_asgs)
+                            if vars1 and vars2:
+                                has1 = model.NewBoolVar(f"tmg_h1_{teacher}_{d}_{p1}")
+                                model.Add(sum(vars1) >= 1).OnlyEnforceIf(has1)
+                                model.Add(sum(vars1) == 0).OnlyEnforceIf(has1.Not())
+                                has2 = model.NewBoolVar(f"tmg_h2_{teacher}_{d}_{p2}")
+                                model.Add(sum(vars2) >= 1).OnlyEnforceIf(has2)
+                                model.Add(sum(vars2) == 0).OnlyEnforceIf(has2.Not())
+                                model.Add(has1 + has2 <= 1)
+
+        elif kind == "subject_spread_days":
+            target_class = params.get("class")
+            subject = params.get("subject")
+            min_days = int(params.get("minDays", 2))
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
+                if not asgs:
+                    continue
+                day_vars = []
+                for d in days:
+                    sv = _slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))
+                    if not sv:
+                        continue
+                    has_day = model.NewBoolVar(f"ssd_{c}_{subject}_{d}")
+                    model.Add(sum(sv) >= 1).OnlyEnforceIf(has_day)
+                    model.Add(sum(sv) == 0).OnlyEnforceIf(has_day.Not())
+                    day_vars.append(has_day)
+                if day_vars:
+                    model.Add(sum(day_vars) >= min(min_days, len(day_vars)))
+
+        elif kind == "teacher_no_last_period":
+            teacher = params.get("teacher")
+            excluded_periods = params.get("excludedPeriods")
+            if not teacher:
+                continue
+            teacher_asgs = [a for a in assignments if a["teacher"] == teacher]
+            for d in days:
+                day_periods = _periods_for(d)
+                if excluded_periods:
+                    target_periods = [int(p) for p in excluded_periods if int(p) in day_periods]
+                else:
+                    target_periods = [day_periods[-1]] if day_periods else []
+                for p in target_periods:
+                    for a in teacher_asgs:
+                        _safe_add_zero(_slot_var(a, d, p))
+
         elif kind == "custom_dsl":
             # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
             # custom_dsl specs (không lặp lại per-spec). (fix bug #5)

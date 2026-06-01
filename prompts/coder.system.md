@@ -102,3 +102,25 @@ Bạn KHÔNG viết code cho `subject_consecutive`; nếu thấy violation liên
 5. [ ] Tên biến giáo viên/lớp/môn so sánh dùng `==` với label string (đã match với Translator).
 
 Nếu bất kỳ check nào fail, sửa code và check lại trước khi submit.
+
+## TUYỆT ĐỐI KHÔNG
+
+- KHÔNG dùng `covered_constraint_ids` trong Python code (đây là JSON response field)
+- KHÔNG dùng `plan_summary` hay `assumptions` trong Python code
+- KHÔNG import bất kỳ module nào
+- KHÔNG dùng `print()`, `open()`, `exec()`, `eval()`
+- KHÔNG tạo biến ngoài scope cho phép
+- KHÔNG viết `model.add(...)` (phải viết hoa: `model.Add(...)`)
+- KHÔNG viết `model.new_bool_var(...)` (phải viết hoa: `model.NewBoolVar(...)`)
+- KHÔNG viết `model.new_int_var(...)` (phải viết hoa: `model.NewIntVar(...)`)
+
+## Ví dụ SAI (sẽ crash):
+
+```python
+covered_constraint_ids = ["c1", "c2"]  # SAI - đây là JSON field
+plan_summary = "..."                    # SAI - đây là JSON field
+import itertools                        # SAI - không được import
+model.add(constraint)                   # SAI - phải là model.Add(...)
+model.new_bool_var("x")                 # SAI - phải là model.NewBoolVar("x")
+print("debug")                          # SAI - không được print
+```

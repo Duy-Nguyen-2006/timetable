@@ -385,7 +385,21 @@ def daemon() -> None:
                     _os_mod.environ.pop("SOLVER_WORKERS", None)
                 else:
                     _os_mod.environ["SOLVER_WORKERS"] = prev_solver_workers
-        print(json.dumps(result, ensure_ascii=False), flush=True)
+        try:
+            output_line = json.dumps(result, ensure_ascii=False)
+        except (TypeError, ValueError) as exc:
+            result = {
+                "phase": "serialize",
+                "ok": False,
+                "status": "crashed",
+                "durationMs": 0,
+                "errorDigest": f"Result not JSON-serializable: {exc}",
+                "stdout": "",
+                "stderr": "",
+            }
+            output_line = json.dumps(result, ensure_ascii=False)
+        sys.stdout.write(output_line + "\n")
+        sys.stdout.flush()
 
 
 def run_solver_self_exec() -> int:

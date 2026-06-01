@@ -157,6 +157,10 @@ function ensureDaemon(spec) {
       try { daemonWorker.kill('SIGKILL') } catch { /* ignore */ }
     }
     daemonWorker = spawnDaemon(spec)
+    if (daemonWorker) {
+      const pingJob = JSON.stringify({ type: 'syntax-check', code: 'pass' }) + '\n'
+      daemonWorker.stdin.write(pingJob)
+    }
   }
   return daemonWorker
 }
