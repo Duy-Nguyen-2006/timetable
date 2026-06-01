@@ -39,13 +39,11 @@ jobs:
       MODEL_NAME: deepseek/deepseek-v4-flash
       AI_MODEL: deepseek/deepseek-v4-flash
       LLM_MODEL: deepseek/deepseek-v4-flash
-      GH_TOKEN: ${{ secrets.TEST_GH_TOKEN }}
       CI: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.TEST_GH_TOKEN }}
           persist-credentials: false
 
       - name: Validate electron main syntax (fail fast)
