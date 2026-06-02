@@ -467,7 +467,15 @@ const checkSessionLimit: CheckFn = (spec, schedule) => {
   const maxPeriods = Number(spec.params.maxPeriods ?? 1);
   const violations: Violation[] = [];
 
-  if (!teacher) return [];
+  if (!teacher) {
+    violations.push({
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Session limit constraint thiếu teacher — không thể kiểm tra. Xem xét dùng subject_session_max_periods.`,
+      offendingEntries: [],
+    });
+    return violations;
+  }
 
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const entry of schedule) {
@@ -484,6 +492,48 @@ const checkSessionLimit: CheckFn = (spec, schedule) => {
       offendingEntries: entries,
     });
   }
+  return violations;
+};
+
+const checkSubjectSessionMaxPeriods: CheckFn = (spec, schedule) => {
+  const subject = spec.params.subject ? String(spec.params.subject) : null;
+  const klass = spec.params.class ? String(spec.params.class) : null;
+  const maxPeriods = Number(spec.params.maxPeriods ?? NaN);
+  const sessionPeriods = Array.isArray(spec.params.sessionPeriods)
+    ? new Set((spec.params.sessionPeriods as number[]).map(Number))
+    : null;
+  const violations: Violation[] = [];
+
+  const byClassDaySession = new Map<string, Map<string, ScheduleEntry[]>>();
+
+  for (const entry of schedule) {
+    if (subject && entry.subject !== subject) continue;
+    if (klass && entry.class !== klass) continue;
+    const period = toPeriod(entry.period);
+    if (period === null) continue;
+    if (sessionPeriods && !sessionPeriods.has(period)) continue;
+
+    const classDay = `${entry.class}::${entry.day}`;
+    if (!byClassDaySession.has(classDay)) byClassDaySession.set(classDay, new Map());
+    const subjectMap = byClassDaySession.get(classDay)!;
+    const key = entry.subject;
+    subjectMap.set(key, [...(subjectMap.get(key) ?? []), entry]);
+  }
+
+  for (const [classDay, subjectMap] of byClassDaySession) {
+    for (const [subj, entries] of subjectMap) {
+      if (entries.length > maxPeriods) {
+        const [cls, day] = classDay.split('::');
+        violations.push({
+          constraintId: spec.id,
+          kind: spec.kind,
+          message: `Lớp ${cls} học môn ${subj} ${entries.length} tiết trong buổi ngày ${day} (tối đa ${maxPeriods}).`,
+          offendingEntries: entries,
+        });
+      }
+    }
+  }
+
   return violations;
 };
 
@@ -803,6 +853,7 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   if_then: checkIfThen,
   session_limit: checkSessionLimit,
   subject_group_daily_limit: checkSubjectGroupDailyLimit,
+  subject_session_max_periods: checkSubjectSessionMaxPeriods,
 };
 
 export function validateSchedule(

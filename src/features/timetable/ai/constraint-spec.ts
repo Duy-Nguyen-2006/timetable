@@ -33,6 +33,7 @@ export type ConstraintKind =
   | 'session_limit'
   | 'subject_group'
   | 'subject_group_daily_limit'
+  | 'subject_session_max_periods'
   | 'custom_dsl';
 
 export type ConditionExpr =

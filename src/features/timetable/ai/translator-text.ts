@@ -129,6 +129,37 @@ export function isSessionLimitText(text: string): { teacher: string; maxPeriods:
   return null;
 }
 
+export function isSubjectSessionMaxPeriodsText(text: string): { maxPeriods: number; session: 'morning' | 'afternoon' | 'all' } | null {
+  const normalized = normalizeConstraintText(text);
+  const match = normalized.match(
+    /(?:khong|khong de|khong duoc|toi da|max)\s*(?:de\s+)?(?:\d+\s+)?(?:lop\s+)?(?:hoc\s+)?(?:qua\s+)?(\d+)\s+tiet\s+(?:cung\s+)?(?:1\s+)?(?:mon\s+)?(?:trong\s+)?(?:cung\s+)?(?:1\s+)?buoi(?:\s+(sang|chieu))?/iu
+  );
+  if (match) {
+    const maxPeriods = Number(match[1]);
+    const sessionRaw = match[2];
+    let session: 'morning' | 'afternoon' | 'all' = 'all';
+    if (sessionRaw) {
+      session = sessionRaw.toLowerCase().includes('sang') ? 'morning' : 'afternoon';
+    }
+    if (Number.isFinite(maxPeriods) && maxPeriods > 0) return { maxPeriods, session };
+  }
+
+  const match2 = normalized.match(
+    /(\d+)\s+tiet\s+(?:cung\s+)?(?:1\s+)?(?:mon\s+)?(?:trong\s+)?(?:cung\s+)?(?:1\s+)?buoi(?:\s+(sang|chieu))?/iu
+  );
+  if (match2 && /(khong|toi da|max|qua)/u.test(normalized)) {
+    const maxPeriods = Number(match2[1]);
+    const sessionRaw = match2[2];
+    let session: 'morning' | 'afternoon' | 'all' = 'all';
+    if (sessionRaw) {
+      session = sessionRaw.toLowerCase().includes('sang') ? 'morning' : 'afternoon';
+    }
+    if (Number.isFinite(maxPeriods) && maxPeriods > 0) return { maxPeriods, session };
+  }
+
+  return null;
+}
+
 export function isSubjectGroupText(text: string): { name: string; subjects: string[] } | null {
   const normalized = normalizeConstraintText(text);
   const match = normalized.match(/mon\s+(.+?)\s+gom\s*:\s*(.+)/iu);

@@ -17,6 +17,7 @@ import {
   isAutoBaseConstraintText,
   isResourceCapacityText,
   isSessionLimitText,
+  isSubjectSessionMaxPeriodsText,
   isSubjectGroupDailyLimitText,
   isSubjectGroupText,
   markAutoBaseSpec,
@@ -67,6 +68,7 @@ const constraintSpecSchema = z.object({
     'session_limit',
     'subject_group',
     'subject_group_daily_limit',
+    'subject_session_max_periods',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -475,6 +477,28 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         },
         tags: ['auto_base'],
         notes: 'ignored:room_constraint',
+      } satisfies ConstraintSpec;
+    }
+
+    const subjectSessionMax = isSubjectSessionMaxPeriodsText(constraint.text);
+    if (subjectSessionMax) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const sessionPeriods = subjectSessionMax.session === 'all'
+        ? null
+        : periodsForSession(input, subjectSessionMax.session === 'morning' ? input.sessions[0]?.id ?? '' : input.sessions[1]?.id ?? '');
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_session_max_periods',
+        params: {
+          ...(subject ? { subject } : {}),
+          ...(klass ? { class: klass } : {}),
+          session: subjectSessionMax.session,
+          maxPeriods: subjectSessionMax.maxPeriods,
+          ...(sessionPeriods ? { sessionPeriods } : {}),
+        },
       } satisfies ConstraintSpec;
     }
 
@@ -997,6 +1021,7 @@ export async function runTranslatorTurn(
                       'session_limit',
                       'subject_group',
                       'subject_group_daily_limit',
+                      'subject_session_max_periods',
                       'custom_dsl',
                     ],
                   },

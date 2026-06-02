@@ -43,6 +43,7 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'session_limit', label: 'Session limit', group: 'global', hasChecker: true, requiredParams: ['day', 'period', 'max'] },
   { kind: 'subject_group', label: 'Subject group', group: 'subject', hasChecker: false, requiredParams: ['subjects'] },
   { kind: 'subject_group_daily_limit', label: 'Subject group daily limit', group: 'subject', hasChecker: true, requiredParams: ['subjects', 'max'] },
+  { kind: 'subject_session_max_periods', label: 'Subject session max periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'session', 'max'] },
   { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: ['pythonPredicate'] },
 ];
 
