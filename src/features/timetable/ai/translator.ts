@@ -44,12 +44,25 @@ const constraintSpecSchema = z.object({
     'teacher_no_gaps',
     'teacher_allowed_days',
     'teacher_allowed_periods',
+    'teacher_min_working_days',
+    'teacher_max_gaps',
+    'teacher_min_consecutive',
+    'teacher_balanced_load',
+    'teacher_max_subjects_per_day',
+    'teacher_max_consecutive_days',
     'subject_pin_period',
     'subject_consecutive',
     'subject_max_consecutive',
     'subject_allowed_days',
     'subject_min_gap_days',
     'subject_daily_max_periods',
+    'subject_block_period',
+    'subject_block_days',
+    'subject_not_consecutive',
+    'subject_min_days',
+    'subject_spread_evenly',
+    'subject_order_before',
+    'subject_not_after_subject',
     'class_block_day',
     'class_block_period',
     'class_block_slot',
@@ -58,13 +71,27 @@ const constraintSpecSchema = z.object({
     'class_no_gaps',
     'class_no_double_subject_day',
     'class_subjects_not_same_day',
+    'class_fixed_period',
+    'class_allowed_days',
+    'class_allowed_periods',
+    'class_max_consecutive',
+    'class_max_subjects_per_day',
+    'class_balanced_load',
+    'class_subjects_same_day',
+    'class_min_working_days',
     'assignment_pin_slot',
     'assignment_block_slot',
     'assignment_allowed_slots',
     'assignment_spread_days',
     'weekly_periods_exact',
+    'assignment_consecutive',
+    'assignment_max_per_day',
+    'assignment_same_day',
+    'assignment_not_same_day',
     'if_then',
     'pair_not_same_slot',
+    'pair_same_slot',
+    'mutual_exclusion',
     'session_limit',
     'subject_group',
     'subject_group_daily_limit',
@@ -480,6 +507,40 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       } satisfies ConstraintSpec;
     }
 
+    if (/(liên\s*tiếp|lien\s*tiep)/u.test(constraint.text) && /(không|khong)/u.test(constraint.text) && /(buổi|buoi)/u.test(constraint.text)) {
+      const maxConsecutive = extractFirstNumber(constraint.text);
+      if (maxConsecutive !== null) {
+        const effectiveMax = maxConsecutive - 1;
+        const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+        const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+        if (subject) {
+          return {
+            id,
+            original: constraint.text,
+            severity,
+            kind: 'subject_max_consecutive',
+            params: {
+              subject,
+              maxConsecutive: effectiveMax,
+              ...(klass ? { classes: [klass] } : {}),
+            },
+          } satisfies ConstraintSpec;
+        }
+        const uniqueSubjects = [...new Set(input.assignments.map((a) => a.subject.label))];
+        return uniqueSubjects.map((subj, idx) => ({
+          id: uniqueSubjects.length === 1 ? id : `${id}_${idx + 1}`,
+          original: constraint.text,
+          severity,
+          kind: 'subject_max_consecutive',
+          params: {
+            subject: subj,
+            maxConsecutive: effectiveMax,
+            ...(klass ? { classes: [klass] } : {}),
+          },
+        }) satisfies ConstraintSpec);
+      }
+    }
+
     const subjectSessionMax = isSubjectSessionMaxPeriodsText(constraint.text);
     if (subjectSessionMax) {
       const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
@@ -685,6 +746,160 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         });
         if (matchedAssignment) {
           return { id, original: constraint.text, severity, kind: 'assignment_spread_days', params: { assignmentId: matchedAssignment.id, minDays } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // ===== NEW KINDS — common deterministic patterns =====
+
+    // class_fixed_period: "Chào cờ sáng thứ 2 tiết 1 cho tất cả các lớp" | "lớp 6A sinh hoạt lớp thứ 6 tiết 1"
+    if (/(chào\s*cờ|chao\s*co|sinh\s*hoạt|sinh\s*hoat|SHL|tiết\s*cố\s*định|co\s*định\s*tiết)/iu.test(constraint.text)) {
+      const day = extractDayId(constraint.text, input.days);
+      const period = extractPeriodNumber(constraint.text) ?? extractFirstNumber(constraint.text);
+      const isAll = /(tất cả|tat ca|mọi|moi|all).*(lớp|lop)/iu.test(constraint.text);
+      if (day && period !== null) {
+        if (isAll) {
+          return classLabels.map((klass, idx) => ({
+            id: classLabels.length === 1 ? id : `${id}_${idx + 1}`,
+            original: constraint.text,
+            severity,
+            kind: 'class_fixed_period',
+            params: { class: klass, day, period },
+          }) satisfies ConstraintSpec);
+        }
+        const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+        if (klass) {
+          return { id, original: constraint.text, severity, kind: 'class_fixed_period', params: { class: klass, day, period } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // class_allowed_days: "lớp 10A chỉ học thứ 2, 3, 4"
+    if (/(chỉ\s*học|chi\s*hoc).*(thứ|thu|lớp|lop)/u.test(constraint.text) && !/(tiết|tiet)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      if (klass) {
+        const days = input.days.map((d) => d.id).filter((dayId) => includesLabel(constraint.text, dayId) || new RegExp(`thứ\\s*${dayId}|thu\\s*${dayId}`, 'iu').test(constraint.text));
+        const extracted = extractDayId(constraint.text, input.days);
+        const allDays = extracted ? [extracted] : days;
+        if (allDays.length > 0) {
+          return { id, original: constraint.text, severity, kind: 'class_allowed_days', params: { class: klass, days: allDays } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // class_allowed_periods: "lớp 10A chỉ học tiết 1-5"
+    if (/(chỉ\s*học|chi\s*hoc).*(tiết|tiet)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      if (klass) {
+        const rangeMatch = constraint.text.match(/tiết\s*(\d+)\s*[-–]\s*(\d+)/iu);
+        if (rangeMatch) {
+          const from = Number(rangeMatch[1]);
+          const to = Number(rangeMatch[2]);
+          const periods = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+          return { id, original: constraint.text, severity, kind: 'class_allowed_periods', params: { class: klass, periods } } satisfies ConstraintSpec;
+        }
+        const period = extractPeriodNumber(constraint.text);
+        if (period !== null) {
+          return { id, original: constraint.text, severity, kind: 'class_allowed_periods', params: { class: klass, periods: [period] } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // class_max_consecutive: "lớp 10A không quá 3 tiết liên tiếp"
+    if (/(lớp|lop).*(tối\s*đa|toi\s*da|không\s*quá|khong\s*qua).*(liên\s*tiếp|lien\s*tiep)/u.test(constraint.text)) {
+      const klass = classLabels.find((label) => includesLabel(constraint.text, label));
+      const maxConsecutive = extractFirstNumber(constraint.text);
+      if (klass && maxConsecutive !== null) {
+        return { id, original: constraint.text, severity, kind: 'class_max_consecutive', params: { class: klass, maxConsecutive } } satisfies ConstraintSpec;
+      }
+    }
+
+    // subject_block_period: "môn Toán không xếp tiết 1"
+    if (/(không\s*xếp|khong\s*xep|không\s*dạy|khong\s*day).*(tiết|tiet)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const period = extractPeriodNumber(constraint.text) ?? extractFirstNumber(constraint.text);
+      if (subject && period !== null) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return { id, original: constraint.text, severity, kind: 'subject_block_period', params: { subject, periods: [period], ...(classes.length ? { classes } : {}) } } satisfies ConstraintSpec;
+      }
+    }
+
+    // subject_block_days: "môn Thể dục không học thứ 7"
+    if (/(không\s*học|khong\s*hoc|không\s*xếp|khong\s*xep).*(thứ|thu)/u.test(constraint.text) && /(môn|mon)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const day = extractDayId(constraint.text, input.days);
+      if (subject && day) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return { id, original: constraint.text, severity, kind: 'subject_block_days', params: { subject, days: [day], ...(classes.length ? { classes } : {}) } } satisfies ConstraintSpec;
+      }
+    }
+
+    // subject_not_consecutive: "môn Thể dục không 2 tiết liền nhau"
+    if (/(không|khong).*(2|hai).*?(liên\s*tiếp|lien\s*tiep|liền nhau|lien nhau)/u.test(constraint.text) && /(môn|mon)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      if (subject) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return { id, original: constraint.text, severity, kind: 'subject_not_consecutive', params: { subject, ...(classes.length ? { classes } : {}) } } satisfies ConstraintSpec;
+      }
+    }
+
+    // subject_min_days: "môn Toán rải ít nhất 3 ngày"
+    if (/(rải|rai).*(ít nhất|it nhat|min).*?(ngày|ngay)/u.test(constraint.text) && /(môn|mon)/u.test(constraint.text)) {
+      const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+      const minDays = extractFirstNumber(constraint.text);
+      if (subject && minDays !== null) {
+        const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+        return { id, original: constraint.text, severity, kind: 'subject_min_days', params: { subject, minDays, ...(classes.length ? { classes } : {}) } } satisfies ConstraintSpec;
+      }
+    }
+
+    // teacher_min_working_days: "giáo viên A dạy ít nhất 4 ngày/tuần"
+    if (/(giáo\s*viên|giao\s*vien).*(ít nhất|it nhat|tối thiểu|toi thieu).*(ngày|ngay)/u.test(constraint.text)) {
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      const minDays = extractFirstNumber(constraint.text);
+      if (teacher && minDays !== null) {
+        return { id, original: constraint.text, severity, kind: 'teacher_min_working_days', params: { teacher, minDays } } satisfies ConstraintSpec;
+      }
+    }
+
+    // teacher_max_gaps: "giáo viên A tối đa 2 tiết trống/ngày"
+    if (/(giáo\s*viên|giao\s*vien).*(tối\s*đa|toi\s*da|max).*(trống|trong)/u.test(constraint.text)) {
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      const maxGaps = extractFirstNumber(constraint.text);
+      if (teacher && maxGaps !== null) {
+        return { id, original: constraint.text, severity, kind: 'teacher_max_gaps', params: { teacher, maxGaps } } satisfies ConstraintSpec;
+      }
+    }
+
+    // teacher_min_consecutive: "giáo viên A khi dạy thì ít nhất 2 tiết liền"
+    if (/(giáo\s*viên|giao\s*vien).*(khi\s*dạy|khi\s*day).*(ít nhất|it nhat|min).*?(liên\s*tiếp|lien\s*tiep)/u.test(constraint.text)) {
+      const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
+      const minConsecutive = extractFirstNumber(constraint.text);
+      if (teacher && minConsecutive !== null) {
+        return { id, original: constraint.text, severity, kind: 'teacher_min_consecutive', params: { teacher, minConsecutive } } satisfies ConstraintSpec;
+      }
+    }
+
+    // pair_same_slot: "giáo viên A và B cùng dạy / song song"
+    if (/(cùng\s*dạy|cung\s*day|song\s*song|dạy\s*song\s*song)/u.test(constraint.text)) {
+      const teachers = teacherLabels.filter((label) => includesLabel(constraint.text, label)).slice(0, 2);
+      if (teachers.length === 2) {
+        const matched = input.assignments.filter((a) => teachers.includes(a.teacher.label));
+        const assignmentIds = [...new Set(matched.map((a) => a.id))];
+        if (assignmentIds.length === 2) {
+          return { id, original: constraint.text, severity, kind: 'pair_same_slot', params: { assignmentIds } } satisfies ConstraintSpec;
+        }
+      }
+    }
+
+    // mutual_exclusion: "các môn Toán, Lý, Hóa không cùng tiết"
+    if (/(không\s*cùng|khong\s*cung).*(tiết|tiet|slot)/u.test(constraint.text)) {
+      const subs = subjectLabels.filter((label) => includesLabel(constraint.text, label));
+      if (subs.length >= 2) {
+        const matched = input.assignments.filter((a) => subs.includes(a.subject.label));
+        const assignmentIds = [...new Set(matched.map((a) => a.id))];
+        if (assignmentIds.length >= 2) {
+          return { id, original: constraint.text, severity, kind: 'mutual_exclusion', params: { assignmentIds } } satisfies ConstraintSpec;
         }
       }
     }
@@ -997,12 +1212,25 @@ export async function runTranslatorTurn(
                       'teacher_no_gaps',
                       'teacher_allowed_days',
                       'teacher_allowed_periods',
+                      'teacher_min_working_days',
+                      'teacher_max_gaps',
+                      'teacher_min_consecutive',
+                      'teacher_balanced_load',
+                      'teacher_max_subjects_per_day',
+                      'teacher_max_consecutive_days',
                       'subject_pin_period',
                       'subject_consecutive',
                       'subject_max_consecutive',
                       'subject_allowed_days',
                       'subject_min_gap_days',
                       'subject_daily_max_periods',
+                      'subject_block_period',
+                      'subject_block_days',
+                      'subject_not_consecutive',
+                      'subject_min_days',
+                      'subject_spread_evenly',
+                      'subject_order_before',
+                      'subject_not_after_subject',
                       'class_block_day',
                       'class_block_period',
                       'class_block_slot',
@@ -1011,13 +1239,27 @@ export async function runTranslatorTurn(
                       'class_no_gaps',
                       'class_no_double_subject_day',
                       'class_subjects_not_same_day',
+                      'class_fixed_period',
+                      'class_allowed_days',
+                      'class_allowed_periods',
+                      'class_max_consecutive',
+                      'class_max_subjects_per_day',
+                      'class_balanced_load',
+                      'class_subjects_same_day',
+                      'class_min_working_days',
                       'assignment_pin_slot',
                       'assignment_block_slot',
                       'assignment_allowed_slots',
                       'assignment_spread_days',
                       'weekly_periods_exact',
+                      'assignment_consecutive',
+                      'assignment_max_per_day',
+                      'assignment_same_day',
+                      'assignment_not_same_day',
                       'if_then',
                       'pair_not_same_slot',
+                      'pair_same_slot',
+                      'mutual_exclusion',
                       'session_limit',
                       'subject_group',
                       'subject_group_daily_limit',
