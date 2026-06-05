@@ -344,6 +344,75 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
                 )
         return out
 
+    if kind == "teacher_max_classes_per_day":
+        teacher_filter = params.get("teacher")
+        try:
+            max_classes = int(params.get("maxClasses", 99))
+        except (TypeError, ValueError):
+            max_classes = 99
+        teachers = [teacher_filter] if teacher_filter else list({e.get("teacher") for e in schedule})
+        out: list[dict[str, Any]] = []
+        for teacher in teachers:
+            by_day: dict[str, set[Any]] = {}
+            for entry in schedule:
+                if entry.get("teacher") != teacher:
+                    continue
+                by_day.setdefault(str(entry.get("day")), set()).add(entry.get("class"))
+            for day_key, classes in by_day.items():
+                if len(classes) > max_classes:
+                    entries = [e for e in schedule if e.get("teacher") == teacher and str(e.get("day")) == day_key]
+                    out.append(_violation(cid, kind, "teacher_max_classes_per_day violated.", entries))
+        return out
+
+    if kind in ("teacher_pair_not_same_slot", "pair_not_same_slot"):
+        teachers = params.get("teachers", [])
+        if len(teachers) != 2:
+            return []
+        scope_day = (params.get("scope") or {}).get("day")
+        relevant = [
+            e
+            for e in schedule
+            if e.get("teacher") in teachers and (not scope_day or e.get("day") == scope_day)
+        ]
+        by_slot: dict[str, list[dict[str, Any]]] = {}
+        for entry in relevant:
+            key = f"{entry.get('day')}::{entry.get('period')}"
+            by_slot.setdefault(key, []).append(entry)
+        out = []
+        for entries in by_slot.values():
+            if len({e.get("teacher") for e in entries}) > 1:
+                out.append(_violation(cid, kind, "teacher_pair_not_same_slot violated.", entries))
+        return out
+
+    if kind == "subject_flag_ceremony_slot":
+        day = params.get("day")
+        period = _to_period(params.get("period"))
+        entries = [
+            e
+            for e in schedule
+            if e.get("day") == day and _to_period(e.get("period")) == period
+        ]
+        return [] if not entries else [_violation(cid, kind, "subject_flag_ceremony_slot violated.", entries)]
+
+    if kind == "class_first_period_required":
+        klass = params.get("class")
+        if not klass:
+            return []
+        by_day: dict[str, list[int]] = {}
+        for entry in schedule:
+            if entry.get("class") != klass:
+                continue
+            p = _to_period(entry.get("period"))
+            if p is None:
+                continue
+            by_day.setdefault(str(entry.get("day")), []).append(p)
+        out = []
+        for day_key, periods in by_day.items():
+            if min(periods) > 1:
+                entries = [e for e in schedule if e.get("class") == klass and str(e.get("day")) == day_key]
+                out.append(_violation(cid, kind, "class_first_period_required violated.", entries))
+        return out
+
     return []
 
 

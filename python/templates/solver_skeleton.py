@@ -71,6 +71,8 @@ def is_slot_allowed(assignment, day, period, constraint_specs):
             }
             if allowed_slots and (day, period) not in allowed_slots:
                 return False
+        if kind == "subject_flag_ceremony_slot" and day == params.get("day") and period == int(params.get("period", -1)):
+            return False
     return True
 
 
@@ -355,6 +357,51 @@ def build_custom_constraints(model, slots, data):
 
         elif kind == "subject_max_consecutive":
             _add_subject_max_consecutive(spec, soft_terms_ref=soft_terms)
+
+        elif kind in ("subject_preferred_periods", "teacher_preferred_periods"):
+            entity_key = "subject" if kind == "subject_preferred_periods" else "teacher"
+            entity = params.get(entity_key)
+            allowed = set(int(x) for x in params.get("periods", []))
+            target_classes = set(params.get("classes") or data["classes"])
+            forbidden = []
+            for a in assignments:
+                if a.get(entity_key) != entity:
+                    continue
+                if entity_key == "subject" and a["class"] not in target_classes:
+                    continue
+                for d in days:
+                    for p in _periods_for(d):
+                        if p not in allowed:
+                            forbidden.append(_slot_var(a, d, p))
+            _penalize_forbidden_slots(spec, _slot_vars(forbidden))
+
+        elif kind == "global_teacher_utilization_balance":
+            loads = {}
+            for a in assignments:
+                loads.setdefault(a["teacher"], []).append(a)
+            if len(loads) < 2:
+                return
+            totals = []
+            for teacher, asgs in loads.items():
+                total_vars = _slot_vars(_slot_var(a, d, p) for a in asgs for d in days for p in _periods_for(d))
+                if not total_vars:
+                    continue
+                total = model.NewIntVar(0, len(total_vars), f"load_{teacher}")
+                model.Add(total == sum(total_vars))
+                totals.append(total)
+            if len(totals) >= 2:
+                max_bound = sum(int(a.get("weeklyPeriods", 0) or 0) for a in assignments) + 1
+                max_load = model.NewIntVar(0, max_bound, "teacher_max_load")
+                min_load = model.NewIntVar(0, max_bound, "teacher_min_load")
+                for t in totals:
+                    model.Add(max_load >= t)
+                    model.Add(min_load <= t)
+                spread = model.NewIntVar(0, max_bound, "teacher_load_spread")
+                model.Add(spread == max_load - min_load)
+                tol = int(params.get("tolerance", 1) or 1)
+                excess = model.NewIntVar(0, max_bound, "teacher_load_excess")
+                model.Add(excess >= spread - tol)
+                soft_terms.append((_soft_weight(spec), excess))
 
         else:
             unsupported_soft_kinds.append(spec.get("id", spec.get("kind", "unknown")))
@@ -865,6 +912,141 @@ def build_custom_constraints(model, slots, data):
                 for p in target_periods:
                     for a in teacher_asgs:
                         _safe_add_zero(_slot_var(a, d, p))
+
+        elif kind == "teacher_max_classes_per_day":
+            teacher = params.get("teacher")
+            max_classes = int(params.get("maxClasses", 99))
+            target_teachers = [teacher] if teacher else list({a["teacher"] for a in assignments})
+            for target_teacher in target_teachers:
+                teacher_asgs = [a for a in assignments if a["teacher"] == target_teacher]
+                for d in days:
+                    present_vars = []
+                    for cls in {a["class"] for a in teacher_asgs}:
+                        cls_asgs = [a for a in teacher_asgs if a["class"] == cls]
+                        sv = _slot_vars(_slot_var(a, d, p) for a in cls_asgs for p in _periods_for(d))
+                        if not sv:
+                            continue
+                        present = model.NewBoolVar(f"tmc_{target_teacher}_{cls}_{d}")
+                        model.Add(sum(sv) >= 1).OnlyEnforceIf(present)
+                        model.Add(sum(sv) == 0).OnlyEnforceIf(present.Not())
+                        present_vars.append(present)
+                    if len(present_vars) > max_classes:
+                        model.Add(sum(present_vars) <= max_classes)
+
+        elif kind == "teacher_pair_not_same_slot":
+            teachers = params.get("teachers", [])
+            if len(teachers) != 2:
+                raise NotImplementedError(f"Invalid teacher_pair_not_same_slot: {spec.get('id')}")
+            t1, t2 = teachers
+            scope_day = (params.get("scope") or {}).get("day")
+            days_to_check = [scope_day] if scope_day else days
+            asgs1 = [a for a in assignments if a["teacher"] == t1]
+            asgs2 = [a for a in assignments if a["teacher"] == t2]
+            for d in days_to_check:
+                for p in _periods_for(d):
+                    model.Add(
+                        sum(_slot_vars(_slot_var(a, d, p) for a in asgs1)) +
+                        sum(_slot_vars(_slot_var(a, d, p) for a in asgs2))
+                        <= 1
+                    )
+
+        elif kind == "teacher_homeroom_first_period":
+            teacher = params.get("teacher")
+            cls = params.get("class")
+            period = int(params.get("period", 1))
+            target_days = params.get("days") or days
+            asgs = [a for a in assignments if a["teacher"] == teacher and a["class"] == cls]
+            for d in target_days:
+                pinned = _slot_vars(_slot_var(a, d, period) for a in asgs if period in _periods_for(d))
+                if pinned:
+                    model.Add(sum(pinned) >= 1)
+
+        elif kind == "subject_not_last_period":
+            subject = params.get("subject")
+            target_classes = set(params.get("classes") or data["classes"])
+            for a in assignments:
+                if a["subject"] != subject or a["class"] not in target_classes:
+                    continue
+                for d in days:
+                    day_periods = _periods_for(d)
+                    if not day_periods:
+                        continue
+                    last_p = day_periods[-1]
+                    _safe_add_zero(_slot_var(a, d, last_p))
+
+        elif kind == "class_max_heavy_subjects_per_session":
+            heavy_subjects = set(params.get("subjects") or [])
+            groups = params.get("subjectGroups") or [list(heavy_subjects)]
+            max_heavy = int(params.get("maxHeavyInSession", 2) or 2)
+            by_session = params.get("sessionPeriodsBySession") or {}
+            target_class = params.get("class")
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                for d in days:
+                    for session_id, sess_periods in by_session.items():
+                        sess_periods = [int(p) for p in sess_periods]
+                        if not sess_periods:
+                            continue
+                        for group in groups:
+                            present_vars = []
+                            for subj in group:
+                                asgs = [a for a in assignments if a["class"] == c and a["subject"] == subj]
+                                sv = _slot_vars(_slot_var(a, d, p) for a in asgs for p in sess_periods)
+                                if not sv:
+                                    continue
+                                present = model.NewBoolVar(f"hsess_{c}_{subj}_{d}_{session_id}")
+                                model.Add(sum(sv) >= 1).OnlyEnforceIf(present)
+                                model.Add(sum(sv) == 0).OnlyEnforceIf(present.Not())
+                                present_vars.append(present)
+                            if len(present_vars) > max_heavy:
+                                model.Add(sum(present_vars) <= max_heavy)
+
+        elif kind == "class_max_heavy_subjects_per_day":
+            heavy_subjects = set(params.get("subjects") or [])
+            max_heavy = int(params.get("maxHeavy", 2))
+            target_class = params.get("class")
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                for d in days:
+                    present_vars = []
+                    for subj in heavy_subjects:
+                        asgs = [a for a in assignments if a["class"] == c and a["subject"] == subj]
+                        sv = _slot_vars(_slot_var(a, d, p) for a in asgs for p in _periods_for(d))
+                        if not sv:
+                            continue
+                        present = model.NewBoolVar(f"heavy_{c}_{subj}_{d}")
+                        model.Add(sum(sv) >= 1).OnlyEnforceIf(present)
+                        model.Add(sum(sv) == 0).OnlyEnforceIf(present.Not())
+                        present_vars.append(present)
+                    if len(present_vars) > max_heavy:
+                        model.Add(sum(present_vars) <= max_heavy)
+
+        elif kind == "class_first_period_required":
+            target_class = params.get("class")
+            target_classes = [target_class] if target_class else data["classes"]
+            for c in target_classes:
+                class_asgs = [a for a in assignments if a["class"] == c]
+                for d in days:
+                    day_periods = _periods_for(d)
+                    if not day_periods:
+                        continue
+                    first_p = day_periods[0]
+                    day_slots = _slot_vars(_slot_var(a, d, p) for a in class_asgs for p in day_periods)
+                    if not day_slots:
+                        continue
+                    has_day = model.NewBoolVar(f"c1st_has_{c}_{d}")
+                    model.Add(sum(day_slots) >= 1).OnlyEnforceIf(has_day)
+                    model.Add(sum(day_slots) == 0).OnlyEnforceIf(has_day.Not())
+                    first_slots = _slot_vars(_slot_var(a, d, first_p) for a in class_asgs)
+                    if first_slots:
+                        model.Add(sum(first_slots) >= 1).OnlyEnforceIf(has_day)
+
+        elif kind == "subject_flag_ceremony_slot":
+            d = params.get("day")
+            p = int(params.get("period", 1))
+            if p in _periods_for(d):
+                for a in assignments:
+                    _safe_add_zero(_slot_var(a, d, p))
 
         elif kind == "custom_dsl":
             # AI-generated custom code phía dưới, chạy MỘT LẦN cho tất cả
