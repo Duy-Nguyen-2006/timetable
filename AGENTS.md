@@ -19,6 +19,7 @@ tool.
 <!-- HARNESS:END -->
   GNU nano 9.0                                                                                 Backup.md                                                                                 Modified
 - Rule : Luôn có câu "Sax báo cáo" ở cuối mỗi câu trả lời
+- Luôn push lên git sau mỗi chỉnh sửa
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
