@@ -84,8 +84,18 @@ notes?: string                // ghi chú edge case nếu có
 | `class_no_double_subject_day` | "Lớp X không học môn Y 2 lần/ngày" / "phân bổ đều, không quá N tiết/ngày" | `{ class?: string, subject?: string, maxPerDay?: number }` |
 | `class_subjects_not_same_day` | "Không xếp môn A và môn B cùng ngày cho cùng lớp" | `{ subjects: string[], class?: string, maxSubjectsPerDay?: number }` |
 | `teacher_max_working_days` | "GV X có ít nhất N ngày nghỉ" / "GV dạy tối đa N ngày/tuần" | `{ teacher?: string, minDaysOff?: number, maxDays?: number }` |
-| `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` |
+| `subject_max_consecutive` | "Không xếp quá N tiết môn X liên tiếp cùng ngày/lớp" | `{ subject: string, maxConsecutive: number, classes?: string[] }` — nếu câu cấm **N tiết liên tiếp** thì đặt `maxConsecutive = N - 1`. Câu “mọi môn / mọi lớp / bất kỳ” → tách nhiều spec hoặc một spec/môn; **không bịa** tên GV/lớp/môn ngoài `context`. |
 | `pair_not_same_slot` | "GV X và Y không cùng tiết" | `{ teachers: [string, string], scope?: { day?: string } }` |
+| `teacher_preferred_periods` | "GV X nên dạy tiết 1-2" (soft) | `{ teacher: string, periods: number[] }` |
+| `teacher_max_classes_per_day` | "GV X tối đa N lớp/ngày" | `{ teacher?: string, maxClasses: number }` |
+| `teacher_pair_not_same_slot` | Alias cứng cho cặp GV không trùng slot | `{ teachers: [string, string], scope?: { day?: string } }` |
+| `teacher_homeroom_first_period` | "GVCN X dạy tiết 1 lớp Y" | `{ teacher: string, class: string, days?: string[], period: number }` |
+| `subject_preferred_periods` | "Môn Toán nên xếp tiết đầu buổi" (soft) | `{ subject: string, periods: number[], classes?: string[] }` |
+| `subject_not_last_period` | "Môn GDTC không xếp tiết cuối" | `{ subject: string, classes?: string[] }` |
+| `class_max_heavy_subjects_per_day` | "Lớp không quá N môn nặng/ngày" | `{ subjects: string[], maxHeavy: number, class?: string }` |
+| `class_first_period_required` | "Lớp bắt đầu từ tiết 1 mỗi ngày" | `{ class: string }` |
+| `subject_flag_ceremony_slot` | "Chào cờ thứ 2 tiết 1" | `{ day: string, period: number }` |
+| `global_teacher_utilization_balance` | "Cân bằng tải GV toàn trường" (soft) | `{ tolerance: number }` |
 | `session_limit` | "GV X tối đa N tiết mỗi buổi/ngày" | `{ teacher: string, maxPeriods: number }` |
 | `subject_group_daily_limit` | "Nhóm môn X tối đa N môn/ngày mỗi lớp" | `{ groupName: string, maxPerDay: number, class?: string }` |
 | `if_then` | Bất kỳ ràng buộc dạng "nếu ... thì ..." | `{ if: ConditionExpr, then: ConstraintSpec[] }` |
@@ -144,6 +154,25 @@ type ConditionExpr =
 {"kind":"teacher_block_slot","params":{"teacher":"Hòa","day":"wed","period":3}}
 
 ]
+
+}
+
+}
+
+```
+
+**Input:** `"Nếu cô Dung dạy thứ 2 thì cô Thúy không dạy thứ 2"` →
+```
+
+{
+
+"id":"c7", "original":"Nếu cô Dung dạy thứ 2 thì cô Thúy không dạy thứ 2", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"teacher_teaches_on_day","teacher":"Dung","day":"mon"},
+
+"then":[{"kind":"teacher_block_day","params":{"teacher":"Thúy","day":"mon"}}]
 
 }
 
