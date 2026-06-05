@@ -19,6 +19,17 @@ export type ParsedConstraint =
   | { kind: 'subjects_not_consecutive'; subjectLabels: string[] }
   | { kind: 'subject_prefer_periods'; subjectLabels: string[]; periods: number[]; classFilter?: string[] }
   | { kind: 'subject_prefer_sessions'; subjectLabels: string[]; sessionIds: string[] }
+  | { kind: 'teacher_prefer_periods'; teacherLabels: string[]; periods: number[] }
+  | { kind: 'teacher_max_classes_per_day'; teacherLabels: string[] | '*'; max: number }
+  | { kind: 'teacher_pair_not_same_slot'; teacherLabels: string[]; dayIds: string[] }
+  | { kind: 'teacher_homeroom_first_period'; teacherLabels: string[]; classLabels: string[]; dayIds: string[]; period: number }
+  | { kind: 'subject_not_last_period'; subjectLabels: string[]; classFilter?: string[] }
+  | { kind: 'class_subjects_not_same_day'; classLabels: string[] | '*'; subjectLabels: string[]; maxSubjectsPerDay: number; softHint: boolean }
+  | { kind: 'class_max_heavy_subjects_per_day'; classLabels: string[] | '*'; subjectLabels: string[]; maxHeavy: number }
+  | { kind: 'class_max_heavy_subjects_per_session'; classLabels: string[] | '*'; subjectLabels: string[]; subjectGroups?: string[][]; maxHeavyInSession: number; sessionIds: string[]; softHint?: boolean }
+  | { kind: 'class_first_period_required'; classLabels: string[] | '*' }
+  | { kind: 'subject_flag_ceremony_slot'; dayIds: string[]; period: number }
+  | { kind: 'global_teacher_utilization_balance'; tolerance: number }
   | { kind: 'unparsed'; reason: string }
 
 type ParseContext = {
@@ -62,6 +73,26 @@ function matchLabels(text: string, labels: string[]): string[] {
     .filter(Boolean)
     .sort((a, b) => b.length - a.length)
     .filter((label) => boundaryPattern(label).test(text))
+}
+
+
+function heavySubjectsFromLabels(labels: string[]): string[] {
+  return labels.filter((label) =>
+    /toán|toan|văn|van|tiếng\s*anh|tieng\s*anh|khtn|thể\s*dục|gdcd|lý|ls&đl|cn|sinh\s*hoạt/u.test(normalize(label))
+  )
+}
+
+function extractHeavySubjectGroups(raw: string, ctx: ParseContext): string[][] | null {
+  const segments = raw.split(/\s+(?:và|va)\s+/iu).map((s) => s.trim()).filter(Boolean)
+  const groups: string[][] = []
+  for (const seg of segments) {
+    if (!/(môn|mon|toán|văn|anh|khtn)/iu.test(seg)) continue
+    const picked = matchLabels(seg, ctx.subjectLabels)
+    if (picked.length >= 2) groups.push(picked)
+  }
+  if (groups.length >= 2) return groups
+  if (groups.length === 1) return groups
+  return null
 }
 
 function unique(values: string[]): string[] {
@@ -113,6 +144,19 @@ function extractPeriods(text: string): number[] {
   const singles = text.matchAll(/\btiết\s*(\d+)\b/gu)
   for (const match of singles) periods.push(Number(match[1]))
   return unique(periods.map(String)).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+}
+
+
+function inferMaxHeavyInSession(raw: string, heavyCount: number): number {
+  const explicit = raw.match(/(?:tối\s*đa|toi\s*da|không\s*quá|khong\s*qua|max)\s*(\d+)\s*(?:môn|mon)/iu)
+  if (explicit) {
+    const n = Number(explicit[1])
+    if (Number.isInteger(n) && n > 0) return n
+  }
+  if (/toán.*văn.*anh|toan.*van.*anh/iu.test(raw) || heavyCount >= 3) return 2
+  const first = extractFirstNumber(raw)
+  if (first !== null && first >= 2 && first <= 6) return first
+  return 2
 }
 
 function extractFirstNumber(text: string): number | null {
@@ -209,6 +253,173 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     return classFilter
       ? { kind: 'subject_prefer_periods', subjectLabels: subjects, periods, classFilter }
       : { kind: 'subject_prefer_periods', subjectLabels: subjects, periods }
+  }
+
+  if (teachers.length > 0 && periods.length > 0 && /nên|nen|ưu\s*tiên|uu\s*tien|xếp|xep/u.test(raw)) {
+    return { kind: 'teacher_prefer_periods', teacherLabels: teachers, periods }
+  }
+
+  if (
+    (/tối\s*đa|toi\s*da|không\s*quá|khong\s*qua/u.test(raw)) &&
+    /(lớp|lop)/u.test(raw) &&
+    /(mỗi\s*ngày|moi\s*ngay|ngày|ngay)/u.test(raw) &&
+    teachers.length > 0
+  ) {
+    const max = extractFirstNumber(raw)
+    if (max !== null) {
+      return {
+        kind: 'teacher_max_classes_per_day',
+        teacherLabels: allTeacherToken(raw) ? '*' : teachers,
+        max,
+      }
+    }
+  }
+
+  if (teachers.length >= 2 && /(không|khong).*(cùng|trùng).*(tiết|tiet|slot)/u.test(raw)) {
+    return { kind: 'teacher_pair_not_same_slot', teacherLabels: teachers.slice(0, 2), dayIds: days }
+  }
+
+  if (
+    teachers.length > 0 &&
+    classes.length > 0 &&
+    /(chủ\s*nhiệm|chu\s*nhiem|gvcn)/u.test(raw) &&
+    /(tiết\s*1|tiet\s*1|tiết\s*đầu|tiet\s*dau)/u.test(raw)
+  ) {
+    const period = periods[0] ?? 1
+    return {
+      kind: 'teacher_homeroom_first_period',
+      teacherLabels: teachers,
+      classLabels: classes,
+      dayIds: days.length > 0 ? days : ['monday'],
+      period,
+    }
+  }
+
+  if (subjects.length > 0 && /(tiết\s*cuối|tiet\s*cuoi|không\s*xếp\s*tiết\s*cuối|khong\s*xep\s*tiet\s*cuoi)/u.test(raw)) {
+    const classFilter = classFilterFromText(raw, ctx.classLabels)
+    return classFilter
+      ? { kind: 'subject_not_last_period', subjectLabels: subjects, classFilter }
+      : { kind: 'subject_not_last_period', subjectLabels: subjects }
+  }
+
+  if (
+    (/môn\s*nặng|mon\s*nang|tiết\s*nặng|tiet\s*nang/u.test(raw)) &&
+    /(buổi|buoi|sáng|sang|chiều|chieu)/u.test(raw) &&
+    /(dồn|don|xen\s*kẽ|xen\s*ke|trong\s*(?:1\s*)?buổi|cùng\s*(?:1\s*)?buổi|vào\s*(?:1\s*)?buổi|không\s*chỉ|khong\s*chi)/u.test(raw)
+  ) {
+    const sessions = extractSessions(raw)
+    const sessionIds = sessions.length > 0 ? sessions : (['morning', 'afternoon'] as SessionId[])
+    const groups = extractHeavySubjectGroups(raw, ctx)
+    const heavySubjects =
+      subjects.length >= 2
+        ? subjects
+        : heavySubjectsFromLabels(ctx.subjectLabels)
+    const maxHeavyInSession = inferMaxHeavyInSession(raw, heavySubjects.length)
+    const softHint = /(không\s*nên|khong\s*nen|nên|nen|ưu\s*tiên|uu\s*tien|tránh|tranh)/u.test(raw)
+    if (groups && groups.length >= 1) {
+      return {
+        kind: 'class_max_heavy_subjects_per_session',
+        classLabels: classes.length > 0 ? classes : '*',
+        subjectLabels: groups.flat(),
+        subjectGroups: groups,
+        maxHeavyInSession,
+        sessionIds,
+        softHint,
+      }
+    }
+    if (heavySubjects.length >= 2) {
+      return {
+        kind: 'class_max_heavy_subjects_per_session',
+        classLabels: classes.length > 0 ? classes : '*',
+        subjectLabels: heavySubjects,
+        maxHeavyInSession,
+        sessionIds,
+        softHint,
+      }
+    }
+  }
+
+  if (
+    (/tiết\s*nặng|tiet\s*nang|môn\s*nặng|mon\s*nang|tiết\s*chính|tiet\s*chinh/u.test(raw) ||
+      (/môn\s*nặng|mon\s*nang/u.test(raw) && subjects.length === 0)) &&
+    /(không\s*nên|khong\s*nen|không|khong|tránh|tranh)/u.test(raw) &&
+    /(cùng|cung).*(ngày|ngay)/u.test(raw) &&
+    !/(buổi|buoi)/u.test(raw) &&
+    /(lớp|lop)/u.test(raw)
+  ) {
+    const heavySubjects =
+      subjects.length >= 2
+        ? subjects
+        : ctx.subjectLabels.filter((label) =>
+            /toán|toan|văn|van|tiếng\s*anh|tieng\s*anh|khtn|thể\s*dục|gdcd|lý|van|sinh\s*hoạt/u.test(normalize(label))
+          );
+    if (heavySubjects.length >= 2) {
+      return {
+        kind: 'class_subjects_not_same_day',
+        classLabels: classes.length > 0 ? classes : '*',
+        subjectLabels: heavySubjects,
+        maxSubjectsPerDay: 1,
+        softHint: true,
+      };
+    }
+  }
+
+  if (
+    subjects.length >= 2 &&
+    /(không\s*nên|khong\s*nen|không|khong|tránh|tranh)/u.test(raw) &&
+    /(cùng|cung)/u.test(raw) &&
+    /(ngày|ngay)/u.test(raw) &&
+    /(lớp|lop)/u.test(raw)
+  ) {
+    return {
+      kind: 'class_subjects_not_same_day',
+      classLabels: classes.length > 0 ? classes : '*',
+      subjectLabels: subjects,
+      maxSubjectsPerDay: 1,
+      softHint: /không\s*nên|khong\s*nen|nên\s*tránh|nen\s*tranh/u.test(raw),
+    }
+  }
+
+  if (
+    (/môn\s*nặng|mon\s*nang|môn\s*chính|mon\s*chinh/u.test(raw) || subjects.length >= 2) &&
+    /(tối\s*đa|toi\s*da|không\s*quá|khong\s*qua)/u.test(raw) &&
+    /(ngày|ngay)/u.test(raw)
+  ) {
+    const maxHeavy = extractFirstNumber(raw) ?? 2
+    const heavySubjects =
+      subjects.length > 0
+        ? subjects
+        : ctx.subjectLabels.filter((label) =>
+            /toán|toan|văn|van|tiếng\s*anh|tieng\s*anh|anh\s*văn/u.test(normalize(label))
+          )
+    if (heavySubjects.length > 0) {
+      return {
+        kind: 'class_max_heavy_subjects_per_day',
+        classLabels: allClassToken(raw) ? '*' : classes,
+        subjectLabels: heavySubjects,
+        maxHeavy,
+      }
+    }
+  }
+
+  if (
+    classes.length > 0 &&
+    /(tiết\s*đầu|tiet\s*dau|bắt\s*đầu\s*từ\s*tiết\s*1|bat\s*dau\s*tu\s*tiet\s*1|không\s*bỏ\s*trống\s*tiết\s*đầu)/u.test(raw)
+  ) {
+    return { kind: 'class_first_period_required', classLabels: allClassToken(raw) ? '*' : classes }
+  }
+
+  if (/(chào\s*cờ|chao\s*co|sinh\s*hoạt|sinh\s*hoat|lễ\s*chào)/u.test(raw) && (days.length > 0 || periods.length > 0)) {
+    return {
+      kind: 'subject_flag_ceremony_slot',
+      dayIds: days.length > 0 ? days : ['monday'],
+      period: periods[0] ?? 1,
+    }
+  }
+
+  if (/(cân\s*bằng\s*tải|cân\s*bằng\s*tiết|phan\s*bo\s*deu|balanced)/u.test(raw) && /(giáo\s*viên|giao\s*vien|gv|toàn\s*trường)/u.test(raw)) {
+    const tolerance = extractFirstNumber(raw) ?? 1
+    return { kind: 'global_teacher_utilization_balance', tolerance }
   }
 
   return { kind: 'unparsed', reason: 'Không khớp pattern chuẩn hoặc thiếu entity/ngày/tiết/buổi.' }

@@ -1,8 +1,12 @@
 import type { AgentInputPayload, LocalAgentFinalResult } from './ai/types'
 import type { constraintTypes } from './constants'
 
+export type { RawConstraintInput, ParsedConstraintDraft, ConfirmedConstraint } from './ai/constraint-review-types'
+
 export type TimetableSolveResult = LocalAgentFinalResult
 export type SolverRequestPayload = Pick<AgentInputPayload, 'constraints'>
+
+export type { ConfirmedSolveRequest } from './ai/solver-constraint-gate'
 export type AgentProgressStep = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'
 
 export type CachedRun = {

@@ -11,7 +11,7 @@ export const PROMPT_VERSIONS = {
 
 export const SOLVER_TEMPLATE_VERSION = '1.4.1';
 
-export const CONSTRAINT_REGISTRY_VERSION = '1.2.0';
+export const CONSTRAINT_REGISTRY_VERSION = '1.3.0';
 
 export type PromptStage = keyof typeof PROMPT_VERSIONS;
 

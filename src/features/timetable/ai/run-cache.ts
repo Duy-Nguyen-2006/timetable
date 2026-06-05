@@ -3,12 +3,26 @@ import { PIPELINE_VERSIONS } from './pipeline-versions'
 import { __localAgentInternal } from './local-agent'
 import type { CachedRun, TimetableSolveResult } from '../types'
 import { MAX_CACHED_RUNS } from '../solver-ui'
+import type { ConfirmedConstraint } from './constraint-review-types'
+import { digestConfirmedConstraintSpecs } from '../constraints/confirmed-constraint-signature'
 
 export const RUN_CACHE_STORAGE_KEY = 'tack_ai_run_cache'
 
-export const buildRunCacheDigest = (input: AgentInputPayload, provider: AIProviderConfig) =>
+export const buildRunCacheDigest = (
+  input: AgentInputPayload,
+  provider: AIProviderConfig,
+  confirmedConstraints?: ConfirmedConstraint[]
+) =>
   __localAgentInternal.stableHash({
-    input,
+    input: {
+      ...input,
+      constraints: confirmedConstraints?.length
+        ? [{ type: 'confirmed_digest', text: digestConfirmedConstraintSpecs(confirmedConstraints) }]
+        : input.constraints,
+    },
+    confirmedConstraintDigest: confirmedConstraints?.length
+      ? digestConfirmedConstraintSpecs(confirmedConstraints)
+      : null,
     provider: provider.provider,
     baseURL: provider.baseURL,
     model: provider.model,

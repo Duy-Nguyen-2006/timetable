@@ -12,6 +12,7 @@ import {
   includesLabel,
   extractDayId,
   extractFirstNumber,
+  extractConsecutiveBanCount,
   extractPeriodNumber,
   inferWeeklyAssignmentId,
   isAutoBaseConstraintText,
@@ -50,7 +51,13 @@ const constraintSpecSchema = z.object({
     'teacher_balanced_load',
     'teacher_max_subjects_per_day',
     'teacher_max_consecutive_days',
+    'teacher_preferred_periods',
+    'teacher_max_classes_per_day',
+    'teacher_pair_not_same_slot',
+    'teacher_homeroom_first_period',
     'subject_pin_period',
+    'subject_preferred_periods',
+    'subject_not_last_period',
     'subject_consecutive',
     'subject_max_consecutive',
     'subject_allowed_days',
@@ -79,6 +86,11 @@ const constraintSpecSchema = z.object({
     'class_balanced_load',
     'class_subjects_same_day',
     'class_min_working_days',
+    'class_max_heavy_subjects_per_day',
+    'class_max_heavy_subjects_per_session',
+    'class_first_period_required',
+    'subject_flag_ceremony_slot',
+    'global_teacher_utilization_balance',
     'assignment_pin_slot',
     'assignment_block_slot',
     'assignment_allowed_slots',
@@ -294,6 +306,166 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
+    if (parsed.kind === 'teacher_prefer_periods' && parsed.teacherLabels[0] && parsed.periods.length > 0) {
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: severity === 'hard' ? 'soft' : severity,
+        kind: 'teacher_preferred_periods',
+        params: { teacher: parsed.teacherLabels[0], periods: parsed.periods },
+      } satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'teacher_max_classes_per_day') {
+      const teacher = parsed.teacherLabels === '*' ? undefined : parsed.teacherLabels[0];
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_max_classes_per_day',
+        params: { ...(teacher ? { teacher } : {}), maxClasses: parsed.max },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_pair_not_same_slot' && parsed.teacherLabels.length >= 2) {
+      const day = parsed.dayIds[0];
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_pair_not_same_slot',
+        params: {
+          teachers: parsed.teacherLabels.slice(0, 2),
+          ...(day ? { scope: { day } } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (
+      parsed.kind === 'teacher_homeroom_first_period' &&
+      parsed.teacherLabels[0] &&
+      parsed.classLabels[0]
+    ) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_homeroom_first_period',
+        params: {
+          teacher: parsed.teacherLabels[0],
+          class: parsed.classLabels[0],
+          days: parsed.dayIds,
+          period: parsed.period,
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'subject_not_last_period' && parsed.subjectLabels[0]) {
+      const classes = parsed.classFilter ?? classLabels.filter((label) => includesLabel(constraint.text, label));
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_not_last_period',
+        params: {
+          subject: parsed.subjectLabels[0],
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'class_max_heavy_subjects_per_session' && parsed.subjectLabels.length > 0) {
+      const klass = parsed.classLabels === '*' ? undefined : parsed.classLabels[0];
+      const sessionPeriodsBySession: Record<string, number[]> = {};
+      for (const sessionId of parsed.sessionIds) {
+        sessionPeriodsBySession[sessionId] = periodsForSession(input, sessionId);
+      }
+      const sessionPeriods = parsed.sessionIds.flatMap((sessionId) => periodsForSession(input, sessionId));
+      const parsedSeverity = parsed.softHint ? 'soft' : severity;
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: parsedSeverity,
+        kind: 'class_max_heavy_subjects_per_session',
+        params: {
+          subjects: parsed.subjectLabels,
+          maxHeavyInSession: parsed.maxHeavyInSession,
+          sessionIds: parsed.sessionIds,
+          sessionPeriods,
+          sessionPeriodsBySession,
+          ...(parsed.subjectGroups ? { subjectGroups: parsed.subjectGroups } : {}),
+          ...(klass ? { class: klass } : {}),
+        },
+      } satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'class_max_heavy_subjects_per_day' && parsed.subjectLabels.length > 0) {
+      const klass = parsed.classLabels === '*' ? undefined : parsed.classLabels[0];
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'class_max_heavy_subjects_per_day',
+        params: {
+          subjects: parsed.subjectLabels,
+          maxHeavy: parsed.maxHeavy,
+          ...(klass ? { class: klass } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'class_subjects_not_same_day' && parsed.subjectLabels.length >= 2) {
+      const klass = parsed.classLabels === '*' ? undefined : parsed.classLabels[0];
+      const parsedSeverity = parsed.softHint ? 'soft' : severity;
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: parsedSeverity,
+        kind: 'class_subjects_not_same_day',
+        params: {
+          subjects: parsed.subjectLabels,
+          maxSubjectsPerDay: parsed.maxSubjectsPerDay,
+          ...(klass ? { class: klass } : {}),
+        },
+      } satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'class_first_period_required') {
+      const targets =
+        parsed.classLabels === '*'
+          ? classLabels
+          : parsed.classLabels.length > 0
+            ? parsed.classLabels
+            : classLabels;
+      return targets.map((klass, idx) => ({
+        id: targets.length === 1 ? id : `${id}_${idx + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'class_first_period_required',
+        params: { class: klass },
+      }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'subject_flag_ceremony_slot') {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_flag_ceremony_slot',
+        params: { day: parsed.dayIds[0], period: parsed.period },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'global_teacher_utilization_balance') {
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: severity === 'hard' ? 'soft' : severity,
+        kind: 'global_teacher_utilization_balance',
+        params: { tolerance: parsed.tolerance },
+      } satisfies ConstraintSpec);
+    }
+
     if (parsed.kind === 'subject_pin_periods' && parsed.subjectLabels[0] && parsed.periods.length > 0) {
       const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
       return {
@@ -361,6 +533,35 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
             ...(classes.length ? { classes } : {}),
           },
         } satisfies ConstraintSpec;
+      }
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: severity === 'hard' ? 'soft' : severity,
+        kind: 'subject_preferred_periods',
+        params: {
+          subject: parsed.subjectLabels[0],
+          periods: parsed.periods,
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'subject_prefer_sessions' && parsed.subjectLabels[0] && parsed.sessionIds.length > 0) {
+      const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+      const allowedPeriods = parsed.sessionIds.flatMap((sessionId) => periodsForSession(input, sessionId));
+      if (allowedPeriods.length > 0) {
+        return withWeight({
+          id,
+          original: constraint.text,
+          severity: severity === 'hard' ? 'soft' : severity,
+          kind: 'subject_preferred_periods',
+          params: {
+            subject: parsed.subjectLabels[0],
+            periods: allowedPeriods,
+            ...(classes.length ? { classes } : {}),
+          },
+        } satisfies ConstraintSpec);
       }
     }
 
@@ -507,12 +708,14 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       } satisfies ConstraintSpec;
     }
 
-    if (/(liên\s*tiếp|lien\s*tiep)/u.test(constraint.text) && /(không|khong)/u.test(constraint.text) && /(buổi|buoi)/u.test(constraint.text)) {
-      const maxConsecutive = extractFirstNumber(constraint.text);
-      if (maxConsecutive !== null) {
+    if (/(liên\s*tiếp|lien\s*tiep)/iu.test(constraint.text) && /(không|khong|không xếp|khong xep)/iu.test(constraint.text)) {
+      const maxConsecutive = extractConsecutiveBanCount(constraint.text);
+      if (maxConsecutive !== null && maxConsecutive >= 2) {
         const effectiveMax = maxConsecutive - 1;
         const klass = classLabels.find((label) => includesLabel(constraint.text, label));
         const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
+        const expandAllSubjects =
+          /(cùng\s*1\s*môn|cung\s*1\s*mon|mọi\s*môn|moi\s*mon|bất\s*kỳ|bat\s*ky)/iu.test(constraint.text) && !subject;
         if (subject) {
           return {
             id,
@@ -521,19 +724,22 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
             kind: 'subject_max_consecutive',
             params: {
               subject,
+              max: effectiveMax,
               maxConsecutive: effectiveMax,
               ...(klass ? { classes: [klass] } : {}),
             },
           } satisfies ConstraintSpec;
         }
         const uniqueSubjects = [...new Set(input.assignments.map((a) => a.subject.label))];
-        return uniqueSubjects.map((subj, idx) => ({
-          id: uniqueSubjects.length === 1 ? id : `${id}_${idx + 1}`,
+        const targets = expandAllSubjects || uniqueSubjects.length > 1 ? uniqueSubjects : uniqueSubjects;
+        return targets.map((subj, idx) => ({
+          id: targets.length === 1 ? id : `${id}_${idx + 1}`,
           original: constraint.text,
           severity,
           kind: 'subject_max_consecutive',
           params: {
             subject: subj,
+            max: effectiveMax,
             maxConsecutive: effectiveMax,
             ...(klass ? { classes: [klass] } : {}),
           },
@@ -1299,7 +1505,9 @@ export async function runTranslatorTurn(
     const deterministicParsed = deterministicSpecs.filter(
       (s) => s.kind !== 'custom_dsl' && !unparsedTexts.has(s.original)
     );
-    const merged = sanitizeSpecs(input, [...deterministicParsed, ...validated.constraintSpecs]);
+    const rawMerged = [...deterministicParsed, ...validated.constraintSpecs];
+    const fixedMerged = fixIfThenOverrides(input, rawMerged);
+    const merged = sanitizeSpecs(input, fixedMerged);
     return {
       constraintSpecs: merged,
       rawResponse: response.content,
@@ -1312,6 +1520,30 @@ export async function runTranslatorTurn(
       usageTokens: 0,
     };
   }
+}
+
+/** Re-parse "nếu...thì..." constraints that LLM incorrectly classified as non-if_then. */
+function fixIfThenOverrides(input: AgentInputPayload, specs: ConstraintSpec[]): ConstraintSpec[] {
+  const reparseNeeded = new Set<string>();
+  for (const spec of specs) {
+    if (spec.kind !== 'if_then' && /nếu|neu/iu.test(spec.original) && /thì|thi/iu.test(spec.original)) {
+      reparseNeeded.add(spec.original);
+    }
+  }
+  if (reparseNeeded.size === 0) return specs;
+
+  const reparsed = fallbackFromRuleParser({
+    ...input,
+    constraints: input.constraints.filter((c) => reparseNeeded.has(c.text)),
+  });
+
+  const reparsedByOriginal = new Map(reparsed.filter((s) => s.kind === 'if_then').map((s) => [s.original, s]));
+  if (reparsedByOriginal.size === 0) return specs;
+
+  return specs.map((spec) => {
+    const fixed = reparsedByOriginal.get(spec.original);
+    return fixed ? { ...fixed, id: spec.id, severity: spec.severity, weight: spec.weight } : spec;
+  });
 }
 
 export const __translatorInternal = {

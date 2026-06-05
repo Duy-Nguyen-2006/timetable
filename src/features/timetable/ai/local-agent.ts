@@ -1,6 +1,6 @@
 import { TokenBudgetGuard } from './budget-guard';
 import { runCoderTurn } from './coder';
-import type { ScheduleEntry } from './constraint-spec';
+import type { ConstraintSpec, ScheduleEntry } from './constraint-spec';
 import { verifyCpSatRoundTrip } from './cp-sat-roundtrip';
 import { validateSchedule } from './deterministic-validator';
 import { compressPayload, digestError } from './input-compressor';
@@ -38,6 +38,11 @@ import {
   normalizeRoundTripMessage,
 } from './local-agent-utils';
 
+export interface RunLocalAgentOptions {
+  /** Bỏ qua translator khi đã có specs đã xác nhận. */
+  preTranslatedConstraintSpecs?: ConstraintSpec[];
+}
+
 export interface RunLocalAgentResult {
   success: boolean;
   finalResult?: LocalAgentFinalResult;
@@ -46,7 +51,8 @@ export interface RunLocalAgentResult {
 
 export async function runLocalAgent(
   input: AgentInputPayload,
-  config: LocalAgentConfig
+  config: LocalAgentConfig,
+  options?: RunLocalAgentOptions
 ): Promise<RunLocalAgentResult> {
   const runtime = resolveSolverRuntime(config);
   const timeoutMs = runtime.timeoutMs;
@@ -61,25 +67,45 @@ export async function runLocalAgent(
     emit(config, { type: 'phase', phase: 'translator', message: 'Đang dịch constraints', iteration: 0 });
     emit(config, { type: 'stage_started', stage: 'translator', message: 'Translator started' });
 
-    const translatorCacheKey = `translator:${stableHash({
-      model: pickStageConfig(config, 'translator').model,
-      promptVersion: PIPELINE_VERSIONS.prompt.translator,
-      registryVersion: PIPELINE_VERSIONS.constraintRegistry,
-      assignments: input.assignments,
-      constraints: input.constraints,
-      days: input.days,
-      sessions: input.sessions,
-      periodCounts: input.periodCounts,
-      deletedPeriods: input.deletedPeriods,
-    })}`;
-    const translatorCached = await getCachedStage(translatorCacheKey, () =>
-      runTranslatorTurn(pickStageConfig(config, 'translator'), input)
-    );
-    const translator = translatorCached.value;
-    consumeBudget(budget, translatorCached.hit ? 0 : translator.usageTokens, JSON.stringify(input.constraints), translator.rawResponse ?? '');
-    if (!translatorCached.hit) totalToolCalls += 1;
-    const deduped = dedupeConstraintSpecs(translator.constraintSpecs);
-    emit(config, { type: 'stage_completed', stage: 'translator', message: `Translator done (${translator.constraintSpecs.length} specs, ${deduped.length} after dedupe)` });
+    let deduped: ConstraintSpec[];
+    const preTranslated = options?.preTranslatedConstraintSpecs;
+    if (preTranslated?.length) {
+      deduped = dedupeConstraintSpecs(preTranslated);
+      emit(config, {
+        type: 'stage_completed',
+        stage: 'translator',
+        message: `Dùng ${deduped.length} ràng buộc đã xác nhận (bỏ qua translator)`,
+      });
+    } else {
+      const translatorCacheKey = `translator:${stableHash({
+        model: pickStageConfig(config, 'translator').model,
+        promptVersion: PIPELINE_VERSIONS.prompt.translator,
+        registryVersion: PIPELINE_VERSIONS.constraintRegistry,
+        assignments: input.assignments,
+        constraints: input.constraints,
+        days: input.days,
+        sessions: input.sessions,
+        periodCounts: input.periodCounts,
+        deletedPeriods: input.deletedPeriods,
+      })}`;
+      const translatorCached = await getCachedStage(translatorCacheKey, () =>
+        runTranslatorTurn(pickStageConfig(config, 'translator'), input)
+      );
+      const translator = translatorCached.value;
+      consumeBudget(
+        budget,
+        translatorCached.hit ? 0 : translator.usageTokens,
+        JSON.stringify(input.constraints),
+        translator.rawResponse ?? ''
+      );
+      if (!translatorCached.hit) totalToolCalls += 1;
+      deduped = dedupeConstraintSpecs(translator.constraintSpecs);
+      emit(config, {
+        type: 'stage_completed',
+        stage: 'translator',
+        message: `Translator done (${translator.constraintSpecs.length} specs, ${deduped.length} after dedupe)`,
+      });
+    }
     const compressed = compressPayload(input, deduped);
     const solverConstraintSpecs = deduped.filter(
       (spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base'))

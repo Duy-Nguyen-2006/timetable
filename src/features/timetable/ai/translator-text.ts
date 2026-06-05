@@ -12,6 +12,16 @@ export function extractFirstNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+/** Số tiết trong cụm “N tiết liên tiếp” (tránh lấy nhầm “1 môn”, “1 lớp”). */
+export function extractConsecutiveBanCount(text: string): number | null {
+  const matched = text.match(/(\d+)\s*(?:tiết|tiet)\s*(?:liên\s*tiếp|lien\s*tiep)/iu);
+  if (matched) {
+    const value = Number(matched[1]);
+    if (Number.isFinite(value) && value >= 2) return value;
+  }
+  return extractFirstNumber(text);
+}
+
 export function extractPeriodNumber(text: string): number | null {
   const matched = text.match(/(?:tiết|tiet|period)\s*(\d+)/iu);
   if (matched) {

@@ -335,6 +335,52 @@ describe('validator edge cases', () => {
     assert.match(failReport.violations[0].message, /tối đa 2/);
   });
 
+  it('soft preference violations do not make schedule unsolved or collide with duplicate hard ids', () => {
+    const hardBlock = spec('c1', 'teacher_block_day', {
+      teacher: 'Sơn',
+      day: 'tue',
+    }, 'hard');
+    const softPreferred = spec('c1', 'subject_preferred_periods', {
+      subject: 'Toán',
+      periods: [1, 2],
+    }, 'soft');
+    const softConsecutive = spec('c1', 'subject_consecutive', {
+      subject: 'Văn',
+      length: 2,
+    }, 'soft');
+
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 1, 'Văn', 'Dung'),
+        entry('6A', 'mon', 3, 'Văn', 'Dung'),
+      ],
+      [hardBlock, softPreferred, softConsecutive]
+    );
+
+    assert.equal(report.ok, true);
+    assert.equal(report.hardConstraintPass, true);
+    assert.equal(report.softConstraintPass, false);
+    assert.equal(report.hardViolations.length, 0);
+    assert.equal(report.softViolations.length, 2);
+  });
+
+  it('subject_consecutive violation message includes class to avoid duplicate-looking errors', () => {
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Văn', 'Dung'),
+        entry('6A', 'mon', 3, 'Văn', 'Dung'),
+        entry('6B', 'tue', 1, 'Văn', 'Dung'),
+        entry('6B', 'tue', 3, 'Văn', 'Dung'),
+      ],
+      [spec('subject_consecutive_classes', 'subject_consecutive', { subject: 'Văn', length: 2 })]
+    );
+
+    assert.equal(report.violations.length, 2);
+    assert.match(report.violations[0].message, /Lớp 6A:/);
+    assert.match(report.violations[1].message, /Lớp 6B:/);
+  });
+
   it('validateSchedule fail-closed logic for unchecked hard constraints', () => {
     const uncheckedHardSpec = spec('unchecked_hard_spec', 'custom_dsl', {
       naturalLanguage: 'custom hard constraint description',

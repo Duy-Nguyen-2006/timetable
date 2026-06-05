@@ -6,6 +6,7 @@ import type {
   ScheduleEntry,
   Violation,
 } from './constraint-spec';
+import { countHeavySubjectsInPeriods, sessionPeriodBuckets } from './class-heavy-session';
 import { CHECKED_KINDS } from './constraint-registry';
 import { checkBaseConstraints, evaluateCondition, toPeriod } from './validator-helpers';
 
@@ -176,7 +177,7 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
     byClass.set(entry.class, [...(byClass.get(entry.class) ?? []), entry]);
   }
 
-  for (const entries of byClass.values()) {
+  for (const [klass, entries] of byClass.entries()) {
     if (entries.length < length) continue;
     const totalPeriodsForSubject = entries.length;
     // Rule A: subject_consecutive chỉ yêu cầu floor(total / length) block liên tiếp.
@@ -214,7 +215,7 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
       violations.push({
         constraintId: spec.id,
         kind: spec.kind,
-        message: `Môn ${subject} cần các block liên tiếp độ dài ${length}.`,
+        message: `Lớp ${klass}: Môn ${subject} cần các block liên tiếp độ dài ${length}.`,
         offendingEntries: entries,
       });
     }
@@ -1311,6 +1312,290 @@ const checkAssignmentNotSameDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+const checkTeacherPreferredPeriods: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const preferred = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
+  if (!teacher || preferred.size === 0) return [];
+  const offending = schedule.filter((e) => {
+    if (e.teacher !== teacher) return false;
+    const p = toPeriod(e.period);
+    return p === null || !preferred.has(p);
+  });
+  if (!offending.length) return [];
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `${teacher} nên dạy các tiết ${[...preferred].join(', ')} nhưng có ${offending.length} tiết ngoài ưu tiên.`,
+    offendingEntries: offending,
+  }];
+};
+
+const checkSubjectPreferredPeriods: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const preferred = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
+  const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
+  if (!subject || preferred.size === 0) return [];
+  const offending = schedule.filter((e) => {
+    if (e.subject !== subject) return false;
+    if (classes && !classes.includes(e.class)) return false;
+    const p = toPeriod(e.period);
+    return p === null || !preferred.has(p);
+  });
+  if (!offending.length) return [];
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `Môn ${subject} nên xếp tiết ${[...preferred].join(', ')} nhưng có tiết ngoài ưu tiên.`,
+    offendingEntries: offending,
+  }];
+};
+
+const checkTeacherMaxClassesPerDay: CheckFn = (spec, schedule) => {
+  const teacherFilter = spec.params.teacher ? String(spec.params.teacher) : null;
+  const maxClasses = Number(spec.params.maxClasses ?? NaN);
+  if (!Number.isFinite(maxClasses)) return [];
+  const teachers = teacherFilter ? [teacherFilter] : [...new Set(schedule.map((e) => e.teacher))];
+  const violations: Violation[] = [];
+  for (const teacher of teachers) {
+    const byDay = new Map<string, Set<string>>();
+    for (const e of schedule) {
+      if (e.teacher !== teacher) continue;
+      if (!byDay.has(e.day)) byDay.set(e.day, new Set());
+      byDay.get(e.day)!.add(e.class);
+    }
+    for (const [day, classes] of byDay) {
+      if (classes.size > maxClasses) {
+        const entries = schedule.filter((e) => e.teacher === teacher && e.day === day);
+        violations.push({
+          constraintId: spec.id,
+          kind: spec.kind,
+          message: `${teacher} dạy ${classes.size} lớp khác nhau ngày ${day} (tối đa ${maxClasses}).`,
+          offendingEntries: entries,
+        });
+      }
+    }
+  }
+  return violations;
+};
+
+const checkTeacherPairNotSameSlot: CheckFn = (spec, schedule) => {
+  const teachers = Array.isArray(spec.params.teachers)
+    ? spec.params.teachers.map((value) => String(value))
+    : [];
+  if (teachers.length !== 2) return [];
+  const scope = (spec.params.scope ?? {}) as { day?: string };
+  const relevant = schedule.filter((entry) => {
+    if (!teachers.includes(entry.teacher)) return false;
+    if (scope.day && entry.day !== scope.day) return false;
+    return true;
+  });
+  const bySlot = new Map<string, ScheduleEntry[]>();
+  for (const entry of relevant) {
+    const key = `${entry.day}::${entry.period}`;
+    bySlot.set(key, [...(bySlot.get(key) ?? []), entry]);
+  }
+  const violations: Violation[] = [];
+  for (const entries of bySlot.values()) {
+    const uniqTeachers = new Set(entries.map((entry) => entry.teacher));
+    if (uniqTeachers.size > 1) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `${teachers[0]} và ${teachers[1]} cùng dạy một slot.`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkTeacherHomeroomFirstPeriod: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const klass = String(spec.params.class ?? '');
+  const period = Number(spec.params.period ?? 1);
+  const days = Array.isArray(spec.params.days) ? spec.params.days.map(String) : [];
+  if (!teacher || !klass) return [];
+  const targetDays = days.length > 0 ? days : [...new Set(schedule.map((e) => e.day))];
+  const violations: Violation[] = [];
+  for (const day of targetDays) {
+    const ok = schedule.some(
+      (e) =>
+        e.teacher === teacher &&
+        e.class === klass &&
+        e.day === day &&
+        toPeriod(e.period) === period
+    );
+    if (!ok) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `GVCN ${teacher} phải dạy lớp ${klass} tiết ${period} ngày ${day}.`,
+        offendingEntries: schedule.filter((e) => e.class === klass && e.day === day),
+      });
+    }
+  }
+  return violations;
+};
+
+const checkSubjectNotLastPeriod: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
+  if (!subject) return [];
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.subject !== subject) continue;
+    if (classes && !classes.includes(e.class)) continue;
+    const key = `${e.class}::${e.day}`;
+    byClassDay.set(key, [...(byClassDay.get(key) ?? []), e]);
+  }
+  for (const [key, entries] of byClassDay) {
+    const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null);
+    if (periods.length === 0) continue;
+    const maxPeriod = Math.max(...periods);
+    const onLast = entries.filter((e) => toPeriod(e.period) === maxPeriod);
+    if (onLast.length > 0) {
+      const [klass, day] = key.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Môn ${subject} không được xếp tiết cuối (${maxPeriod}) lớp ${klass} ngày ${day}.`,
+        offendingEntries: onLast,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkClassMaxHeavySubjectsPerDay: CheckFn = (spec, schedule) => {
+  const heavy = new Set((Array.isArray(spec.params.subjects) ? spec.params.subjects : []).map(String));
+  const maxHeavy = Number(spec.params.maxHeavy ?? NaN);
+  const targetClass = spec.params.class ? String(spec.params.class) : null;
+  if (heavy.size === 0 || !Number.isFinite(maxHeavy)) return [];
+  const violations: Violation[] = [];
+  const byClassDay = new Map<string, Set<string>>();
+  for (const e of schedule) {
+    if (!heavy.has(e.subject)) continue;
+    if (targetClass && e.class !== targetClass) continue;
+    const key = `${e.class}::${e.day}`;
+    if (!byClassDay.has(key)) byClassDay.set(key, new Set());
+    byClassDay.get(key)!.add(e.subject);
+  }
+  for (const [key, subjects] of byClassDay) {
+    if (subjects.size > maxHeavy) {
+      const [klass, day] = key.split('::');
+      const entries = schedule.filter((e) => e.class === klass && e.day === day && heavy.has(e.subject));
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Lớp ${klass} có ${subjects.size} môn nặng ngày ${day} (tối đa ${maxHeavy}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+
+
+const checkClassMaxHeavySubjectsPerSession: CheckFn = (spec, schedule) => {
+  const heavy = new Set((Array.isArray(spec.params.subjects) ? spec.params.subjects : []).map(String));
+  const groups = Array.isArray(spec.params.subjectGroups)
+    ? (spec.params.subjectGroups as string[][]).map((g) => g.map(String))
+    : [[...heavy]];
+  const maxHeavy = Number(spec.params.maxHeavyInSession ?? 2);
+  const targetClass = spec.params.class ? String(spec.params.class) : null;
+  if (heavy.size === 0 || !Number.isFinite(maxHeavy)) return [];
+  const buckets = sessionPeriodBuckets(spec);
+  const violations: Violation[] = [];
+  const classes = targetClass ? [targetClass] : [...new Set(schedule.map((e) => e.class))];
+  const days = [...new Set(schedule.map((e) => e.day))];
+  for (const klass of classes) {
+    for (const day of days) {
+      const dayEntries = schedule.filter((e) => e.class === klass && e.day === day);
+      if (!dayEntries.length) continue;
+      for (const bucket of buckets) {
+        if (!bucket.periods.length) continue;
+        for (const group of groups) {
+          const groupSet = new Set(group);
+          const n = countHeavySubjectsInPeriods(dayEntries, groupSet, bucket.periods);
+          if (n > maxHeavy) {
+            const inSession = dayEntries.filter((e) => {
+              const p = toPeriod(e.period);
+              return p !== null && bucket.periods.includes(p) && groupSet.has(e.subject);
+            });
+            violations.push({
+              constraintId: spec.id,
+              kind: spec.kind,
+              message: `Lớp ${klass} có ${n} môn nặng (${group.join(', ')}) trong buổi ngày ${day} (tối đa ${maxHeavy}); không nên dồn Toán/Văn/Anh cùng buổi.`,
+              offendingEntries: inSession,
+            });
+          }
+        }
+      }
+    }
+  }
+  return violations;
+};
+const checkClassFirstPeriodRequired: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  if (!klass) return [];
+  const violations: Violation[] = [];
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (e.class !== klass) continue;
+    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  }
+  for (const [day, entries] of byDay) {
+    const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null);
+    if (periods.length === 0) continue;
+    const dayMin = Math.min(...periods);
+    if (dayMin > 1) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Lớp ${klass} không bắt đầu từ tiết 1 ngày ${day} (tiết đầu là ${dayMin}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkSubjectFlagCeremonySlot: CheckFn = (spec, schedule) => {
+  const day = String(spec.params.day ?? '');
+  const period = Number(spec.params.period ?? NaN);
+  if (!day || !Number.isFinite(period)) return [];
+  const offending = schedule.filter((e) => e.day === day && toPeriod(e.period) === period);
+  if (!offending.length) return [];
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `Slot chào cờ/sinh hoạt ${day} tiết ${period} không được xếp lịch dạy.`,
+    offendingEntries: offending,
+  }];
+};
+
+const checkGlobalTeacherUtilizationBalance: CheckFn = (spec, schedule) => {
+  const tolerance = Number(spec.params.tolerance ?? 1);
+  const loads = new Map<string, number>();
+  for (const e of schedule) {
+    loads.set(e.teacher, (loads.get(e.teacher) ?? 0) + 1);
+  }
+  const values = [...loads.values()];
+  if (values.length <= 1) return [];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (max - min <= tolerance) return [];
+  const offenders = schedule.filter((e) => loads.get(e.teacher) === max || loads.get(e.teacher) === min);
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `Chênh lệch tải GV ${max - min} tiết (tolerance ${tolerance}).`,
+    offendingEntries: offenders,
+  }];
+};
+
 // ===== NEW GLOBAL CHECKERS =====
 
 const checkPairSameSlot: CheckFn = (spec, schedule) => {
@@ -1366,7 +1651,13 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_balanced_load: checkTeacherBalancedLoad,
   teacher_max_subjects_per_day: checkTeacherMaxSubjectsPerDay,
   teacher_max_consecutive_days: checkTeacherMaxConsecutiveDays,
+  teacher_preferred_periods: checkTeacherPreferredPeriods,
+  teacher_max_classes_per_day: checkTeacherMaxClassesPerDay,
+  teacher_pair_not_same_slot: checkTeacherPairNotSameSlot,
+  teacher_homeroom_first_period: checkTeacherHomeroomFirstPeriod,
   subject_pin_period: checkSubjectPinPeriod,
+  subject_preferred_periods: checkSubjectPreferredPeriods,
+  subject_not_last_period: checkSubjectNotLastPeriod,
   subject_consecutive: checkSubjectConsecutive,
   subject_max_consecutive: checkSubjectMaxConsecutive,
   subject_allowed_days: checkSubjectAllowedDays,
@@ -1395,6 +1686,11 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   class_balanced_load: checkClassBalancedLoad,
   class_subjects_same_day: checkClassSubjectsSameDay,
   class_min_working_days: checkClassMinWorkingDays,
+  class_max_heavy_subjects_per_day: checkClassMaxHeavySubjectsPerDay,
+  class_max_heavy_subjects_per_session: checkClassMaxHeavySubjectsPerSession,
+  class_first_period_required: checkClassFirstPeriodRequired,
+  subject_flag_ceremony_slot: checkSubjectFlagCeremonySlot,
+  global_teacher_utilization_balance: checkGlobalTeacherUtilizationBalance,
   assignment_pin_slot: checkAssignmentPinSlot,
   assignment_block_slot: checkAssignmentBlockSlot,
   assignment_allowed_slots: checkAssignmentAllowedSlots,
@@ -1420,44 +1716,41 @@ export function validateSchedule(
 ): DeterministicValidationReport {
   const baseViolations = checkBaseConstraints(schedule, ctx);
   const specViolations: Violation[] = [];
+  const hardSpecViolations: Violation[] = [];
+  const softViolations: Violation[] = [];
   const uncheckedConstraintIds: string[] = [];
+  const hardUncheckedConstraintIds: string[] = [];
 
   for (const spec of constraintSpecs) {
     if (!CHECKED_KINDS.has(spec.kind)) {
       uncheckedConstraintIds.push(spec.id);
+      if (spec.severity === 'hard') hardUncheckedConstraintIds.push(spec.id);
       continue;
     }
     const checker = checkerByKind[spec.kind];
     if (!checker) {
       uncheckedConstraintIds.push(spec.id);
+      if (spec.severity === 'hard') hardUncheckedConstraintIds.push(spec.id);
       continue;
     }
-    specViolations.push(...checker(spec, schedule, ctx));
+    const checkedViolations = checker(spec, schedule, ctx);
+    specViolations.push(...checkedViolations);
+    if (spec.severity === 'hard') {
+      hardSpecViolations.push(...checkedViolations);
+    } else if (spec.severity === 'soft') {
+      softViolations.push(...checkedViolations);
+    }
   }
 
   const violations = [...baseViolations, ...specViolations];
-  const hardConstraintIds = new Set(
-    constraintSpecs.filter((spec) => spec.severity === 'hard').map((spec) => spec.id)
-  );
-  const softConstraintIds = new Set(
-    constraintSpecs.filter((spec) => spec.severity === 'soft').map((spec) => spec.id)
-  );
-
-  const hardViolations = violations.filter(
-    (violation) =>
-      violation.kind === 'base_constraint' || hardConstraintIds.has(violation.constraintId)
-  );
-  const softViolations = violations.filter((violation) => softConstraintIds.has(violation.constraintId));
+  const hardViolations = [...baseViolations, ...hardSpecViolations];
 
   // FAIL-CLOSED: một hard constraint không có checker (custom_dsl / kind lạ)
   // KHÔNG được mặc nhiên coi là đạt. (fix bug #4)
-  const hardUncheckedConstraintIds = uncheckedConstraintIds.filter((id) =>
-    hardConstraintIds.has(id)
-  );
   const hardCoverageComplete = hardUncheckedConstraintIds.length === 0;
 
   return {
-    ok: violations.length === 0 && hardCoverageComplete,
+    ok: baseViolations.length === 0 && hardViolations.length === 0 && hardCoverageComplete,
     baseConstraintPass: baseViolations.length === 0,
     hardConstraintPass: hardViolations.length === 0 && hardCoverageComplete,
     softConstraintPass: softViolations.length === 0,

@@ -225,7 +225,7 @@ test('fallback parser covers remaining constraint kinds', () => {
   assert.equal(specs[1].kind, 'subject_consecutive');
   assert.equal(specs[2].kind, 'subject_pin_period');
   assert.equal(specs[3].kind, 'class_no_double_subject_day');
-  assert.equal(specs[4].kind, 'pair_not_same_slot');
+  assert.equal(specs[4].kind, 'teacher_pair_not_same_slot');
   assert.equal(specs[5].kind, 'weekly_periods_exact');
   assert.equal(specs[6].kind, 'if_then');
 });
@@ -623,6 +623,31 @@ test('fallback parser marks unparsed hard constraints explicitly', () => {
 
   assert.equal(specs[0].kind, 'custom_dsl');
   assert.equal(specs[0].notes, 'fallback_parser:UNPARSED_HARD');
+});
+
+test('fallback parser maps "tránh môn nặng cùng 1 buổi" to class_max_heavy_subjects_per_session', () => {
+  const heavyInput: AgentInputPayload = {
+    ...sampleInput,
+    sessions: [
+      { id: 'morning', label: 'Sáng' },
+      { id: 'afternoon', label: 'Chiều' },
+    ],
+    periodCounts: { morning: 4, afternoon: 3 },
+    assignments: [
+      { id: 'a1', teacher: { id: 't1', label: 'GV A' }, subject: { id: 's1', label: 'KHTN' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 3 },
+      { id: 'a2', teacher: { id: 't2', label: 'GV B' }, subject: { id: 's2', label: 'Toán' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 4 },
+      { id: 'a3', teacher: { id: 't3', label: 'GV C' }, subject: { id: 's3', label: 'Văn' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 4 },
+      { id: 'a4', teacher: { id: 't4', label: 'GV D' }, subject: { id: 's4', label: 'Tiếng Anh' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 3 },
+    ],
+    constraints: [
+      { type: 'required', text: 'Tránh các môn nặng gồm KHTN, Toán, Văn, Tiếng Anh tất cả cùng dạy vào 1 buổi ở cùng 1 lớp' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(heavyInput);
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'class_max_heavy_subjects_per_session');
+  assert.ok(specs[0].params.subjects);
+  assert.ok(Array.isArray(specs[0].params.subjects));
 });
 
 test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', () => {

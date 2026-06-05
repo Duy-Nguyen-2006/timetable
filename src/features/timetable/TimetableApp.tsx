@@ -24,6 +24,16 @@ import ExcelJS from 'exceljs'
 
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
+import { constraintItemsToRaw, validateConfirmedSolveRequest } from './ai/solver-constraint-gate'
+import { ConstraintInputPanel } from './constraints/ConstraintInputPanel'
+import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
+import { useConstraintReview } from './constraints/useConstraintReview'
+import {
+  buildDatasetSignature,
+  readConstraintWorkspace,
+  writeConstraintWorkspace,
+} from './constraints/constraint-workspace-storage'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SettingsModal } from './SettingsModal'
 import type {
   AIProviderConfig,
@@ -114,6 +124,24 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     const [assignmentValidationMessage, setAssignmentValidationMessage] = useState<string | null>(null)
     const [constraintDraft, setConstraintDraft] = useState<{ type: keyof typeof constraintTypes; text: string; weight: number }>({ type: 'required', text: '', weight: 5 })
   const [constraintList, setConstraintList] = useState<ConstraintItem[]>([])
+  const {
+    constraintDrafts,
+    confirmedConstraints,
+    parseLoading,
+    parseError,
+    invalidateReview,
+    confirmDraft,
+    ignoreDraft,
+    updateDraft,
+    applyTemplate,
+    markConstraintsAdded,
+    removeConstraintReview,
+    newConstraintIds,
+    runParse,
+    preflight: constraintPreflight,
+    hydrateFromWorkspace,
+  } = useConstraintReview()
+  const constraintWorkspaceLoaded = useRef(false)
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -133,6 +161,26 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [isFirstRun, setIsFirstRun] = useState(false)
   const [solverRuntimeNotice, setSolverRuntimeNotice] = useState<string | null>(null)
   const [secureStorageNotice, setSecureStorageNotice] = useState<string | null>(null)
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmTitle, setConfirmTitle] = useState('')
+  const [confirmDescription, setConfirmDescription] = useState('')
+  const [confirmVariant, setConfirmVariant] = useState<'danger' | 'warning'>('danger')
+  const confirmActionRef = useRef<(() => void) | null>(null)
+
+  const openConfirmDialog = (
+    title: string,
+    description: string,
+    variant: 'danger' | 'warning',
+    onConfirm: () => void,
+  ) => {
+    setConfirmTitle(title)
+    setConfirmDescription(description)
+    setConfirmVariant(variant)
+    confirmActionRef.current = onConfirm
+    setConfirmOpen(true)
+  }
 
   const pushSolverRuntimeMode = (mode: AIProviderConfig['solverRuntimeMode']) => {
     try {
@@ -266,6 +314,91 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     () => days.filter((day) => selectedDays.includes(day.id)),
     [selectedDays],
   )
+
+  const constraintAgentInput = useMemo(() => {
+    const requestConstraints: SolverRequestPayload['constraints'] = constraintList.map((constraint) =>
+      constraint.type === 'required'
+        ? { type: 'required', text: constraint.text }
+        : {
+            type: 'preferred',
+            text: constraint.text,
+            weight:
+              constraint.weight === 8 || constraint.weight === 5 || constraint.weight === 3 ? constraint.weight : 5,
+          }
+    )
+    return {
+      days: selectedSpreadsheetDays,
+      sessions: selectedSessionData,
+      periodCounts: periods,
+      deletedPeriods,
+      assignments: normalizeAssignments(assignmentList),
+      constraints: requestConstraints,
+    }
+  }, [
+    assignmentList,
+    constraintList,
+    deletedPeriods,
+    periods,
+    selectedSessionData,
+    selectedSpreadsheetDays,
+  ])
+
+  const constraintSolvePreflight = useMemo(
+    () => constraintPreflight(constraintList),
+    [constraintList, constraintPreflight]
+  )
+
+  const canProceedToSolve =
+    constraintList.length === 0 || constraintSolvePreflight.canSolve
+
+  const solveBlockHint = useMemo(() => {
+    if (canProceedToSolve) return null
+    return constraintSolvePreflight.messages[0] ??
+      'Còn ràng buộc chưa được duyệt. Phân tích và bấm «Đúng rồi» trên từng dòng trước khi sang bước xếp lịch.'
+  }, [canProceedToSolve, constraintSolvePreflight.messages])
+
+  useEffect(() => {
+    if (constraintWorkspaceLoaded.current) return
+    const ws = readConstraintWorkspace()
+    if (ws?.constraintList.length) {
+      setConstraintList(ws.constraintList)
+      hydrateFromWorkspace({
+        constraintDrafts: ws.constraintDrafts,
+        confirmedConstraints: ws.confirmedConstraints,
+      })
+    }
+    constraintWorkspaceLoaded.current = true
+  }, [hydrateFromWorkspace])
+
+  const datasetSignature = useMemo(
+    () => (assignmentList.length ? buildDatasetSignature(constraintAgentInput) : ''),
+    [assignmentList.length, constraintAgentInput]
+  )
+  const prevDatasetSignatureRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!constraintWorkspaceLoaded.current || !datasetSignature) return
+    if (
+      prevDatasetSignatureRef.current &&
+      prevDatasetSignatureRef.current !== datasetSignature
+    ) {
+      invalidateReview()
+    }
+    prevDatasetSignatureRef.current = datasetSignature
+    writeConstraintWorkspace({
+      version: 1,
+      constraintList,
+      constraintDrafts,
+      confirmedConstraints,
+      datasetSignature,
+    })
+  }, [
+    datasetSignature,
+    constraintList,
+    constraintDrafts,
+    confirmedConstraints,
+    invalidateReview,
+  ])
 
   const timetableRows = useMemo(
     () =>
@@ -473,8 +606,14 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }
 
   const deleteTeacher = (name: string) => {
-    setTeacherList((current) => current.filter((teacher) => teacher !== name))
-    window.alert(`Đã xóa giáo viên ${name}.`)
+    openConfirmDialog(
+      'Xác nhận xóa giáo viên',
+      `Bạn có chắc chắn muốn xóa giáo viên "${name}"? Hành động này không thể hoàn tác.`,
+      'danger',
+      () => {
+        setTeacherList((current) => current.filter((teacher) => teacher !== name))
+      },
+    )
   }
 
   const importSubject = (presetValue?: string) => {
@@ -495,8 +634,14 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }
 
   const deleteSubject = (name: string) => {
-    setSubjectList((current) => current.filter((subject) => subject !== name))
-    window.alert(`Đã xóa môn ${name}.`)
+    openConfirmDialog(
+      'Xác nhận xóa môn học',
+      `Bạn có chắc chắn muốn xóa môn "${name}"? Hành động này không thể hoàn tác.`,
+      'danger',
+      () => {
+        setSubjectList((current) => current.filter((subject) => subject !== name))
+      },
+    )
   }
 
   const importClass = () => {
@@ -509,12 +654,17 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
   const deleteClass = (name: string) => {
     const removedAssignmentCount = assignmentList.filter((assignment) => assignment.className === name).length
-    setClassList((current) => current.filter((className) => className !== name))
-    setAssignmentList((current) => current.filter((assignment) => assignment.className !== name))
-    window.alert(
-      removedAssignmentCount > 0
-        ? `Đã xóa lớp ${name} và ${removedAssignmentCount} phân công chuyên môn liên quan.`
-        : `Đã xóa lớp ${name}.`,
+    const message = removedAssignmentCount > 0
+      ? `Lớp "${name}" có ${removedAssignmentCount} phân công chuyên môn liên quan sẽ bị xóa theo. Bạn có chắc chắn muốn xóa?`
+      : `Bạn có chắc chắn muốn xóa lớp "${name}"?`
+    openConfirmDialog(
+      'Xác nhận xóa lớp học',
+      message,
+      'danger',
+      () => {
+        setClassList((current) => current.filter((className) => className !== name))
+        setAssignmentList((current) => current.filter((assignment) => assignment.className !== name))
+      },
     )
   }
 
@@ -593,10 +743,16 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
     const deleteAssignment = (key: string) => {
       const deletedAssignment = assignmentList.find((assignment) => assignment.key === key)
-      setAssignmentList((current) => current.filter((assignment) => assignment.key !== key))
-      if (deletedAssignment) {
-        window.alert(`Đã xóa phân công: ${deletedAssignment.teacher} - ${deletedAssignment.subject} - ${deletedAssignment.className} - ${deletedAssignment.weeklyPeriods} tiết.`)
-      }
+      openConfirmDialog(
+        'Xác nhận xóa phân công',
+        deletedAssignment
+          ? `Bạn có chắc chắn muốn xóa phân công: ${deletedAssignment.teacher} - ${deletedAssignment.subject} - ${deletedAssignment.className} (${deletedAssignment.weeklyPeriods} tiết)?`
+          : 'Bạn có chắc chắn muốn xóa phân công này?',
+        'danger',
+        () => {
+          setAssignmentList((current) => current.filter((assignment) => assignment.key !== key))
+        },
+      )
     }
 
     const validateAssignmentsBeforeNext = () => {
@@ -640,21 +796,29 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
     setConstraintList((current) => [...current, ...newItems])
     setConstraintDraft((current) => ({ ...current, text: '' }))
+    markConstraintsAdded(newItems.map((item) => item.id))
   }
 
   const deleteConstraint = (id: string) => {
     const deletedConstraint = constraintList.find((constraint) => constraint.id === id)
-    setConstraintList((current) => current.filter((constraint) => constraint.id !== id))
-    if (deletedConstraint) {
-      window.alert(`Đã xóa ràng buộc: ${deletedConstraint.text}`)
-    }
+    openConfirmDialog(
+      'Xác nhận xóa ràng buộc',
+      deletedConstraint
+        ? `Bạn có chắc chắn muốn xóa ràng buộc: "${deletedConstraint.text}"?`
+        : 'Bạn có chắc chắn muốn xóa ràng buộc này?',
+      'danger',
+      () => {
+        setConstraintList((current) => current.filter((constraint) => constraint.id !== id))
+        removeConstraintReview(id)
+      },
+    )
   }
 
   const pushTimelineEvent = useCallback((event: AgentLifecycleEvent) => {
     setAgentTimeline((current) => [...current, event])
   }, [])
 
-    const handleGenerate = async (options?: { skipConstraintConfirm?: boolean }) => {
+    const handleGenerate = async () => {
 
     if (activePeriodCount <= 0) {
       setAiError(NO_ACTIVE_PERIOD_MESSAGE)
@@ -662,38 +826,38 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       return
     }
 
-    const constraintConfirmations = constraintList.map((c) => ({
-      id: c.id,
-      original: c.text,
-      interpreted: c.type === 'preferred' && c.weight != null
-        ? `${c.text} [preferred:${c.weight}]`
-        : `${c.text} [required]`,
-      accepted: true,
-    }))
+    if (!canProceedToSolve) {
+      setAiError(solveBlockHint ?? 'Chưa thể xếp lịch: ràng buộc bắt buộc chưa xác nhận.')
+      setPage('constraints')
+      return
+    }
 
-      const requestConstraints: SolverRequestPayload['constraints'] = constraintList.map((constraint) => (
-        constraint.type === 'required'
-          ? {
-              type: 'required',
-              text: constraint.text,
-            }
-          : {
-              type: 'preferred',
-              text: constraint.text,
-              weight: constraint.weight === 8 || constraint.weight === 5 || constraint.weight === 3
-                ? constraint.weight
-                : 5,
-            }
-      ))
-      const normalizedAssignments = normalizeAssignments(assignmentList)
-      const needConfirm = constraintConfirmations.length > 0
+    const agentInputBase = {
+      ...constraintAgentInput,
+      ...(aiResult?.schedule?.length ? { previousSchedule: aiResult.schedule } : {}),
+    }
 
-    if (needConfirm && !options?.skipConstraintConfirm) {
-      const ok = window.confirm('Vui lòng xác nhận: hệ thống đang hiểu ràng buộc đúng như bạn đã nhập. Nhấn OK để tiếp tục xếp lịch.')
-      if (!ok) {
-        setAiError('Bạn đã hủy để chỉnh lại ràng buộc trước khi xếp lịch.')
-        return
+    const solveGate = validateConfirmedSolveRequest(
+      constraintItemsToRaw(
+        constraintList.map((c) => ({ id: c.id, type: c.type, text: c.text, weight: c.weight }))
+      ),
+      constraintDrafts,
+      {
+        input: {
+          days: agentInputBase.days,
+          sessions: agentInputBase.sessions,
+          periodCounts: agentInputBase.periodCounts,
+          deletedPeriods: agentInputBase.deletedPeriods,
+          assignments: agentInputBase.assignments,
+        },
+        confirmedConstraints,
       }
+    )
+
+    if (!solveGate.ok) {
+      setAiError([solveGate.error, ...(solveGate.messages ?? [])].filter(Boolean).join('\n'))
+      setPage('constraints')
+      return
     }
 
     setAiLoading(true)
@@ -732,16 +896,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       }
 
       try {
-        const agentInput = {
-          days: selectedSpreadsheetDays,
-          sessions: selectedSessionData,
-          periodCounts: periods,
-          deletedPeriods,
-          assignments: normalizedAssignments,
-          constraints: requestConstraints,
-          ...(aiResult?.schedule?.length ? { previousSchedule: aiResult.schedule } : {}),
-        }
-        const inputDigest = buildRunCacheDigest(agentInput, aiProvider)
+        const agentInput = solveGate.agentInput
+        const inputDigest = buildRunCacheDigest(agentInput, aiProvider, confirmedConstraints)
         const cachedRun = readCachedRuns().find((run) => run.inputDigest === inputDigest)
         if (cachedRun) {
           setAiResult(cachedRun.result)
@@ -769,11 +925,9 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
                 timestamp: new Date().toISOString(),
               })
             },
-          }
+          },
+          { preTranslatedConstraintSpecs: solveGate.preTranslatedSpecs }
         )
-
-
-
 
         if (agentResult && agentResult.success && agentResult.finalResult) {
           setAiResult(agentResult.finalResult as any);
@@ -1698,7 +1852,13 @@ const handleDownloadExcel = useCallback(async () => {
                       <ArrowLeft size={14} strokeWidth={1.5} />
                       Quay lại
                     </button>
-                    <button type="button" onClick={() => setPage('summary')} className={navNextClass}>
+                    <button
+                      type="button"
+                      onClick={() => setPage('summary')}
+                      disabled={!canProceedToSolve}
+                      title={solveBlockHint ?? undefined}
+                      className={`${navNextClass} ${navDisabledClass}`}
+                    >
                       Tiếp tục
                       <ChevronRight size={14} strokeWidth={1.5} />
                     </button>
@@ -1713,7 +1873,7 @@ const handleDownloadExcel = useCallback(async () => {
                         Nhập constraints cho thời khóa biểu
                       </h1>
                       <p className="mt-4 max-w-3xl text-sm text-white/40">
-                        Chọn loại ràng buộc, nhập mỗi ràng buộc một dòng, rồi bấm Import để thêm tất cả vào bảng.
+                        Import ràng buộc, bấm Phân tích, xác nhận từng dòng (Đúng rồi) rồi mới Tiếp tục xếp lịch.
                       </p>
                     </div>
                     <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>
@@ -1723,143 +1883,37 @@ const handleDownloadExcel = useCallback(async () => {
                   </header>
 
                   <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(330px,0.7fr)_minmax(0,1.3fr)]">
-                    <section className={`${panelClass} p-4`}>
-                      <div className="mb-4 flex items-center gap-2.5">
-                        <span className={iconShellClass}>
-                          <Plus size={16} strokeWidth={1.5} />
-                        </span>
-                        <div>
-                          <h2 className="text-sm font-semibold text-white">Tạo ràng buộc</h2>
-                          <p className="text-xs text-white/40">Vàng là bắt buộc, xám là nên có</p>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {constraintTypeList.map((constraintType) => {
-                          const selected = constraintDraft.type === constraintType.id
-
-                          return (
-                            <button
-                              key={constraintType.id}
-                              type="button"
-                              onClick={() => setConstraintDraft((current) => ({ ...current, type: constraintType.id }))}
-                              className={`rounded-md border p-3 text-left transition ${
-                                selected
-                                  ? constraintType.boxClass
-                                  : 'border-white/[0.06] bg-[#141414] text-white hover:border-white/[0.12] hover:bg-white/[0.04]'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5">
-                                <Circle className={selected ? constraintType.iconClass : 'text-white/30'} size={16} strokeWidth={1.5} />
-                                <span className="text-sm font-medium">{constraintType.label}</span>
-                              </div>
-                              <p className={`mt-2 text-xs leading-4 ${selected ? 'text-white/70' : 'text-white/30'}`}>{constraintType.description}</p>
-                            </button>
-                          )
-                        })}
-                      </div>
-
-                      <label className={`${panelClass} mt-4 block p-4`}>
-                        <div className="mb-3 flex items-center gap-2.5">
-                          <span className={iconShellClass}>
-                            <ClipboardList size={16} strokeWidth={1.5} />
-                          </span>
-                          <span className="text-sm font-medium text-white">Nội dung ràng buộc</span>
-                        </div>
-                          <textarea
-                            value={constraintDraft.text}
-                            onChange={(event) => setConstraintDraft((current) => ({ ...current, text: event.target.value }))}
-                            onKeyDown={(event) => {
-                              if (event.key !== 'Enter' || event.shiftKey) return
-                              event.preventDefault()
-                              importConstraint()
-                            }}
-                            placeholder={"Ví dụ:\nSơn không dạy thứ 2\nHương không dạy tiết 1\n(mỗi dòng là một ràng buộc)"}
-                            rows={5}
-                            className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
-                          />
-                      </label>
-
-                      {constraintDraft.type === 'preferred' && (
-                        <div className="mt-3 flex items-center gap-2">
-                          <span className="text-xs text-white/40">Độ ưu tiên:</span>
-                          {([['Thấp', 3], ['TB', 5], ['Cao', 8]] as const).map(([label, val]) => (
-                            <button
-                              key={val}
-                              type="button"
-                              onClick={() => setConstraintDraft((c) => ({ ...c, weight: val }))}
-                              className={`rounded px-2.5 py-1 text-xs font-medium transition ${
-                                constraintDraft.weight === val
-                                  ? 'bg-white/10 text-white'
-                                  : 'text-white/40 hover:text-white/70'
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                          <span className="ml-1 text-xs text-white/25">{constraintDraft.weight}/10</span>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={importConstraint}
-                        disabled={!constraintDraft.text.trim()}
-                        className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
-                      >
-                        <Plus size={14} strokeWidth={1.5} />
-                        Import
-                      </button>
-                    </section>
-
-                    <aside className={`${panelClass} p-4`}>
-                      <div className="mb-4 flex items-center gap-2.5">
-                        <span className={iconShellClass}>
-                          <Check size={16} strokeWidth={1.5} />
-                        </span>
-                        <div>
-                          <h2 className="text-sm font-semibold text-white">Bảng constraints</h2>
-                          <p className="text-xs text-white/40">Màu vàng hiển thị Bắt buộc, màu xám hiển thị Nên có</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-0">
-                          {constraintList.length ? (
-                            sortedConstraintList.map((constraint) => {
-                              const constraintType = constraintTypes[constraint.type] ?? constraintTypes.required
-
-                              return (
-                                  <div key={constraint.id} className={`rounded-md border p-3 ${constraintType.boxClass}`}>
-
-                                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${constraintType.badgeClass}`}>
-                                      <Circle className={constraintType.iconClass} size={10} fill="currentColor" strokeWidth={0} />
-                                      {constraintType.label}
-                                    </span>
-                                    {constraint.type === 'preferred' && constraint.weight != null && (
-                                      <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-white/40">
-                                        w={constraint.weight}
-                                      </span>
-                                    )}
-                                  </div>
-                                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                                  <p className="min-w-0 flex-1 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5 text-sm text-white/60">
-                                    {constraint.text}
-                                  </p>
-                                    <button type="button" onClick={() => deleteConstraint(constraint.id)} className="p-1 transition hover:bg-white/[0.04]">
-                                      <Trash2 size={14} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
-                                    </button>
-                                </div>
-                              </div>
-                            )
-                          })
-                        ) : (
-                          <div className={`${panelMutedClass} p-4 text-sm text-white/30`}>
-                            Chưa có ràng buộc nào. Chọn loại, nhập mỗi ràng buộc một dòng rồi bấm Import.
-                          </div>
-                        )}
-                      </div>
-                    </aside>
+                    <ConstraintInputPanel
+                      draft={constraintDraft}
+                      onDraftChange={(patch) => setConstraintDraft((current) => ({ ...current, ...patch }))}
+                      onImport={importConstraint}
+                      totalCount={constraintList.length}
+                    />
+                    <ConstraintReviewPanel
+                      constraints={sortedConstraintList}
+                      drafts={constraintDrafts}
+                      confirmed={confirmedConstraints}
+                      newConstraintIds={newConstraintIds}
+                      agentInput={constraintAgentInput}
+                      parseLoading={parseLoading}
+                      parseError={parseError}
+                      canSolve={canProceedToSolve}
+                      solveBlockHint={solveBlockHint}
+                      onParse={() => {
+                        if (!aiProvider) {
+                          setShowSettingsModal(true)
+                          return
+                        }
+                        void runParse(constraintAgentInput, constraintList, aiProvider)
+                      }}
+                      onConfirmDraft={(rawId) => confirmDraft(rawId, constraintDrafts)}
+                      onIgnoreDraft={ignoreDraft}
+                      onDeleteConstraint={deleteConstraint}
+                      onSaveDraft={updateDraft}
+                      onApplyTemplate={(c, templateId) =>
+                        applyTemplate(c, templateId, constraintAgentInput, constraintDrafts.find((d) => d.rawConstraintId === c.id))
+                      }
+                    />
                   </div>
 
                 </section>
@@ -1873,8 +1927,9 @@ const handleDownloadExcel = useCallback(async () => {
                     <button
                       type="button"
                       onClick={() => handleGenerate()}
-                      disabled={aiLoading || !aiProvider || activePeriodCount <= 0}
-                      className={`${navNextClass} disabled:cursor-not-allowed disabled:opacity-60`}
+                      disabled={aiLoading || !aiProvider || activePeriodCount <= 0 || !canProceedToSolve}
+                      title={!canProceedToSolve ? (solveBlockHint ?? undefined) : undefined}
+                      className={`${navNextClass} ${navDisabledClass}`}
                     >
                       {aiLoading ? (
                         <>
@@ -2293,6 +2348,18 @@ const handleDownloadExcel = useCallback(async () => {
                             {constraintList.length ? (
                               sortedConstraintList.map((constraint) => {
                                 const constraintType = constraintTypes[constraint.type] ?? constraintTypes.required
+                                const confirmed = confirmedConstraints.find((c) => c.rawConstraintId === constraint.id)
+                                const draft = constraintDrafts.find((d) => d.rawConstraintId === constraint.id)
+                                const displayText = confirmed?.summary
+                                  ?? (draft?.proposedSpecs.length
+                                    ? draft.proposedSpecs.map((s) => {
+                                        const p = s.params as Record<string, unknown>
+                                        if (s.kind === 'class_max_heavy_subjects_per_session') {
+                                          return `Mỗi lớp, mỗi ngày, trong cùng một buổi: không dồn quá ${p.maxHeavyInSession ?? 2} môn nặng trong danh sách (${Array.isArray(p.subjects) ? p.subjects.join(', ') : ''})`
+                                        }
+                                        return s.original
+                                      }).join('\n')
+                                    : constraint.text)
 
                                 return (
                                     <div key={constraint.id} className={`rounded-md border p-3 ${constraintType.boxClass}`}>
@@ -2302,9 +2369,15 @@ const handleDownloadExcel = useCallback(async () => {
                                         <Circle className={constraintType.iconClass} size={10} fill="currentColor" strokeWidth={0} />
                                         {constraintType.label}
                                       </span>
+                                      {confirmed && (
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                                          <Check size={10} strokeWidth={2} />
+                                          Đã duyệt
+                                        </span>
+                                      )}
                                   </div>
-                                  <p className="rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5 text-sm text-white/60">
-                                    {constraint.text}
+                                  <p className="rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5 text-sm text-white/60 whitespace-pre-line">
+                                    {displayText}
                                   </p>
                                 </div>
                               )
@@ -2398,6 +2471,16 @@ const handleDownloadExcel = useCallback(async () => {
           setIsFirstRun(false);
         }}
         requireValid={isFirstRun}
+      />
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={confirmTitle}
+        description={confirmDescription}
+        variant={confirmVariant}
+        onConfirm={() => confirmActionRef.current?.()}
       />
     </>
   );
