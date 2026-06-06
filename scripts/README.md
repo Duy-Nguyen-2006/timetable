@@ -104,11 +104,25 @@ payload.
 By default the installer also downloads the prebuilt Rust Harness CLI for the
 current platform into `scripts/bin/harness-cli` and verifies its `.sha256`
 checksum before making it executable. A source branch can pin the release used
-by the installer through `scripts/harness-cli-release-tag`; Phase 3 pins
-`harness-cli-v0.1.4` so branch installs receive a Phase 3-built CLI. Set
-`HARNESS_CLI_RELEASE_TAG` to override that tag, or set `HARNESS_CLI_BASE_URL` to
-point at an alternate artifact directory, such as a local `file:///.../dist`
-directory created by `scripts/build-harness-cli-release.sh`.
+by the installer through `scripts/harness-cli-release-tag`; the current
+in-tree CLI is `harness-cli-v0.1.8`. Set `HARNESS_CLI_RELEASE_TAG` to override
+that tag, or set `HARNESS_CLI_BASE_URL` to point at an alternate artifact
+directory, such as a local `file:///.../dist` directory created by
+`scripts/build-harness-cli-release.sh`.
+
+The local `scripts/bin/harness-cli` is `0.1.8` (verified SHA256
+`5b65def42b2b1d7d18bf7dfaa0d557bebd7cf07aaa9b1f46dac17bdd7da1f646` from
+the upstream `harness-cli-v0.1.8` release). To update manually:
+
+```bash
+curl -fsSL -o /tmp/harness-cli-linux-x64 \
+  "https://github.com/hoangnb24/repository-harness/releases/download/harness-cli-v0.1.8/harness-cli-linux-x64"
+curl -fsSL -o /tmp/harness-cli-linux-x64.sha256 \
+  "https://github.com/hoangnb24/repository-harness/releases/download/harness-cli-v0.1.8/harness-cli-linux-x64.sha256"
+expected="$(awk '{print $1}' /tmp/harness-cli-linux-x64.sha256)"
+[ "$(sha256sum /tmp/harness-cli-linux-x64 | awk '{print $1}')" = "$expected" ] \
+  && install -m 0755 /tmp/harness-cli-linux-x64 scripts/bin/harness-cli
+```
 
 ## Schema Migrations
 
