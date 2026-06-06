@@ -444,6 +444,74 @@ def build_custom_constraints(model, slots, data):
                 model.Add(lit == 0)
             return lit
 
+        if op == "teacher_pair_teaches_same_slot":
+            teachers = condition.get("teachers") or []
+            day = condition.get("day")
+            period = int(condition.get("period"))
+            if len(teachers) < 2:
+                model.Add(lit == 0)
+                return lit
+            t1, t2 = teachers[0], teachers[1]
+            t1_vars = _slot_vars(
+                _slot_var(a, day, period)
+                for a in assignments
+                if a["teacher"] == t1 and period in _periods_for(day)
+            )
+            t2_vars = _slot_vars(
+                _slot_var(a, day, period)
+                for a in assignments
+                if a["teacher"] == t2 and period in _periods_for(day)
+            )
+            if t1_vars and t2_vars:
+                model.Add(sum(t1_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(t1_vars) == 0).OnlyEnforceIf(lit.Not())
+                model.Add(sum(t2_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(t2_vars) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
+
+        if op == "teacher_pair_teaches_same_day":
+            teachers = condition.get("teachers") or []
+            day = condition.get("day")
+            if len(teachers) < 2:
+                model.Add(lit == 0)
+                return lit
+            t1, t2 = teachers[0], teachers[1]
+            t1_vars = _slot_vars(
+                _slot_var(a, day, p) for a in assignments if a["teacher"] == t1 for p in _periods_for(day)
+            )
+            t2_vars = _slot_vars(
+                _slot_var(a, day, p) for a in assignments if a["teacher"] == t2 for p in _periods_for(day)
+            )
+            if t1_vars and t2_vars:
+                model.Add(sum(t1_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(t1_vars) == 0).OnlyEnforceIf(lit.Not())
+                model.Add(sum(t2_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(t2_vars) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
+
+        if op == "class_teacher_at_slot":
+            klass = condition.get("class")
+            subject = condition.get("subject")
+            day = condition.get("day")
+            period = int(condition.get("period"))
+            slot_vars = _slot_vars(
+                _slot_var(a, day, period)
+                for a in assignments
+                if a["class"] == klass
+                and a["subject"] == subject
+                and period in _periods_for(day)
+            )
+            if slot_vars:
+                model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(lit)
+                model.Add(sum(slot_vars) == 0).OnlyEnforceIf(lit.Not())
+            else:
+                model.Add(lit == 0)
+            return lit
+
         if op == "and":
             args = [_build_condition_literal(arg) for arg in condition.get("args", [])]
             if not args:

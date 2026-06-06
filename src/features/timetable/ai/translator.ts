@@ -1396,153 +1396,168 @@ export async function runTranslatorTurn(
     periodsByDay: buildTranslatorPeriodsByDay(input),
   };
 
-  const payload = {
-    baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
-    apiKey: config.apiKey,
-    model: config.model,
-    messages: [
-      { role: 'system', content: systemPrompt },
+  const buildPayload = (decomposeHint: string | null) => {
+    const userContent = JSON.stringify(
       {
-        role: 'user',
-        content: JSON.stringify(
-          {
-            context,
-            raw_constraints: llmInput.constraints.map((constraint) => ({
-              text: constraint.text,
-              severity_hint: constraint.type === 'required' ? 'hard' : 'soft',
-            })),
-          },
-          null,
-          0
-        ),
+        context,
+        raw_constraints: llmInput.constraints.map((constraint) => ({
+          text: constraint.text,
+          severity_hint: constraint.type === 'required' ? 'hard' : 'soft',
+        })),
+        ...(decomposeHint ? { _meta: { decomposeHint } } : {}),
       },
-    ],
-    temperature: 0,
-    max_tokens: 3500,
-    cache_control: { enable: true },
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'translator_specs',
-        schema: {
-          type: 'object',
-          properties: {
-            constraintSpecs: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  original: { type: 'string' },
-                  severity: { type: 'string', enum: ['hard', 'soft', 'info'] },
-                  kind: {
-                    type: 'string',
-                    enum: [
-                      'teacher_block_day',
-                      'teacher_block_period',
-                      'teacher_block_slot',
-                      'teacher_max_per_day',
-                      'teacher_max_consecutive',
-                      'teacher_max_working_days',
-                      'teacher_min_per_day',
-                      'teacher_no_gaps',
-                      'teacher_allowed_days',
-                      'teacher_allowed_periods',
-                      'teacher_min_working_days',
-                      'teacher_max_gaps',
-                      'teacher_min_consecutive',
-                      'teacher_balanced_load',
-                      'teacher_max_subjects_per_day',
-                      'teacher_max_consecutive_days',
-                      'subject_pin_period',
-                      'subject_consecutive',
-                      'subject_max_consecutive',
-                      'subject_allowed_days',
-                      'subject_min_gap_days',
-                      'subject_daily_max_periods',
-                      'subject_block_period',
-                      'subject_block_days',
-                      'subject_not_consecutive',
-                      'subject_min_days',
-                      'subject_spread_evenly',
-                      'subject_order_before',
-                      'subject_not_after_subject',
-                      'class_block_day',
-                      'class_block_period',
-                      'class_block_slot',
-                      'class_max_per_day',
-                      'class_min_per_day',
-                      'class_no_gaps',
-                      'class_no_double_subject_day',
-                      'class_subjects_not_same_day',
-                      'class_fixed_period',
-                      'class_allowed_days',
-                      'class_allowed_periods',
-                      'class_max_consecutive',
-                      'class_max_subjects_per_day',
-                      'class_balanced_load',
-                      'class_subjects_same_day',
-                      'class_min_working_days',
-                      'assignment_pin_slot',
-                      'assignment_block_slot',
-                      'assignment_allowed_slots',
-                      'assignment_spread_days',
-                      'weekly_periods_exact',
-                      'assignment_consecutive',
-                      'assignment_max_per_day',
-                      'assignment_same_day',
-                      'assignment_not_same_day',
-                      'if_then',
-                      'pair_not_same_slot',
-                      'pair_same_slot',
-                      'mutual_exclusion',
-                      'session_limit',
-                      'subject_group',
-                      'subject_group_daily_limit',
-                      'subject_session_max_periods',
-                      'custom_dsl',
-                    ],
-                  },
-                  params: { type: 'object', additionalProperties: true },
-                  weight: { type: 'number' },
-                  pythonPredicate: { type: 'string' },
-                  tags: {
-                    type: 'array',
-                    items: {
+      null,
+      0
+    );
+    return {
+      baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
+      apiKey: config.apiKey,
+      model: config.model,
+      messages: [
+        { role: 'system', content: systemPrompt + (decomposeHint ? `\n\n${decomposeHint}` : '') },
+        { role: 'user', content: userContent },
+      ],
+      temperature: 0,
+      max_tokens: 3500,
+      cache_control: { enable: true },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'translator_specs',
+          schema: {
+            type: 'object',
+            properties: {
+              constraintSpecs: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    original: { type: 'string' },
+                    severity: { type: 'string', enum: ['hard', 'soft', 'info'] },
+                    kind: {
                       type: 'string',
-                      enum: ['auto_base', 'user_required', 'user_preferred'],
+                      enum: [
+                        'teacher_block_day',
+                        'teacher_block_period',
+                        'teacher_block_slot',
+                        'teacher_max_per_day',
+                        'teacher_max_consecutive',
+                        'teacher_max_working_days',
+                        'teacher_min_per_day',
+                        'teacher_no_gaps',
+                        'teacher_allowed_days',
+                        'teacher_allowed_periods',
+                        'teacher_min_working_days',
+                        'teacher_max_gaps',
+                        'teacher_min_consecutive',
+                        'teacher_balanced_load',
+                        'teacher_max_subjects_per_day',
+                        'teacher_max_consecutive_days',
+                        'subject_pin_period',
+                        'subject_consecutive',
+                        'subject_max_consecutive',
+                        'subject_allowed_days',
+                        'subject_min_gap_days',
+                        'subject_daily_max_periods',
+                        'subject_block_period',
+                        'subject_block_days',
+                        'subject_not_consecutive',
+                        'subject_min_days',
+                        'subject_spread_evenly',
+                        'subject_order_before',
+                        'subject_not_after_subject',
+                        'class_block_day',
+                        'class_block_period',
+                        'class_block_slot',
+                        'class_max_per_day',
+                        'class_min_per_day',
+                        'class_no_gaps',
+                        'class_no_double_subject_day',
+                        'class_subjects_not_same_day',
+                        'class_fixed_period',
+                        'class_allowed_days',
+                        'class_allowed_periods',
+                        'class_max_consecutive',
+                        'class_max_subjects_per_day',
+                        'class_balanced_load',
+                        'class_subjects_same_day',
+                        'class_min_working_days',
+                        'assignment_pin_slot',
+                        'assignment_block_slot',
+                        'assignment_allowed_slots',
+                        'assignment_spread_days',
+                        'weekly_periods_exact',
+                        'assignment_consecutive',
+                        'assignment_max_per_day',
+                        'assignment_same_day',
+                        'assignment_not_same_day',
+                        'if_then',
+                        'pair_not_same_slot',
+                        'pair_same_slot',
+                        'mutual_exclusion',
+                        'session_limit',
+                        'subject_group',
+                        'subject_group_daily_limit',
+                        'subject_session_max_periods',
+                        'custom_dsl',
+                      ],
                     },
+                    params: { type: 'object', additionalProperties: true },
+                    weight: { type: 'number' },
+                    pythonPredicate: { type: 'string' },
+                    tags: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                        enum: ['auto_base', 'user_required', 'user_preferred'],
+                      },
+                    },
+                    notes: { type: 'string' },
                   },
-                  notes: { type: 'string' },
+                  required: ['id', 'original', 'severity', 'kind', 'params'],
+                  additionalProperties: false,
                 },
-                required: ['id', 'original', 'severity', 'kind', 'params'],
-                additionalProperties: false,
               },
             },
+            required: ['constraintSpecs'],
+            additionalProperties: false,
           },
-          required: ['constraintSpecs'],
-          additionalProperties: false,
         },
       },
-    },
+    };
+  };
+
+  const shouldDecompose = (specs: ConstraintSpec[]): boolean => {
+    return specs.some(
+      (spec) =>
+        spec.kind === 'custom_dsl' &&
+        spec.severity === 'hard' &&
+        spec.original.length > 30
+    );
   };
 
   try {
+    const payload = buildPayload(null);
     const response = await invokeChat(payload);
     const parsedJson = parseModelJson(response.content);
     const validated = translatorResponseSchema.parse(parsedJson);
-    const unparsedTexts = new Set(unparsedConstraints.map((c) => c.text));
-    const deterministicParsed = deterministicSpecs.filter(
-      (s) => s.kind !== 'custom_dsl' && !unparsedTexts.has(s.original)
-    );
-    const rawMerged = [...deterministicParsed, ...validated.constraintSpecs];
-    const fixedMerged = fixIfThenOverrides(input, rawMerged);
-    const merged = sanitizeSpecs(input, fixedMerged);
-    return {
-      constraintSpecs: merged,
-      rawResponse: response.content,
-      usageTokens: response.usage?.total_tokens,
-    };
+
+    if (shouldDecompose(validated.constraintSpecs)) {
+      const decomposeHint =
+        'QUAN TRỌNG: Ràng buộc trên dài hơn 30 ký tự và đang bị gán `kind: custom_dsl`. ' +
+        'Hãy decompose (phân rã) thành nhiều `ConstraintSpec` đơn giản dùng các op: ' +
+        '`if_then`, `and`, `or`, `not`, `teacher_teaches_at_slot`, `teacher_teaches_on_day`, ' +
+        '`teacher_pair_teaches_same_slot`, `teacher_pair_teaches_same_day`, `class_teacher_at_slot`. ' +
+        'Chỉ dùng `custom_dsl` khi KHÔNG thể biểu diễn bằng các op trên.';
+      const retryPayload = buildPayload(decomposeHint);
+      const retryResponse = await invokeChat(retryPayload);
+      const retryParsed = parseModelJson(retryResponse.content);
+      const retryValidated = translatorResponseSchema.parse(retryParsed);
+      return mergeAndReturn(input, deterministicSpecs, unparsedConstraints, retryValidated, retryResponse);
+    }
+
+    return mergeAndReturn(input, deterministicSpecs, unparsedConstraints, validated, response);
   } catch {
     return {
       constraintSpecs: fallbackFromRuleParser(input),
@@ -1550,6 +1565,27 @@ export async function runTranslatorTurn(
       usageTokens: 0,
     };
   }
+}
+
+function mergeAndReturn(
+  input: AgentInputPayload,
+  deterministicSpecs: ConstraintSpec[],
+  unparsedConstraints: Array<{ type: 'required' | 'preferred' | string; text: string; weight?: number }>,
+  validated: { constraintSpecs: ConstraintSpec[] },
+  response: { content?: string; usage?: { total_tokens?: number } }
+): TranslatorTurnResult {
+  const unparsedTexts = new Set(unparsedConstraints.map((c) => c.text));
+  const deterministicParsed = deterministicSpecs.filter(
+    (s) => s.kind !== 'custom_dsl' && !unparsedTexts.has(s.original)
+  );
+  const rawMerged = [...deterministicParsed, ...validated.constraintSpecs];
+  const fixedMerged = fixIfThenOverrides(input, rawMerged);
+  const merged = sanitizeSpecs(input, fixedMerged);
+  return {
+    constraintSpecs: merged,
+    rawResponse: response.content ?? '',
+    usageTokens: response.usage?.total_tokens,
+  };
 }
 
 /** Re-parse "nếu...thì..." constraints that LLM incorrectly classified as non-if_then. */

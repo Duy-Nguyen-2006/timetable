@@ -26,6 +26,45 @@ def _evaluate_condition(condition: dict[str, Any], schedule: list[dict[str, Any]
             and _to_period(e.get("period")) == _to_period(period)
             for e in schedule
         )
+    if op == "teacher_pair_teaches_same_slot":
+        teachers = condition.get("teachers") or []
+        if not isinstance(teachers, list) or len(teachers) < 2:
+            return False
+        t1, t2 = teachers[0], teachers[1]
+        day = condition.get("day")
+        period = _to_period(condition.get("period"))
+        return any(
+            e.get("teacher") == t1
+            and e.get("day") == day
+            and _to_period(e.get("period")) == period
+            for e in schedule
+        ) and any(
+            e.get("teacher") == t2
+            and e.get("day") == day
+            and _to_period(e.get("period")) == period
+            for e in schedule
+        )
+    if op == "teacher_pair_teaches_same_day":
+        teachers = condition.get("teachers") or []
+        if not isinstance(teachers, list) or len(teachers) < 2:
+            return False
+        t1, t2 = teachers[0], teachers[1]
+        day = condition.get("day")
+        return any(e.get("teacher") == t1 and e.get("day") == day for e in schedule) and any(
+            e.get("teacher") == t2 and e.get("day") == day for e in schedule
+        )
+    if op == "class_teacher_at_slot":
+        klass = condition.get("class")
+        subject = condition.get("subject")
+        day = condition.get("day")
+        period = _to_period(condition.get("period"))
+        return any(
+            e.get("class") == klass
+            and e.get("subject") == subject
+            and e.get("day") == day
+            and _to_period(e.get("period")) == period
+            for e in schedule
+        )
     if op == "and":
         return all(_evaluate_condition(arg, schedule) for arg in condition.get("args", []))
     if op == "or":

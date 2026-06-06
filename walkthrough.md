@@ -17,7 +17,7 @@ Remote: `https://github.com/Duy-Nguyen-2006/timetable.git`
 | **Tier 1** rule-parser-fix | ✅ Done (commit `7aebdce`) | tsc/lint/tests pass |
 | **Tier 1** validation-blockers | ✅ Done (commit `25b9c31`) | tsc/lint/tests pass, smoke OK |
 | **scrutiny-validator-tier1** | 🟡 in_progress | Awaiting completion review |
-| **Tier 2** schema-decompose | ⏳ pending | Chưa bắt đầu |
+| **Tier 2** schema-decompose | ✅ Done (commit sắp tới) | tsc/lint/213 tests pass |
 | **Tier 3** predicate-exec | ⏳ pending | Chưa bắt đầu |
 | **Tier 4** interpretation-card | ⏳ pending | Chưa bắt đầu |
 | **Tier 4** pattern-cache | ⏳ pending | Chưa bắt đầu |
@@ -79,7 +79,16 @@ b954925 chore(harness): upgrade harness-cli to v0.1.8
 - [ ] `dedupeConstraintSpecs` semantics test: id+original same, params different → KHÔNG collapse
 
 ### 3.5 Trạng thái hiện tại
-- ⏳ **PENDING** — chưa bắt đầu
+- ✅ **DONE** — commit sẽ là `tier2-schema-decompose`
+  - ✅ 3 ops mới thêm vào `ConditionExpr`: `teacher_pair_teaches_same_slot`, `teacher_pair_teaches_same_day`, `class_teacher_at_slot`
+  - ✅ Python `_evaluate_condition` hỗ trợ 3 ops mới
+  - ✅ Python `_build_condition_literal` tạo BoolVar với `OnlyEnforceIf` binding
+  - ✅ Humanizer render 3 ops bằng tiếng Việt
+  - ✅ Self-decompose retry fires exactly once khi `text.length > 30`
+  - ✅ Retry idempotency: max 2 LLM calls
+  - ✅ Tests: 8 new tests (3 humanizer, 2 dedupe, 3 retry)
+  - ✅ Tổng: 213/213 tests pass, tsc clean, lint clean
+  - ⏳ Live LLM smoke (VAL-T2-008) — cần `OPENROUTER_API_KEY` thực
 
 ---
 
@@ -205,6 +214,7 @@ Mỗi feature implementation sẽ theo các bước:
 
 | Ngày | Công việc | Commit/PR |
 |------|-----------|-----------|
-| 2026-06-06 | Walkthrough.md created | (file này) |
-| 2026-06-06 | 2 commits pushed (ea72315..25b9c31) | `25b9c31`, `7aebdce` |
-| ... | Tier 2 sẽ bắt đầu ở đây | TBD |
+| 2026-06-06 | Walkthrough.md created | `2ae707f` |
+| 2026-06-06 | 2 commits pushed (Tier 1: rule-parser-fix, validation-blockers) | `25b9c31`, `7aebdce` |
+| 2026-06-06 | Tier 2: 3 new ConditionExpr ops, humanizer, retry logic, tests | (sắp commit) |
+| ... | Tier 3 sẽ tiếp tục ở đây | TBD |

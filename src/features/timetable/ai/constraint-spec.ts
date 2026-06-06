@@ -77,6 +77,9 @@ export type ConstraintKind =
 export type ConditionExpr =
   | { op: 'teacher_teaches_on_day'; teacher: string; day: string }
   | { op: 'teacher_teaches_at_slot'; teacher: string; day: string; period: number }
+  | { op: 'teacher_pair_teaches_same_slot'; teachers: [string, string]; day: string; period: number }
+  | { op: 'teacher_pair_teaches_same_day'; teachers: [string, string]; day: string }
+  | { op: 'class_teacher_at_slot'; class: string; subject: string; day: string; period: number }
   | { op: 'and'; args: ConditionExpr[] }
   | { op: 'or'; args: ConditionExpr[] }
   | { op: 'not'; arg: ConditionExpr };

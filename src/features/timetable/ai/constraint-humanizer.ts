@@ -12,6 +12,9 @@ function paramStr(value: unknown): string {
 function renderConditionExpr(cond: {
   op?: string;
   teacher?: string;
+  teachers?: string[];
+  class?: string;
+  subject?: string;
   day?: string;
   period?: number;
   args?: Array<Record<string, unknown>>;
@@ -19,6 +22,9 @@ function renderConditionExpr(cond: {
 } | undefined): string {
   if (!cond || typeof cond !== 'object' || !cond.op) return '(điều kiện chưa xác định)';
   const teacher = typeof cond.teacher === 'string' ? cond.teacher : '';
+  const teachers = Array.isArray(cond.teachers) ? cond.teachers.filter((t): t is string => typeof t === 'string') : [];
+  const klass = typeof cond.class === 'string' ? cond.class : '';
+  const subject = typeof cond.subject === 'string' ? cond.subject : '';
   const day = cond.day ? dayInText(cond.day) : '';
   const period = typeof cond.period === 'number' ? cond.period : null;
 
@@ -27,6 +33,15 @@ function renderConditionExpr(cond: {
   }
   if (cond.op === 'teacher_teaches_on_day' && teacher && day) {
     return `Giáo viên ${teacher} dạy vào ${day}`;
+  }
+  if (cond.op === 'teacher_pair_teaches_same_slot' && teachers.length >= 2 && day && period !== null) {
+    return `${teachers[0]} và ${teachers[1]} cùng dạy ${day}, tiết ${period}`;
+  }
+  if (cond.op === 'teacher_pair_teaches_same_day' && teachers.length >= 2 && day) {
+    return `${teachers[0]} và ${teachers[1]} cùng dạy vào ${day}`;
+  }
+  if (cond.op === 'class_teacher_at_slot' && klass && subject && day && period !== null) {
+    return `Lớp ${klass} học môn ${subject} ${day}, tiết ${period}`;
   }
   if (cond.op === 'and' && Array.isArray(cond.args) && cond.args.length > 0) {
     const parts = cond.args.map((a) => renderConditionExpr(a as Parameters<typeof renderConditionExpr>[0]));
