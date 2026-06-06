@@ -58,9 +58,9 @@ test('buildCoderExhaustedMessage includes the last actionable failure', () => {
 test('runLocalAgent accepts feasible solver results and passes worker hints', async () => {
   const originalFetch = globalThis.fetch;
   const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-  let executeBody: { solverWorkers?: number; input?: { warmStartSchedule?: unknown[] } } | null = null;
+  let executeBody: any = null;
 
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
 
@@ -127,13 +127,9 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
   const originalFetch = globalThis.fetch;
   const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
   let coderCalls = 0;
-  let repairPayload: {
-    currentCode?: string;
-    constraintCode?: string;
-    compileOrRunError?: string;
-  } | null = null;
+  let repairPayload: any = null;
 
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
 
@@ -194,7 +190,7 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
       }
 
       if (systemPrompt === 'repair') {
-        repairPayload = JSON.parse(body.messages?.[1]?.content ?? '{}');
+        repairPayload = JSON.parse(body.messages?.[1]?.content ?? '{}') as { currentCode?: string; constraintCode?: string; compileOrRunError?: string };
         return Response.json({
           ok: true,
           content: JSON.stringify({
@@ -304,7 +300,7 @@ test('runLocalAgent returns a clear repeated-violation error instead of stopped 
   const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
   let repairCalls = 0;
 
-  (globalThis as typeof globalThis & { window?: unknown }).window = {};
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
 

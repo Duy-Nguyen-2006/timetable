@@ -31,11 +31,47 @@ export function extractPeriodNumber(text: string): number | null {
   return null;
 }
 
+/** Map Vietnamese day-of-week number to the canonical index (0=Mon … 6=Sun). */
+const VN_DAY_NUMBER_TO_INDEX: Record<string, number> = {
+  '2': 0, 'hai': 0,
+  '3': 1, 'ba': 1,
+  '4': 2, 'tư': 2, 'tu': 2,
+  '5': 3, 'năm': 3, 'nam': 3,
+  '6': 4, 'sáu': 4, 'sau': 4,
+  '7': 5, 'bảy': 5, 'bay': 5,
+};
+
+const HARDCODED_DAY_IDS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+
+function lookupDayIdByNumber(text: string, days: Array<{ id: string; label: string }>): string | null {
+  // Try "thứ N" / "thu N" pattern — look up N in the days array by label.
+  const m = text.match(/th[ứu]\s*(\d)/iu);
+  if (m) {
+    const idx = VN_DAY_NUMBER_TO_INDEX[m[1]];
+    if (idx !== undefined && days[idx]) return days[idx].id;
+  }
+  // Try Vietnamese word forms ("hai", "ba", …).
+  const m2 = text.match(/th[ứu]\s*(hai|ba|tư|tu|năm|nam|sáu|sau|bảy|bay)/iu);
+  if (m2) {
+    const idx = VN_DAY_NUMBER_TO_INDEX[m2[1].toLowerCase()];
+    if (idx !== undefined && days[idx]) return days[idx].id;
+  }
+  // "chủ nhật" / "CN"
+  if (/chủ\s*nhật|chu\s*nhat|\bcn\b/iu.test(text) && days[6]) return days[6].id;
+  return null;
+}
+
 export function extractDayId(text: string, days: Array<{ id: string; label: string }>): string | null {
+  // First pass: direct match against context day IDs and labels.
   for (const day of days) {
     if (includesLabel(text, day.id) || includesLabel(text, day.label)) return day.id;
   }
 
+  // Second pass: match Vietnamese day-of-week patterns and resolve to context ID.
+  const contextId = lookupDayIdByNumber(text, days);
+  if (contextId) return contextId;
+
+  // Third pass: hardcoded English fallback (when days array is empty or short).
   if (/thứ\s*2|thu\s*2/iu.test(text)) return 'monday';
   if (/thứ\s*3|thu\s*3/iu.test(text)) return 'tuesday';
   if (/thứ\s*4|thu\s*4/iu.test(text)) return 'wednesday';

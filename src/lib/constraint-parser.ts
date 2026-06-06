@@ -40,15 +40,17 @@ type ParseContext = {
   sessionIds: Record<string, string>
 }
 
-const VN_DAY_ALIASES: Array<[RegExp, DayId]> = [
-  [/\bthứ\s*(?:2|hai)\b/u, 'monday'],
-  [/\bthứ\s*(?:3|ba)\b/u, 'tuesday'],
-  [/\bthứ\s*(?:4|tư|tu)\b/u, 'wednesday'],
-  [/\bthứ\s*(?:5|năm|nam)\b/u, 'thursday'],
-  [/\bthứ\s*(?:6|sáu|sau)\b/u, 'friday'],
-  [/\bthứ\s*(?:7|bảy|bay)\b/u, 'saturday'],
-  [/\b(?:chủ\s*nhật|chu\s*nhat|cn)\b/u, 'sunday'],
+const VN_DAY_ALIASES: Array<[RegExp, number]> = [
+  [/\bthứ\s*(?:2|hai)\b/u, 0], // Monday
+  [/\bthứ\s*(?:3|ba)\b/u, 1], // Tuesday
+  [/\bthứ\s*(?:4|tư|tu)\b/u, 2], // Wednesday
+  [/\bthứ\s*(?:5|năm|nam)\b/u, 3], // Thursday
+  [/\bthứ\s*(?:6|sáu|sau)\b/u, 4], // Friday
+  [/\bthứ\s*(?:7|bảy|bay)\b/u, 5], // Saturday
+  [/\b(?:chủ\s*nhật|chu\s*nhat|cn)\b/u, 6], // Sunday
 ]
+
+const HARDCODED_DAY_IDS: DayId[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 
 const SESSION_ALIASES: Array<[RegExp, SessionId]> = [
   [/\b(?:buổi\s*)?(?:sáng|sang|sáng\s*sớm|sang\s*som)\b/u, 'morning'],
@@ -99,26 +101,32 @@ function unique(values: string[]): string[] {
   return [...new Set(values)]
 }
 
-function extractDays(text: string): string[] {
+function resolveDayId(dayIndex: number, ctxDayIds?: Record<string, string>): string {
+  if (ctxDayIds) {
+    const entries = Object.entries(ctxDayIds);
+    // Positional lookup: index 0 = Mon, 1 = Tue, …, 6 = Sun.
+    if (dayIndex >= 0 && dayIndex < entries.length) {
+      return entries[dayIndex][1];
+    }
+  }
+  return HARDCODED_DAY_IDS[dayIndex] ?? HARDCODED_DAY_IDS[0];
+}
+
+function extractDays(text: string, ctxDayIds?: Record<string, string>): string[] {
   const days: string[] = []
   const compact = text.match(/\bthứ\s*([2-7](?:\s+[2-7])+)\b/u)
   if (compact) {
     for (const n of compact[1].split(/\s+/)) {
-      const map: Record<string, string> = {
-        '2': 'monday',
-        '3': 'tuesday',
-        '4': 'wednesday',
-        '5': 'thursday',
-        '6': 'friday',
-        '7': 'saturday',
+      const dayIndex = Number(n) - 2; // "thứ 2" → index 0
+      if (dayIndex >= 0 && dayIndex <= 5) {
+        days.push(resolveDayId(dayIndex, ctxDayIds));
       }
-      if (map[n]) days.push(map[n])
     }
     return unique(days)
   }
-  for (const [pattern, dayId] of VN_DAY_ALIASES) {
+  for (const [pattern, dayIndex] of VN_DAY_ALIASES) {
     if (pattern.test(text)) {
-      days.push(dayId)
+      days.push(resolveDayId(dayIndex, ctxDayIds));
       break
     }
   }
@@ -190,7 +198,7 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   const teachers = matchLabels(raw, ctx.teacherLabels)
   const classes = matchLabels(raw, ctx.classLabels)
   const subjects = matchLabels(raw, ctx.subjectLabels)
-  const days = extractDays(raw)
+  const days = extractDays(raw, ctx.dayIds)
   const sessions = extractSessions(raw)
   const periods = extractPeriods(raw)
 

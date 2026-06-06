@@ -55,7 +55,7 @@ test('syntaxCheckPython - preserves Electron errorDigest fallback', async () => 
         syntaxCheck: async () => ({ ok: false, errorDigest: 'SyntaxError: invalid syntax at line 4' }),
       },
     },
-  };
+  } as unknown as (Window & typeof globalThis);
 
   try {
     const res = await syntaxCheckPython('broken python');

@@ -839,8 +839,7 @@ test('VAL-T1-011a: diacritics + title prefix "Cô Lan" yields bare name in param
   assert.equal(specs.length, 1);
   assert.equal(specs[0].kind, 'teacher_block_day');
   assert.equal(specs[0].params.teacher, 'Lan');
-  // parseConstraint hardcodes 'monday' for "thứ 2"
-  assert.equal(specs[0].params.day, 'monday');
+  assert.equal(specs[0].params.day, 'mon');
 });
 
 test('VAL-T1-011b: diacritics + title prefix "Thầy B" yields bare name in params.teacher', () => {
@@ -862,8 +861,7 @@ test('VAL-T1-011b: diacritics + title prefix "Thầy B" yields bare name in para
   assert.equal(specs.length, 1);
   assert.equal(specs[0].kind, 'teacher_block_slot');
   assert.equal(specs[0].params.teacher, 'B');
-  // parseConstraint hardcodes 'tuesday' for "thứ 3"
-  assert.equal(specs[0].params.day, 'tuesday');
+  assert.equal(specs[0].params.day, 'tue');
   assert.equal(specs[0].params.period, 4);
 });
 
@@ -886,8 +884,7 @@ test('VAL-T1-011c: digit-suffixed teacher name "Sơn 2" round-trips with bare na
   assert.equal(specs.length, 1);
   assert.equal(specs[0].kind, 'teacher_block_day');
   assert.equal(specs[0].params.teacher, 'Sơn 2');
-  // parseConstraint hardcodes 'monday' for "thứ 2"
-  assert.equal(specs[0].params.day, 'monday');
+  assert.equal(specs[0].params.day, 'mon');
 });
 
 test('VAL-T1-012a: multi-line paste split on newline yields 2 specs', () => {
@@ -906,8 +903,7 @@ test('VAL-T1-012a: multi-line paste split on newline yields 2 specs', () => {
   assert.deepEqual(specs.map((spec) => spec.id), ['c1', 'c2']);
   assert.equal(specs[0].kind, 'teacher_block_day');
   assert.equal(specs[0].params.teacher, 'Sơn');
-  // parseConstraint hardcodes 'monday' for "thứ 2"
-  assert.equal(specs[0].params.day, 'monday');
+  assert.equal(specs[0].params.day, 'mon');
   assert.equal(specs[1].kind, 'teacher_block_period');
   assert.equal(specs[1].params.teacher, 'Hương');
   assert.equal(specs[1].params.period, 1);
