@@ -1,0 +1,30 @@
+{
+  "classes": ["6A", "6B"],
+  "days": ["mon", "tue", "wed", "thu", "fri"],
+  "periods": [1, 2, 3, 4],
+  "periodsByDay": { "mon": [1,2,3,4], "tue": [1,2,3,4], "wed": [1,2,3,4], "thu": [1,2,3,4], "fri": [1,2,3,4] },
+  "assignments": [
+    { "id": "son_6a", "class": "6A", "subject": "Toán", "teacher": "Sơn",   "weeklyPeriods": 4 },
+    { "id": "son_6b", "class": "6B", "subject": "Toán", "teacher": "Sơn",   "weeklyPeriods": 4 },
+    { "id": "dung_6a", "class": "6A", "subject": "Văn", "teacher": "Dung",   "weeklyPeriods": 4 },
+    { "id": "dung_6b", "class": "6B", "subject": "Văn", "teacher": "Dung",   "weeklyPeriods": 4 },
+    { "id": "huong_6a", "class": "6A", "subject": "Tiếng Anh", "teacher": "Hương", "weeklyPeriods": 3 },
+    { "id": "huong_6b", "class": "6B", "subject": "Tiếng Anh", "teacher": "Hương", "weeklyPeriods": 3 },
+    { "id": "thuy_6a", "class": "6A", "subject": "GDTC", "teacher": "Thủy",   "weeklyPeriods": 2 },
+    { "id": "thuy_6b", "class": "6B", "subject": "GDTC", "teacher": "Thủy",   "weeklyPeriods": 2 },
+    { "id": "hieu_6a", "class": "6A", "subject": "KHTN", "teacher": "Hiếu",   "weeklyPeriods": 3 },
+    { "id": "hieu_6b", "class": "6B", "subject": "KHTN", "teacher": "Hiếu",   "weeklyPeriods": 3 },
+    { "id": "lan_6a", "class": "6A", "subject": "LS&ĐL", "teacher": "Lan",   "weeklyPeriods": 2 },
+    { "id": "lan_6b", "class": "6B", "subject": "LS&ĐL", "teacher": "Lan",   "weeklyPeriods": 2 },
+    { "id": "thang_6a", "class": "6A", "subject": "CN", "teacher": "Thắng",   "weeklyPeriods": 1 },
+    { "id": "thang_6b", "class": "6B", "subject": "CN", "teacher": "Thắng",   "weeklyPeriods": 1 },
+    { "id": "phuong_6a", "class": "6A", "subject": "GDCD", "teacher": "Phương",   "weeklyPeriods": 1 },
+    { "id": "phuong_6b", "class": "6B", "subject": "GDCD", "teacher": "Phương",   "weeklyPeriods": 1 }
+  ],
+  "constraints": [
+    { "id": "h1", "original": "Sơn không dạy thứ 2", "severity": "hard", "kind": "teacher_block_day", "params": { "teacher": "Sơn", "day": "mon" } },
+    { "id": "h2", "original": "Hương không dạy tiết 1", "severity": "hard", "kind": "teacher_block_period", "params": { "teacher": "Hương", "period": 1 } },
+    { "id": "s1", "original": "Toán nên xếp tiết 1-2", "severity": "soft", "kind": "subject_preferred_periods", "params": { "subject": "Toán", "periods": [1, 2] } },
+    { "id": "s2", "original": "Văn nên liên tiếp 2 tiết", "severity": "soft", "kind": "subject_consecutive", "params": { "subject": "Văn", "length": 2 } }
+  ]
+}

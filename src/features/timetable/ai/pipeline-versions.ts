@@ -9,7 +9,7 @@ export const PROMPT_VERSIONS = {
   repair: '3.0.1',
 } as const;
 
-export const SOLVER_TEMPLATE_VERSION = '1.4.2';
+export const SOLVER_TEMPLATE_VERSION = '1.4.3';
 
 export const CONSTRAINT_REGISTRY_VERSION = '1.4.0';
 
