@@ -21,8 +21,10 @@ Remote: `https://github.com/Duy-Nguyen-2006/timetable.git`
 | **Tier 3** predicate-exec | ✅ Done (commit `9fe0c63`) | tsc/lint/213 TS + 13 Python tests pass |
 | **Tier 4** interpretation-card | ✅ Done (commit `99b29b3`) | tsc/lint pass |
 | **Tier 4** pattern-cache | ✅ Done (commit `ec5ab40`) | tsc/lint/223 tests pass |
-| **cross-tier** integration | ✅ Done (commit sắp tới) | tsc/lint/223 tests + bilingual OK |
+| **cross-tier** integration | ✅ Done (commit `6a8d8f0`) | tsc/lint/223 tests + bilingual OK |
 | **user-testing-validator-tier1** | ⏳ pending | Sau khi Tier 1 review xong |
+
+**Tổng kết implementation:** 7/9 features hoàn thành (Tier 1-4 + cross-tier = 5 implementation + 2 Tier 1). Quality gates: 223/223 TS tests + 13 Python tests + bilingual check + tsc/lint đều pass. 7 commits mới trên master.
 
 ---
 
@@ -246,5 +248,5 @@ Mỗi feature implementation sẽ theo các bước:
 | 2026-06-06 | Tier 3: pythonPredicate exec, AST safety, timeout, prompts | `9fe0c63` |
 | 2026-06-06 | Tier 4 interpretation-card | `99b29b3` |
 | 2026-06-06 | Tier 4 pattern-cache (localStorage Jaccard cache) | `ec5ab40` |
-| 2026-06-06 | cross-tier: binary check, bilingual check, regression | (sắp commit) |
-| ... | validators (scrutiny, user-testing) chờ review | TBD |
+| 2026-06-06 | cross-tier: binary check, bilingual check, regression | `6a8d8f0` |
+| ... | validators (scrutiny, user-testing) chờ mission resume | TBD |
