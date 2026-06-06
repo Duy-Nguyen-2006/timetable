@@ -62,24 +62,6 @@ export async function POST(request: Request) {
     }
 
     if (isOpenRouter) {
-      const authRes = await fetchWithTimeout(`${baseURL}/auth/key`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        cache: 'no-store',
-      })
-
-      if (!authRes.ok) {
-        const errorText = await authRes.text()
-        return NextResponse.json(
-          {
-            ok: false,
-            message: `❌ API key OpenRouter không hợp lệ. HTTP ${authRes.status} ${authRes.statusText}`,
-            details: errorText.slice(0, 400),
-          },
-          { status: 200 },
-        )
-      }
-
       const modelsRes = await fetchWithTimeout(`${baseURL}/models`, {
         method: 'GET',
         cache: 'no-store',
@@ -106,14 +88,13 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             ok: false,
-            message: '❌ API key hợp lệ nhưng model không có trong OpenRouter.',
+            message: '❌ Model không có trong OpenRouter.',
             details: `Model đang nhập: ${model}`,
           },
           { status: 200 },
         )
       }
 
-      // FIX 4: minimal chat/completions smoke (no json_schema) to prove request shape works
       const chatSmokeRes = await fetchWithTimeout(`${baseURL}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -126,22 +107,43 @@ export async function POST(request: Request) {
         }),
       })
 
-      if (!chatSmokeRes.ok) {
-        const errorText = await chatSmokeRes.text()
-        return NextResponse.json(
-          {
-            ok: false,
-            message: '❌ API key và model hợp lệ nhưng chat completion thất bại (request body có thể không tương thích).',
-            details: `HTTP ${chatSmokeRes.status} ${chatSmokeRes.statusText}: ${errorText.slice(0, 400)}`,
-          },
-          { status: 200 },
-        )
+      if (chatSmokeRes.ok) {
+        return NextResponse.json({
+          ok: true,
+          message: '✅ Kết nối thành công! Model OpenRouter tồn tại và chat completion hoạt động.',
+        })
       }
 
-      return NextResponse.json({
-        ok: true,
-        message: '✅ Kết nối thành công! API key OpenRouter hợp lệ, model tồn tại và chat completion hoạt động.',
-      })
+      const chatErrorText = await chatSmokeRes.text()
+      let authDiagnostic = ''
+      try {
+        const authRes = await fetchWithTimeout(`${baseURL}/auth/key`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          cache: 'no-store',
+        })
+        if (!authRes.ok) {
+          const authText = await authRes.text()
+          authDiagnostic = `Auth endpoint HTTP ${authRes.status} ${authRes.statusText}: ${authText.slice(0, 200)}`
+        }
+      } catch (authError) {
+        authDiagnostic = authError instanceof Error ? `Auth endpoint error: ${authError.message}` : ''
+      }
+
+      const isAuthStatus = chatSmokeRes.status === 401 || chatSmokeRes.status === 403
+      return NextResponse.json(
+        {
+          ok: false,
+          message: isAuthStatus
+            ? `❌ OpenRouter từ chối chat completion. HTTP ${chatSmokeRes.status} ${chatSmokeRes.statusText}`
+            : `❌ Model tồn tại nhưng chat completion thất bại. HTTP ${chatSmokeRes.status} ${chatSmokeRes.statusText}`,
+          details: [
+            chatErrorText.slice(0, 400),
+            authDiagnostic,
+          ].filter(Boolean).join('\n'),
+        },
+        { status: 200 },
+      )
     }
 
     const useResponses = provider === 'openai-responses'
