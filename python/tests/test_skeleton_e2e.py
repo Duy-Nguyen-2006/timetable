@@ -110,6 +110,53 @@ def test_weekly_periods_exact_is_enforced() -> None:
     assert counts == {"a1": 2, "a2": 2}, counts
 
 
+def test_teacher_min_per_day_is_enforced() -> None:
+    """Newly-added `teacher_min_per_day` must schedule Sơn at least 1 period/day."""
+    payload = json.loads((FIXTURES / "teacher_min_per_day.json").read_text(encoding="utf-8"))
+    with _workspace() as workspace:
+        result = _run_skeleton(workspace, payload)
+    assert result["status"] in ("optimal", "feasible"), result
+    by_day: dict[str, int] = {}
+    for entry in result["schedule"]:
+        if entry["teacher"] != "Sơn":
+            continue
+        by_day[entry["day"]] = by_day.get(entry["day"], 0) + 1
+    # Sơn has 2 weekly periods, 2 active days → at least 1 on each.
+    for day, count in by_day.items():
+        assert count >= 1, f"teacher_min_per_day violated on {day}: Sơn count = {count}"
+
+
+def test_class_max_per_day_is_enforced() -> None:
+    """Newly-added `class_max_per_day` must cap class 6A at 1 period/day."""
+    payload = json.loads((FIXTURES / "class_max_per_day.json").read_text(encoding="utf-8"))
+    with _workspace() as workspace:
+        result = _run_skeleton(workspace, payload)
+    assert result["status"] in ("optimal", "feasible"), result
+    by_day: dict[str, int] = {}
+    for entry in result["schedule"]:
+        if entry["class"] != "6A":
+            continue
+        by_day[entry["day"]] = by_day.get(entry["day"], 0) + 1
+    for day, count in by_day.items():
+        assert count <= 1, f"class_max_per_day violated on {day}: 6A count = {count}"
+
+
+def test_mutual_exclusion_prevents_same_slot() -> None:
+    """Newly-added `mutual_exclusion` must not allow a1 and a3 in the same slot."""
+    payload = json.loads((FIXTURES / "mutual_exclusion.json").read_text(encoding="utf-8"))
+    with _workspace() as workspace:
+        result = _run_skeleton(workspace, payload)
+    assert result["status"] in ("optimal", "feasible"), result
+    seen_slots: set[tuple[str, int]] = set()
+    for entry in result["schedule"]:
+        if entry["assignmentId"] in ("a1", "a3"):
+            key = (entry["day"], int(entry["period"]))
+            assert key not in seen_slots, (
+                f"mutual_exclusion violated: {entry['assignmentId']} at {entry['day']}/{entry['period']}"
+            )
+            seen_slots.add(key)
+
+
 # --- helpers --------------------------------------------------------------
 
 import contextlib

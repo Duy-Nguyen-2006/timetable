@@ -1,0 +1,13 @@
+{
+  "classes": ["6A"],
+  "days": ["mon", "tue", "wed", "thu"],
+  "periods": [1, 2],
+  "periodsByDay": { "mon": [1, 2], "tue": [1, 2], "wed": [1, 2], "thu": [1, 2] },
+  "assignments": [
+    { "id": "a1", "class": "6A", "subject": "Toán", "teacher": "Sơn",   "weeklyPeriods": 2 },
+    { "id": "a2", "class": "6A", "subject": "Văn",  "teacher": "Hương", "weeklyPeriods": 2 }
+  ],
+  "constraints": [
+    { "id": "c1", "original": "Lớp 6A tối đa 1 tiết/ngày", "severity": "hard", "kind": "class_max_per_day", "params": { "class": "6A", "max": 1 } }
+  ]
+}

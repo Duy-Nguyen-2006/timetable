@@ -1,0 +1,15 @@
+{
+  "classes": ["6A", "6B"],
+  "days": ["mon", "tue"],
+  "periods": [1, 2],
+  "periodsByDay": { "mon": [1, 2], "tue": [1, 2] },
+  "assignments": [
+    { "id": "a1", "class": "6A", "subject": "Toán", "teacher": "Sơn",   "weeklyPeriods": 2 },
+    { "id": "a2", "class": "6A", "subject": "Văn",  "teacher": "Hương", "weeklyPeriods": 2 },
+    { "id": "a3", "class": "6B", "subject": "Toán", "teacher": "Sơn",   "weeklyPeriods": 2 },
+    { "id": "a4", "class": "6B", "subject": "Văn",  "teacher": "Hương", "weeklyPeriods": 2 }
+  ],
+  "constraints": [
+    { "id": "c1", "original": "Sơn không dạy 2 lớp cùng tiết", "severity": "hard", "kind": "mutual_exclusion", "params": { "assignmentIds": ["a1", "a3"] } }
+  ]
+}
