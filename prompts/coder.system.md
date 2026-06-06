@@ -57,6 +57,27 @@ for spec in custom_specs:
 
 Không dùng biến `spec`, `kind`, hoặc `params` nếu chưa tự khai báo trong loop của bạn.
 
+## `pythonPredicate` inline (Tier 3)
+
+Khi một `custom_dsl` hard spec mang `params.pythonPredicate` (mã Python do LLM sinh ra từ translator),
+bạn PHẢI inline predicate đó thành hàm `def check_predicate_<id>(schedule, assignments)` trong `build_custom_constraints`
+rồi gọi nó qua `_verify_custom_predicates` (built-in của skeleton). Không viết lại logic predicate — chỉ wrap vào hàm.
+
+Ví dụ (id = `c1`):
+
+```python
+for spec in custom_specs:
+    if spec.get("id") == "c1" and spec.get("params", {}).get("pythonPredicate"):
+        src = spec["params"]["pythonPredicate"]
+        ns = {}
+        exec(src, {"__builtins__": safe_builtins}, ns)  # noqa: S102
+        if "check" in ns and callable(ns["check"]):
+            globals()["check_predicate_c1"] = ns["check"]
+```
+
+Mọi predicate đã inline phải có tên hàm unique `check_predicate_<id>` để `covered_constraint_ids` ánh xạ 1-1.
+Đừng tự viết constraint logic bằng tay khi đã có `pythonPredicate` — wrap rồi trỏ vào `_verify_custom_predicates`.
+
 ## Luật bắt buộc
 
 1. Chỉ đọc `params["naturalLanguage"]` của từng `spec` trong `custom_specs`.

@@ -17,8 +17,8 @@ Remote: `https://github.com/Duy-Nguyen-2006/timetable.git`
 | **Tier 1** rule-parser-fix | ✅ Done (commit `7aebdce`) | tsc/lint/tests pass |
 | **Tier 1** validation-blockers | ✅ Done (commit `25b9c31`) | tsc/lint/tests pass, smoke OK |
 | **scrutiny-validator-tier1** | 🟡 in_progress | Awaiting completion review |
-| **Tier 2** schema-decompose | ✅ Done (commit sắp tới) | tsc/lint/213 tests pass |
-| **Tier 3** predicate-exec | ⏳ pending | Chưa bắt đầu |
+| **Tier 2** schema-decompose | ✅ Done (commit `d8c7eec`) | tsc/lint/213 tests pass |
+| **Tier 3** predicate-exec | ✅ Done (commit sắp tới) | tsc/lint/213 TS + 13 Python tests pass |
 | **Tier 4** interpretation-card | ⏳ pending | Chưa bắt đầu |
 | **Tier 4** pattern-cache | ⏳ pending | Chưa bắt đầu |
 | **cross-tier** integration | ⏳ pending | Chưa bắt đầu |
@@ -109,7 +109,18 @@ b954925 chore(harness): upgrade harness-cli to v0.1.8
 `exec`, `eval`, `compile`, `input`, `breakpoint`, `globals`, `locals`, `vars`, `print`, `__class__`, `__bases__`, `__subclasses__`, `__mro__`, `__builtins__`
 
 ### 4.3 Trạng thái hiện tại
-- ⏳ **PENDING** — chờ Tier 2
+- ✅ **DONE**
+  - ✅ `validate_schedule` gọi `_verify_python_predicate` cho `custom_dsl` hard specs
+  - ✅ Return shape có `uncheckedNotes` (key = spec id, value = `predicate_missing`/`predicate_unsafe`/`predicate_timeout`/`predicate_error`)
+  - ✅ Return shape có `customChecks` (per-spec check result)
+  - ✅ AST safety check 14 forbidden names/attrs (9 names + 5 dunder attrs)
+  - ✅ Exception handling: `NameError`, `TypeError`, `ZeroDivisionError` → `predicate_error`
+  - ✅ Timeout bound: 5s với SIGALRM
+  - ✅ Coder prompt hướng dẫn inline `def check_predicate_<id>(...)` 
+  - ✅ Repair prompt hướng dẫn predicate fix khi runtime fail
+  - ✅ Translator prompt cho phép emit `pythonPredicate` (signature, allowlist)
+  - ✅ 13 Python tests pass, 213 TS tests pass
+  - ⏳ Live E2E solve (VAL-T3-013) — cần `OPENROUTER_API_KEY` thực
 
 ---
 
@@ -216,5 +227,6 @@ Mỗi feature implementation sẽ theo các bước:
 |------|-----------|-----------|
 | 2026-06-06 | Walkthrough.md created | `2ae707f` |
 | 2026-06-06 | 2 commits pushed (Tier 1: rule-parser-fix, validation-blockers) | `25b9c31`, `7aebdce` |
-| 2026-06-06 | Tier 2: 3 new ConditionExpr ops, humanizer, retry logic, tests | (sắp commit) |
-| ... | Tier 3 sẽ tiếp tục ở đây | TBD |
+| 2026-06-06 | Tier 2: 3 new ConditionExpr ops, humanizer, retry logic, tests | `d8c7eec` |
+| 2026-06-06 | Tier 3: pythonPredicate exec, AST safety, timeout, prompts | (sắp commit) |
+| ... | Tier 4 sẽ tiếp tục ở đây | TBD |

@@ -464,12 +464,26 @@ def validate_schedule(
     base_violations = _base_checks(schedule, assignments)
     violations = list(base_violations)
     unchecked: list[str] = []
+    unchecked_notes: dict[str, str] = {}
+    custom_checks: list[dict[str, Any]] = []
 
     for spec in constraint_specs:
-        if spec.get("kind") == "resource_capacity":
+        kind = spec.get("kind")
+        if kind == "resource_capacity":
             continue
-        if spec.get("kind") == "custom_dsl":
-            unchecked.append(str(spec.get("id", "unknown")))
+        if kind == "custom_dsl":
+            sid = str(spec.get("id", "unknown"))
+            check_result = _verify_python_predicate(spec, schedule)
+            custom_checks.append(check_result)
+            if check_result.get("checked"):
+                # Predicate ran; surface its output as violations.
+                for viol in check_result.get("violations", []) or []:
+                    violations.append(viol)
+            else:
+                # Predicate didn't run (missing / unsafe / errored).
+                unchecked.append(sid)
+                note = check_result.get("note") or "predicate_unverified"
+                unchecked_notes[sid] = note
             continue
         violations.extend(_check_single(spec, schedule))
 
@@ -490,4 +504,185 @@ def validate_schedule(
         "hardViolations": hard_violations,
         "softViolations": soft_violations,
         "uncheckedConstraintIds": unchecked,
+        "uncheckedNotes": unchecked_notes,
+        "customChecks": custom_checks,
     }
+
+
+# Inline AST safety check for pythonPredicate in custom_dsl specs.
+# Mirrors the allowlists in python/code_executor.py::check_ast_safety so post-hoc
+# validation matches solver-time gating (Tier 3 — VAL-T3-006).
+_PREDICATE_FORBIDDEN_NAMES = {
+    "open", "exec", "eval", "__import__", "compile", "input",
+    "breakpoint", "globals", "locals", "vars", "print",
+}
+_PREDICATE_FORBIDDEN_ATTRS = {
+    "__import__", "__builtins__", "__class__", "__bases__",
+    "__subclasses__", "__mro__",
+}
+_PREDICATE_ALLOWED_LOAD_NAMES = {
+    "len", "range", "int", "str", "set", "list", "dict", "tuple",
+    "frozenset", "sum", "min", "max", "sorted", "reversed", "round",
+    "divmod", "zip", "map", "filter", "enumerate", "isinstance",
+    "bool", "float", "abs", "all", "any", "ValueError",
+    "NotImplementedError", "schedule", "assignments",
+}
+
+import ast as _ast
+import signal as _signal
+import time as _time
+
+_PREDICATE_TIMEOUT_SECONDS = 5
+
+
+def _predicate_is_unsafe(src: str) -> str | None:
+    """Return an error message if src violates the AST allowlists, else None."""
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError as exc:
+        return f"SyntaxError: {exc}"
+    local_names: set[str] = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Name) and isinstance(node.ctx, (_ast.Store, _ast.Param)):
+            local_names.add(node.id)
+        elif isinstance(node, (_ast.For, _ast.AsyncFor)):
+            targets = [node.target]
+            while targets:
+                target = targets.pop()
+                if isinstance(target, _ast.Name):
+                    local_names.add(target.id)
+                elif isinstance(target, (_ast.Tuple, _ast.List)):
+                    targets.extend(target.elts)
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.Import, _ast.ImportFrom)):
+            return f"Forbidden import at line {node.lineno}"
+        if isinstance(node, _ast.Call):
+            fn = node.func
+            name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+            if name in _PREDICATE_FORBIDDEN_NAMES:
+                return f"Forbidden call '{name}' at line {node.lineno}"
+        if isinstance(node, _ast.Attribute):
+            if node.attr in _PREDICATE_FORBIDDEN_ATTRS:
+                return f"Forbidden attribute '{node.attr}' at line {node.lineno}"
+        if isinstance(node, _ast.Name) and isinstance(node.ctx, _ast.Load):
+            if (
+                node.id not in _PREDICATE_ALLOWED_LOAD_NAMES
+                and node.id not in local_names
+                and not node.id.startswith("_")
+            ):
+                return f"Unknown name '{node.id}' at line {node.lineno}"
+    return None
+
+
+def _predicate_timeout_handler(_signum, _frame):
+    raise TimeoutError("predicate_timeout")
+
+
+def _verify_python_predicate(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> dict[str, Any]:
+    """Execute pythonPredicate for a custom_dsl spec; never raises.
+
+    Returns a dict with `checked` (bool), `violations` (list), and optional `note`.
+    """
+    sid = str(spec.get("id", "unknown"))
+    src = (spec.get("params") or {}).get("pythonPredicate") or spec.get("pythonPredicate")
+    if not src:
+        return {
+            "id": sid,
+            "checked": False,
+            "ok": False,
+            "violations": [
+                {
+                    "constraintId": sid,
+                    "kind": "custom_dsl",
+                    "message": "Thiếu pythonPredicate",
+                }
+            ],
+            "note": "predicate_missing",
+        }
+    unsafe_reason = _predicate_is_unsafe(src)
+    if unsafe_reason is not None:
+        return {
+            "id": sid,
+            "checked": False,
+            "ok": False,
+            "violations": [
+                {
+                    "constraintId": sid,
+                    "kind": "custom_dsl",
+                    "message": f"Predicate unsafe: {unsafe_reason}",
+                }
+            ],
+            "note": "predicate_unsafe",
+        }
+    safe_builtins = {
+        "len": len, "range": range, "sum": sum, "min": min, "max": max,
+        "sorted": sorted, "set": set, "list": list, "dict": dict, "tuple": tuple,
+        "frozenset": frozenset, "any": any, "all": all, "abs": abs, "round": round,
+        "int": int, "str": str, "bool": bool, "float": float,
+        "enumerate": enumerate, "zip": zip, "map": map, "filter": filter,
+        "isinstance": isinstance,
+    }
+    try:
+        ns: dict[str, Any] = {}
+        exec(src, {"__builtins__": safe_builtins}, ns)  # noqa: S102
+        fn = ns.get("check")
+        if not callable(fn):
+            raise ValueError("pythonPredicate phải định nghĩa def check(schedule)")
+        # Run with a coarse wall-clock timeout.
+        old_handler = _signal.getsignal(_signal.SIGALRM) if hasattr(_signal, "SIGALRM") else None
+        if hasattr(_signal, "SIGALRM"):
+            _signal.signal(_signal.SIGALRM, _predicate_timeout_handler)
+            _signal.alarm(_PREDICATE_TIMEOUT_SECONDS)
+        try:
+            raw = fn(schedule)
+        finally:
+            if hasattr(_signal, "SIGALRM"):
+                _signal.alarm(0)
+                if old_handler is not None:
+                    _signal.signal(_signal.SIGALRM, old_handler)
+        if isinstance(raw, bool):
+            viol = (
+                []
+                if raw
+                else [
+                    {
+                        "constraintId": sid,
+                        "kind": "custom_dsl",
+                        "message": "Predicate trả về False",
+                    }
+                ]
+            )
+        else:
+            viol = [
+                {"constraintId": sid, "kind": "custom_dsl", "message": str(v)}
+                for v in (raw or [])
+            ]
+        return {"id": sid, "checked": True, "ok": len(viol) == 0, "violations": viol}
+    except TimeoutError:
+        return {
+            "id": sid,
+            "checked": False,
+            "ok": False,
+            "violations": [
+                {
+                    "constraintId": sid,
+                    "kind": "custom_dsl",
+                    "message": f"Predicate exceeded {_PREDICATE_TIMEOUT_SECONDS}s",
+                }
+            ],
+            "note": "predicate_timeout",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "id": sid,
+            "checked": False,
+            "ok": False,
+            "violations": [
+                {
+                    "constraintId": sid,
+                    "kind": "custom_dsl",
+                    "message": f"Predicate error: {exc}",
+                }
+            ],
+            "note": "predicate_error",
+        }
