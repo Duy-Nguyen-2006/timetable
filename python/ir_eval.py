@@ -154,8 +154,13 @@ def expand_domain(domain: Any, env: dict[str, Any]) -> list:
 
 
 def resolve_var_ref(var_ref: str, env: dict[str, Any]) -> Any:
-    """Resolve $var or $var+N / $var-N against env."""
-    if not var_ref.startswith("$"):
+    """Resolve $var or $var+N / $var-N against env.
+
+    For label variables (e.g. $d → "mon", $t → "Sơn"), we resolve to the label
+    value as-is. For numeric variables (e.g. $p → 1, $p+1 → 2), we apply the
+    offset.
+    """
+    if not isinstance(var_ref, str) or not var_ref.startswith("$"):
         return var_ref
     rest = var_ref[1:]
     offset = 0
@@ -173,10 +178,14 @@ def resolve_var_ref(var_ref: str, env: dict[str, Any]) -> Any:
         var_name = rest
         offset = 0
     val = env.get(var_name, var_ref)
+    if val == var_ref:
+        return var_ref
+    # Try to apply arithmetic (assumes val is int or int-string).
+    # If val is a label like "mon", int() raises — return val as-is.
     try:
         return int(val) + offset
     except (TypeError, ValueError):
-        return var_ref
+        return val
 
 
 # -----------------------------------------------------------------------------------------

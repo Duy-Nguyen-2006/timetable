@@ -1,18 +1,23 @@
 /**
  * Constraint contract parity check.
  *
- * Verifies that every CHECKED `ConstraintKind` in `constraint-registry.ts`
- * has matching coverage in:
- *   1. `python/templates/solver_skeleton.py` (encoder branch in
- *      `is_slot_allowed` or `build_custom_constraints`).
- *   2. `src/features/timetable/ai/deterministic-validator.ts` (entry in
- *      the `checkerByKind` dispatch map).
- *   3. `tests/fixtures/validator/` (at least one golden fixture exercises
- *      a schedule the validator can verify).
+ * Phase 4 (IR + dual-backend architecture): verifies that every kind in
+ * `constraint-registry.ts` has matching coverage in BOTH backends, and that
+ * every IR node type used in `python/macros.py` has matching handlers in
+ * `python/ir_compiler.py` AND `python/ir_eval.py`. This prevents
+ * "checked but not encoded" drift and one-sided backend implementation drift.
  *
- * Why: the same constraint semantics are encoded in 4 places (TS registry,
- * Python skeleton, TS validator, translator prompt). Without an automated
- * check, drift between them silently corrupts the solve path.
+ * Checks performed:
+ *   1. Every kind in `SOLVER_ENCODABLE_KIND_LIST` has either:
+ *      (a) a string-literal branch in `python/templates/solver_skeleton.py`, OR
+ *      (b) an `if kind == "..."` branch in `python/macros.py`
+ *   2. Every IR node type (and, or, not, implies, iff, exists, forall,
+ *      atLeast, atMost, exactly, compare, consecutive, count) is handled
+ *      in BOTH `python/ir_compiler.py` AND `python/ir_eval.py`.
+ *   3. Every IR atom type (teaches, teachesOnDay, classSubjectAt,
+ *      classBusy, assigned, const) is handled in BOTH backends.
+ *   4. Every kind with `hasChecker=true` in the registry has a
+ *      `checkerByKind` entry in `deterministic-validator.ts` (legacy).
  *
  * Run locally:
  *   npx tsx scripts/check_constraint_parity.ts
@@ -41,6 +46,9 @@ const VALIDATOR_PATH = path.join(
 );
 const FIXTURES_DIR = path.join(REPO_ROOT, 'tests', 'fixtures', 'validator');
 const TRANSLATOR_PROMPT_PATH = path.join(REPO_ROOT, 'prompts', 'translator.system.md');
+const MACROS_PATH = path.join(REPO_ROOT, 'python', 'macros.py');
+const IR_COMPILER_PATH = path.join(REPO_ROOT, 'python', 'ir_compiler.py');
+const IR_EVAL_PATH = path.join(REPO_ROOT, 'python', 'ir_eval.py');
 
 type Issue = {
   kind: string;
@@ -68,13 +76,39 @@ function findBranchInSkeleton(skeleton: string, kind: string): boolean {
   // Skeleton checks `spec.get("kind")` or `kind ==` against string literals.
   const literal = `"${kind}"`;
   if (skeleton.includes(literal)) return true;
-  // Some kinds are handled via a grouped dispatch (e.g. teacher_* share a
-  // branch). That's still acceptable as long as the literal appears.
   return false;
+}
+
+function findBranchInMacros(macros: string, kind: string): boolean {
+  // Macros uses `if kind == "<name>":` form. We accept the literal anywhere.
+  const literal = `kind == "${kind}"`;
+  return macros.includes(literal);
 }
 
 function findMentionInTranslatorPrompt(prompt: string, kind: string): boolean {
   return prompt.includes(`\`${kind}\``) || prompt.includes(`"${kind}"`) || prompt.includes(kind);
+}
+
+/**
+ * Check that a list of IR node types are handled in a Python file.
+ * Heuristic: each node type should appear as either a function arg or
+ * an `if "<node>" in expr:` check or a `dict.get("<node>")` call.
+ */
+function findIRNodeHandler(source: string, nodeType: string): boolean {
+  // Direct handlers: `if "<node>" in expr`, `expr["<node>"]`, `expr.get("<node>")`,
+  // or `if "<node>" in c:`, `c["<node>"]`, etc.
+  const patterns = [
+    new RegExp(`["']${nodeType}["']\\s+in\\s+`, 'g'),
+    new RegExp(`\\["${nodeType}"\\]`, 'g'),
+    new RegExp(`\\.get\\(["']${nodeType}["']`, 'g'),
+    new RegExp(`if\\s+["']${nodeType}["']`, 'g'),
+    new RegExp(`["']${nodeType}["']\\s*:`),
+  ];
+  return patterns.some((p) => p.test(source));
+}
+
+function findIRAtomHandler(source: string, atomType: string): boolean {
+  return findIRNodeHandler(source, atomType);
 }
 
 function loadFixtureKinds(): Set<string> {
@@ -96,6 +130,18 @@ function loadFixtureKinds(): Set<string> {
   return set;
 }
 
+const IR_BOOL_NODES = [
+  'and', 'or', 'not', 'implies', 'iff',
+  'exists', 'forall',
+  'atLeast', 'atMost', 'exactly',
+  'compare', 'consecutive',
+];
+
+const IR_INT_NODES = ['count', 'sum', 'scale'];
+const IR_ATOMS = [
+  'teaches', 'teachesOnDay', 'classSubjectAt', 'classBusy', 'assigned', 'const',
+];
+
 function main() {
   const strict = process.argv.includes('--strict');
   const full = process.argv.includes('--full');
@@ -104,21 +150,76 @@ function main() {
   const translatorPrompt = existsSync(TRANSLATOR_PROMPT_PATH)
     ? readFileSync(TRANSLATOR_PROMPT_PATH, 'utf8')
     : '';
+  const macros = readIfExists(MACROS_PATH);
+  const irCompiler = readIfExists(IR_COMPILER_PATH);
+  const irEval = readIfExists(IR_EVAL_PATH);
   const fixtureKinds = loadFixtureKinds();
 
   const issues: Issue[] = [];
   const checkedKinds = [...CHECKED_KINDS];
   const solverKinds = [...SOLVER_ENCODABLE_KIND_LIST];
 
+  // === Check 1: Every SOLVER_ENCODABLE_KIND_LIST kind has skeleton OR macros coverage ===
   for (const kind of solverKinds) {
-    if (!findBranchInSkeleton(skeleton, kind)) {
+    const inSkeleton = findBranchInSkeleton(skeleton, kind);
+    const inMacros = findBranchInMacros(macros, kind);
+    if (!inSkeleton && !inMacros) {
       issues.push({
         kind,
-        reason: `solver-encodable kind has no branch (string literal) in solver_skeleton.py`,
+        reason: `solver-encodable kind has no branch in solver_skeleton.py AND no expansion in python/macros.py`,
       });
     }
   }
 
+  // === Check 2: Every IR BoolExpr node has handlers in BOTH backends ===
+  for (const node of IR_BOOL_NODES) {
+    if (!findIRNodeHandler(irCompiler, node)) {
+      issues.push({
+        kind: `ir_node:${node}`,
+        reason: `IR BoolExpr node "${node}" missing handler in python/ir_compiler.py (compile backend)`,
+      });
+    }
+    if (!findIRNodeHandler(irEval, node)) {
+      issues.push({
+        kind: `ir_node:${node}`,
+        reason: `IR BoolExpr node "${node}" missing handler in python/ir_eval.py (eval backend) — parity broken`,
+      });
+    }
+  }
+
+  // === Check 3: Every IR IntExpr node has handlers in BOTH backends ===
+  for (const node of IR_INT_NODES) {
+    if (!findIRNodeHandler(irCompiler, node)) {
+      issues.push({
+        kind: `ir_node:${node}`,
+        reason: `IR IntExpr node "${node}" missing handler in python/ir_compiler.py`,
+      });
+    }
+    if (!findIRNodeHandler(irEval, node)) {
+      issues.push({
+        kind: `ir_node:${node}`,
+        reason: `IR IntExpr node "${node}" missing handler in python/ir_eval.py`,
+      });
+    }
+  }
+
+  // === Check 4: Every IR atom has handlers in BOTH backends ===
+  for (const atom of IR_ATOMS) {
+    if (!findIRAtomHandler(irCompiler, atom)) {
+      issues.push({
+        kind: `ir_atom:${atom}`,
+        reason: `IR atom "${atom}" missing handler in python/ir_compiler.py`,
+      });
+    }
+    if (!findIRAtomHandler(irEval, atom)) {
+      issues.push({
+        kind: `ir_atom:${atom}`,
+        reason: `IR atom "${atom}" missing handler in python/ir_eval.py`,
+      });
+    }
+  }
+
+  // === Check 5 (legacy): hasChecker=true kinds still need validator entries ===
   for (const meta of CONSTRAINT_REGISTRY) {
     if (!meta.hasChecker) continue;
     if (!findCheckerInValidator(validator, meta.kind)) {
@@ -142,17 +243,20 @@ function main() {
   }
 
   // Print report.
-  console.log(`[parity] ${checkedKinds.length} checked kinds, ${solverKinds.length} solver-encodable kinds across ${CONSTRAINT_REGISTRY.length} registry entries`);
+  console.log(
+    `[parity] ${checkedKinds.length} checked kinds, ${solverKinds.length} solver-encodable kinds across ${CONSTRAINT_REGISTRY.length} registry entries`
+  );
+  console.log(
+    `[parity] IR nodes: ${IR_BOOL_NODES.length} bool + ${IR_INT_NODES.length} int = ${IR_BOOL_NODES.length + IR_INT_NODES.length}; IR atoms: ${IR_ATOMS.length}`
+  );
 
   if (issues.length === 0) {
-    console.log('[parity] OK — solver-encodable kinds have skeleton coverage and CHECKED kinds have validator coverage.');
+    console.log(
+      '[parity] OK — every kind has skeleton/macros coverage, every IR node has matching compile+eval handlers.'
+    );
     return;
   }
 
-  // Default: warn-only (informational). Useful to surface drift without
-  // blocking PRs on legacy drift that hasn't been fixed yet.
-  // --strict: fail on any drift. Use this once drift has been resolved
-  // (or to gate a specific PR that fixes a subset).
   console.error(`[parity] drift detected — ${issues.length} issue(s):`);
   for (const issue of issues) {
     console.error(`  - ${issue.kind}: ${issue.reason}`);

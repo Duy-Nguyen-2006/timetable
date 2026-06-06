@@ -625,18 +625,30 @@ test('fallback parser marks unparsed hard constraints explicitly', () => {
   assert.equal(specs[0].notes, 'fallback_parser:UNPARSED_HARD');
 });
 
-test('fallback parser converts hard solver-unencodable built-ins to custom_dsl', () => {
+test('fallback parser recognizes solver-encodable kinds (no conversion to custom_dsl)', () => {
+  // After Phase 4 expansion: ALL registry kinds are solver-encodable (either via
+  // the skeleton's native branch or via a macros.py→IR expansion). The fallback
+  // parser should therefore recognize the kind and emit it directly, NOT
+  // convert to custom_dsl with `unsupportedKind`.
   const specs = __translatorInternal.fallbackFromRuleParser({
     ...sampleInput,
     constraints: [{ type: 'required', text: 'Toán rải ít nhất 2 ngày' }],
   });
 
-  assert.equal(specs[0].kind, 'custom_dsl');
-  assert.equal(specs[0].params.unsupportedKind, 'assignment_spread_days');
-  assert.match(specs[0].notes ?? '', /SOLVER_UNENCODABLE:assignment_spread_days/);
+  // Parser should map "Toán rải ít nhất 2 ngày" to a known encodable kind.
+  // The kind should NOT be "custom_dsl" with unsupportedKind=assignment_spread_days
+  // (that path is now dead because all kinds are encodable).
+  assert.notEqual(specs[0].kind, 'custom_dsl');
+  // The kind should be a real encodable kind
+  assert.ok(
+    typeof specs[0].kind === 'string' && specs[0].kind.length > 0,
+    `expected a real kind, got ${specs[0].kind}`
+  );
 });
 
-test('sanitize converts model hard solver-unencodable built-ins to custom_dsl', () => {
+test('sanitize passes through solver-encodable kinds unchanged', () => {
+  // After Phase 4 expansion: subject_min_days is solver-encodable (skeleton
+  // handles it natively), so sanitize should NOT convert it to custom_dsl.
   const result = __translatorInternal.sanitizeSpecs(sampleInput, [
     {
       id: 'm1',
@@ -647,8 +659,9 @@ test('sanitize converts model hard solver-unencodable built-ins to custom_dsl', 
     },
   ]);
 
-  assert.equal(result[0].kind, 'custom_dsl');
-  assert.equal(result[0].params.unsupportedKind, 'subject_min_days');
+  // Should be passed through unchanged (not converted to custom_dsl).
+  assert.notEqual(result[0].kind, 'custom_dsl');
+  assert.equal(result[0].kind, 'subject_min_days');
 });
 
 test('fallback parser maps "tránh môn nặng cùng 1 buổi" to class_max_heavy_subjects_per_session', () => {

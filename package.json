@@ -22,6 +22,7 @@
     "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "pipeline:smoke": "tsx scripts/pipeline_smoke_test.ts",
     "executor:check": "node scripts/post-build.mjs",
+    "check:parity": "tsx scripts/check_constraint_parity.ts --strict",
     "lint": "eslint .",
     "build:executor": "node scripts/build_executor.mjs",
     "build:executor:mac": "node scripts/build_executor.mjs",

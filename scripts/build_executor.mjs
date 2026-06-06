@@ -76,11 +76,16 @@ if (ortoolsCheck.status !== 0) {
 console.log(`[build_executor] ortools ${String(ortoolsCheck.stdout).trim()} via ${python}`)
 
 const sep = process.platform === 'win32' ? ';' : ':'
-// Bundle the python sources the executor imports at runtime (sandbox/, templates).
+// Bundle the python sources the executor imports at runtime (sandbox/, templates, IR modules).
 const addData = [
   `${path.join(root, 'sandbox')}${sep}sandbox`,
   `${path.join(root, 'python', 'validator_engine.py')}${sep}.`,
   `${path.join(root, 'python', 'templates')}${sep}templates`,
+  `${path.join(root, 'python', 'ir_compiler.py')}${sep}.`,
+  `${path.join(root, 'python', 'ir_eval.py')}${sep}.`,
+  `${path.join(root, 'python', 'ir_schema.py')}${sep}.`,
+  `${path.join(root, 'python', 'ir_derived.py')}${sep}.`,
+  `${path.join(root, 'python', 'macros.py')}${sep}.`,
 ]
 
 const hiddenImports = [

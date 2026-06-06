@@ -215,8 +215,12 @@ def resolve_var_ref(var_ref: str, env: dict[str, Any]) -> Any:
 
     var_ref is the raw string (e.g. "$p+1"). env maps var names to their values.
     Supports simple arithmetic: "$var+N" or "$var-N" where N is a small integer.
+
+    For label variables (e.g. $d → "mon", $t → "Sơn"), we resolve to the label
+    value as-is. For numeric variables (e.g. $p → 1, $p+1 → 2), we apply the
+    offset.
     """
-    if not var_ref.startswith("$"):
+    if not isinstance(var_ref, str) or not var_ref.startswith("$"):
         return var_ref
 
     rest = var_ref[1:]
@@ -236,11 +240,16 @@ def resolve_var_ref(var_ref: str, env: dict[str, Any]) -> Any:
         offset = 0
 
     val = env.get(var_name, var_ref)
-    # Try to apply arithmetic
+    if val == var_ref:
+        # env didn't have the var
+        return var_ref
+
+    # Try to apply arithmetic (assumes val is int or int-string).
+    # If val is a label like "mon", int() raises — return val as-is.
     try:
         return int(val) + offset
     except (TypeError, ValueError):
-        return var_ref
+        return val
 
 
 # -----------------------------------------------------------------------------------------

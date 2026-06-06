@@ -2,6 +2,12 @@ import json
 import os as _os
 from ortools.sat.python import cp_model
 
+# Bump SOLVER_TEMPLATE_VERSION when the skeleton adds/removes/changes hard
+# constraint encoding paths. Increment major when adding new kinds, minor for
+# bug fixes. The Node-side pipeline-versions.ts reads this through
+# sync_solver_template.mjs — keep the strings in sync.
+SOLVER_TEMPLATE_VERSION = "1.5.0"
+
 with open("input.json", encoding="utf-8") as f:
     data = json.load(f)
 
@@ -1144,10 +1150,50 @@ def build_custom_constraints(model, slots, data):
                 f"Unsupported HARD constraint kind in solver skeleton: {kind} (id={spec.get('id')})"
             )
 
+    # === IR Compiler path (Phase 4) ===
+    # Compiles any constraint with an `expr` field (IR form) into CP-SAT constraints
+    # using the same dual-backend architecture as ir_compiler.py. This is deterministic
+    # and does NOT depend on LLM-generated code.
+    # If the IR modules are not bundled in the executor, this block is silently skipped
+    # and the legacy 25-kind native path takes over.
+    _ir_specs = [s for s in constraints if isinstance(s.get("expr"), dict)]
+    if _ir_specs:
+        try:
+            from ir_compiler import compile_constraint, DerivedVars as _DV  # type: ignore
+            from ir_eval import eval_constraint as _eval_ir  # type: ignore
+        except ImportError:
+            try:
+                # Fallback: try the local modules if available
+                from python.ir_compiler import compile_constraint, DerivedVars as _DV  # type: ignore
+                from python.ir_eval import eval_constraint as _eval_ir  # type: ignore
+            except ImportError:
+                compile_constraint = None
+                _DV = None
+                _eval_ir = None
+        if compile_constraint is not None and _DV is not None:
+            _ir_env = {
+                "days": days,
+                "periods": periods,
+                "classes": classes,
+                "teachers": list({a["teacher"] for a in assignments}),
+                "subjects": list({a["subject"] for a in assignments}),
+            }
+            _dv = _DV(model, slots, assignments)
+            _ir_penalty = []
+            for _ir_spec in _ir_specs:
+                try:
+                    compile_constraint(model, _ir_spec, _dv, _ir_env, _ir_penalty)
+                except Exception as _ir_exc:
+                    # Don't crash solve on IR compile error; surface as unsupported.
+                    unsupported_soft_kinds.append(_ir_spec.get("id", _ir_spec.get("kind", "ir")))
+            # Add IR penalty terms to the global soft_terms
+            for _w, _v in _ir_penalty:
+                soft_terms.append((int(_w), _v))
+
     # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
     # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
     # nên để generated code tự quyết định no-op khi không có custom hard specs.
-    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard"]
+    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard" and not isinstance(s.get("expr"), dict) and not (s.get("params", {}) or {}).get("pythonPredicate")]
     # <<< AI_FILL_HERE >>>
     pass
 

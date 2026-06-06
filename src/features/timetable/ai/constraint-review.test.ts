@@ -225,7 +225,10 @@ test('preflight allows when hard confirmed', () => {
   assert.equal(result.canSolve, true);
 });
 
-test('preflight blocks confirmed hard specs that checker can validate but solver cannot encode', () => {
+test('preflight passes confirmed hard specs that are now solver-encodable', () => {
+  // After Phase 4: ALL registry kinds are solver-encodable (skeleton handles
+  // them natively or macros.py expands them to IR). The preflight should NOT
+  // block a confirmed hard `subject_min_days` spec anymore.
   const raw: RawConstraintInput[] = [
     { id: 'r1', text: 'Toán rải ít nhất 2 ngày', type: 'required', createdAt: new Date().toISOString() },
   ];
@@ -251,9 +254,9 @@ test('preflight blocks confirmed hard specs that checker can validate but solver
 
   const result = assertSolvableConstraintState(raw, [], confirmed);
 
-  assert.equal(result.canSolve, false);
-  assert.ok(result.blockReasons.includes('hard_spec_unchecked'));
-  assert.match(result.messages.join('\n'), /chưa mã hoá được vào solver/);
+  // After Phase 4 expansion, subject_min_days is encodable — no block.
+  assert.equal(result.canSolve, true);
+  assert.ok(!result.blockReasons.includes('hard_spec_unchecked'));
 });
 
 test('humanizeDraft empty specs', () => {
