@@ -18,9 +18,9 @@ Remote: `https://github.com/Duy-Nguyen-2006/timetable.git`
 | **Tier 1** validation-blockers | ✅ Done (commit `25b9c31`) | tsc/lint/tests pass, smoke OK |
 | **scrutiny-validator-tier1** | 🟡 in_progress | Awaiting completion review |
 | **Tier 2** schema-decompose | ✅ Done (commit `d8c7eec`) | tsc/lint/213 tests pass |
-| **Tier 3** predicate-exec | ✅ Done (commit sắp tới) | tsc/lint/213 TS + 13 Python tests pass |
-| **Tier 4** interpretation-card | ⏳ pending | Chưa bắt đầu |
-| **Tier 4** pattern-cache | ⏳ pending | Chưa bắt đầu |
+| **Tier 3** predicate-exec | ✅ Done (commit `9fe0c63`) | tsc/lint/213 TS + 13 Python tests pass |
+| **Tier 4** interpretation-card | ✅ Done (commit `99b29b3`) | tsc/lint pass |
+| **Tier 4** pattern-cache | ✅ Done (commit sắp tới) | tsc/lint/223 tests pass |
 | **cross-tier** integration | ⏳ pending | Chưa bắt đầu |
 | **user-testing-validator-tier1** | ⏳ pending | Sau khi Tier 1 review xong |
 
@@ -172,7 +172,15 @@ b954925 chore(harness): upgrade harness-cli to v0.1.8
 - Resilience: unparseable JSON → null, quota-exceeded → false
 
 ### 6.4 Trạng thái hiện tại
-- ⏳ **PENDING** — chờ Tier 4 interpretation-card
+- ✅ **DONE**
+  - ✅ `constraint-pattern-cache.ts` với localStorage key `tt:constraint-pattern-cache:v1`
+  - ✅ Jaccard similarity với threshold 0.8 trên whitespace + diacritic-normalized tokens
+  - ✅ LRU eviction ở 200 entries
+  - ✅ Resilience: unparseable JSON → null, unknown version → null, unknown kind → drop entry, quota-exceeded → false (with auto-trim fallback)
+  - ✅ APIs: `lookup`, `store`, `clear`, `size`
+  - ✅ Test IDs constants: `cache-hit-badge`, `data-cache-source` (sẽ dùng khi render UI)
+  - ✅ 10 tests pass, 223 total TS tests pass
+  - ⏳ Live UI integration (consult BEFORE rule parser + write on confirm) — sẽ wire trong cross-tier
 
 ---
 
@@ -228,5 +236,7 @@ Mỗi feature implementation sẽ theo các bước:
 | 2026-06-06 | Walkthrough.md created | `2ae707f` |
 | 2026-06-06 | 2 commits pushed (Tier 1: rule-parser-fix, validation-blockers) | `25b9c31`, `7aebdce` |
 | 2026-06-06 | Tier 2: 3 new ConditionExpr ops, humanizer, retry logic, tests | `d8c7eec` |
-| 2026-06-06 | Tier 3: pythonPredicate exec, AST safety, timeout, prompts | (sắp commit) |
-| ... | Tier 4 sẽ tiếp tục ở đây | TBD |
+| 2026-06-06 | Tier 3: pythonPredicate exec, AST safety, timeout, prompts | `9fe0c63` |
+| 2026-06-06 | Tier 4 interpretation-card | `99b29b3` |
+| 2026-06-06 | Tier 4 pattern-cache (localStorage Jaccard cache) | (sắp commit) |
+| ... | cross-tier sẽ tiếp tục ở đây | TBD |
