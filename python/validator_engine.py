@@ -455,6 +455,68 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
     return []
 
 
+def _verify_ir(
+    spec: dict[str, Any],
+    schedule: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Verify an IR constraint (Backend 2) using ir_eval.
+
+    This is the Python verification counterpart to ir_compiler (Backend 1).
+    Both backends share the same IR, guaranteeing enforce == verify.
+    """
+    try:
+        from ir_eval import eval_constraint
+    except ImportError:
+        # ir_eval not available (e.g. in bundled executor without ir modules)
+        return {
+            "id": spec.get("id", "unknown"),
+            "checked": False,
+            "ok": False,
+            "violations": [
+                {
+                    "constraintId": spec.get("id", "unknown"),
+                    "kind": "ir_constraint",
+                    "message": "ir_eval module not available",
+                }
+            ],
+            "note": "ir_eval_unavailable",
+        }
+
+    sid = str(spec.get("id", "unknown"))
+    try:
+        ok = eval_constraint(spec, schedule, assignments)
+        if ok:
+            return {"id": sid, "checked": True, "ok": True, "violations": []}
+        else:
+            return {
+                "id": sid,
+                "checked": True,
+                "ok": False,
+                "violations": [
+                    {
+                        "constraintId": sid,
+                        "kind": "ir_constraint",
+                        "message": spec.get("explain", spec.get("original", "IR constraint violated")),
+                    }
+                ],
+            }
+    except Exception as exc:
+        return {
+            "id": sid,
+            "checked": False,
+            "ok": False,
+            "violations": [
+                {
+                    "constraintId": sid,
+                    "kind": "ir_constraint",
+                    "message": f"IR eval error: {exc}",
+                }
+            ],
+            "note": "ir_eval_error",
+        }
+
+
 def validate_schedule(
     schedule: list[dict[str, Any]],
     constraint_specs: list[dict[str, Any]],
@@ -485,6 +547,15 @@ def validate_schedule(
                 note = check_result.get("note") or "predicate_unverified"
                 unchecked_notes[sid] = note
             continue
+
+        # IR constraint: has expr field → verify using ir_eval (Backend 2)
+        if "expr" in spec and isinstance(spec["expr"], dict):
+            ir_check = _verify_ir(spec, schedule, assignments)
+            if not ir_check.get("ok", False):
+                for viol in ir_check.get("violations", []) or []:
+                    violations.append(viol)
+            continue
+
         violations.extend(_check_single(spec, schedule))
 
     hard_ids = {spec.get("id") for spec in constraint_specs if spec.get("severity") == "hard"}
