@@ -473,7 +473,7 @@ def validate_schedule(
             continue
         if kind == "custom_dsl":
             sid = str(spec.get("id", "unknown"))
-            check_result = _verify_python_predicate(spec, schedule)
+            check_result = _verify_python_predicate(spec, schedule, assignments)
             custom_checks.append(check_result)
             if check_result.get("checked"):
                 # Predicate ran; surface its output as violations.
@@ -494,11 +494,12 @@ def validate_schedule(
         v for v in violations if v.get("kind") == "base_constraint" or v.get("constraintId") in hard_ids
     ]
     soft_violations = [v for v in violations if v.get("constraintId") in soft_ids]
+    hard_unchecked = [cid for cid in unchecked if cid in hard_ids]
 
     return {
-        "ok": len(violations) == 0,
+        "ok": len(violations) == 0 and len(hard_unchecked) == 0,
         "baseConstraintPass": len(base_violations) == 0,
-        "hardConstraintPass": len(hard_violations) == 0,
+        "hardConstraintPass": len(hard_violations) == 0 and len(hard_unchecked) == 0,
         "softConstraintPass": len(soft_violations) == 0,
         "violations": violations,
         "hardViolations": hard_violations,
@@ -514,7 +515,7 @@ def validate_schedule(
 # validation matches solver-time gating (Tier 3 — VAL-T3-006).
 _PREDICATE_FORBIDDEN_NAMES = {
     "open", "exec", "eval", "__import__", "compile", "input",
-    "breakpoint", "globals", "locals", "vars", "print",
+    "breakpoint", "globals", "locals", "vars", "print", "__builtins__",
 }
 _PREDICATE_FORBIDDEN_ATTRS = {
     "__import__", "__builtins__", "__class__", "__bases__",
@@ -525,12 +526,13 @@ _PREDICATE_ALLOWED_LOAD_NAMES = {
     "frozenset", "sum", "min", "max", "sorted", "reversed", "round",
     "divmod", "zip", "map", "filter", "enumerate", "isinstance",
     "bool", "float", "abs", "all", "any", "ValueError",
+    "NameError", "TypeError", "ZeroDivisionError",
     "NotImplementedError", "schedule", "assignments",
 }
 
+import inspect as _inspect
 import ast as _ast
 import signal as _signal
-import time as _time
 
 _PREDICATE_TIMEOUT_SECONDS = 5
 
@@ -565,6 +567,8 @@ def _predicate_is_unsafe(src: str) -> str | None:
             if node.attr in _PREDICATE_FORBIDDEN_ATTRS:
                 return f"Forbidden attribute '{node.attr}' at line {node.lineno}"
         if isinstance(node, _ast.Name) and isinstance(node.ctx, _ast.Load):
+            if node.id in _PREDICATE_FORBIDDEN_NAMES:
+                return f"Forbidden name '{node.id}' at line {node.lineno}"
             if (
                 node.id not in _PREDICATE_ALLOWED_LOAD_NAMES
                 and node.id not in local_names
@@ -578,7 +582,18 @@ def _predicate_timeout_handler(_signum, _frame):
     raise TimeoutError("predicate_timeout")
 
 
-def _verify_python_predicate(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> dict[str, Any]:
+def _accepts_single_schedule_arg(fn) -> bool:
+    try:
+        return len(_inspect.signature(fn).parameters) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+def _verify_python_predicate(
+    spec: dict[str, Any],
+    schedule: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Execute pythonPredicate for a custom_dsl spec; never raises.
 
     Returns a dict with `checked` (bool), `violations` (list), and optional `note`.
@@ -627,14 +642,20 @@ def _verify_python_predicate(spec: dict[str, Any], schedule: list[dict[str, Any]
         exec(src, {"__builtins__": safe_builtins}, ns)  # noqa: S102
         fn = ns.get("check")
         if not callable(fn):
-            raise ValueError("pythonPredicate phải định nghĩa def check(schedule)")
+            raise ValueError("pythonPredicate phải định nghĩa def check(schedule, assignments)")
         # Run with a coarse wall-clock timeout.
         old_handler = _signal.getsignal(_signal.SIGALRM) if hasattr(_signal, "SIGALRM") else None
         if hasattr(_signal, "SIGALRM"):
             _signal.signal(_signal.SIGALRM, _predicate_timeout_handler)
             _signal.alarm(_PREDICATE_TIMEOUT_SECONDS)
         try:
-            raw = fn(schedule)
+            try:
+                raw = fn(schedule, assignments)
+            except TypeError as exc:
+                if _accepts_single_schedule_arg(fn):
+                    raw = fn(schedule)
+                else:
+                    raise exc
         finally:
             if hasattr(_signal, "SIGALRM"):
                 _signal.alarm(0)

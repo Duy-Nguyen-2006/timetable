@@ -17,6 +17,7 @@ const PROMPTS = [
 const DIACRITIC_RE = /[ăâđêôơưĂÂĐÊÔƠƯáàảãạằẳẵặắấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵÁÀẢÃẠẰẲẴẶẮẤẦẨẪẬÉÈẺẼẸẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌỐỒỔỖỘỚỜỞỠỢÚÙỦŨỤỨỪỬỮỰÝỲỶỸỴ]/;
 const TEACHER_NAMES = ['Sơn', 'Hương', 'Trang', 'Thúy', 'Hòa', 'Thủy', 'Thìn', 'Dung', 'Lan', 'Minh', 'Hoa'];
 const MIN_DIACRITICS = 10;
+const ENGLISH_RUN_WORD_THRESHOLD = 50;
 
 function countDiacritics(text: string): number {
   let count = 0;
@@ -30,7 +31,6 @@ function findLongEnglishRuns(text: string): string[] {
   // Match runs of 50+ ASCII words (each word is A-Za-z only, no diacritics around).
   const lines = text.split('\n');
   const offenders: string[] = [];
-  let currentRun: string[] = [];
   for (const line of lines) {
     const tokens = line.split(/\s+/).filter(Boolean);
     let runInLine: string[] = [];
@@ -40,12 +40,11 @@ function findLongEnglishRuns(text: string): string[] {
       if (/^[A-Za-z]+$/.test(stripped)) {
         runInLine.push(tok);
       } else {
-        if (runInLine.length >= 12) offenders.push(runInLine.join(' '));
+        if (runInLine.length > ENGLISH_RUN_WORD_THRESHOLD) offenders.push(runInLine.join(' '));
         runInLine = [];
       }
     }
-    if (runInLine.length >= 12) offenders.push(runInLine.join(' '));
-    void currentRun;
+    if (runInLine.length > ENGLISH_RUN_WORD_THRESHOLD) offenders.push(runInLine.join(' '));
   }
   return offenders;
 }
@@ -61,7 +60,7 @@ function checkFile(file: string): { ok: boolean; issues: string[] } {
   }
   const englishRuns = findLongEnglishRuns(text);
   if (englishRuns.length > 0) {
-    issues.push(`Found ${englishRuns.length} long English paragraph(s) (≥12 ASCII words in a row): ${englishRuns[0]?.slice(0, 60)}…`);
+    issues.push(`Found ${englishRuns.length} long English paragraph(s) (>${ENGLISH_RUN_WORD_THRESHOLD} ASCII words in a row): ${englishRuns[0]?.slice(0, 60)}…`);
   }
   // Teacher names: at least 3 of the canonical names should appear in examples.
   const present = TEACHER_NAMES.filter((n) => text.includes(n));

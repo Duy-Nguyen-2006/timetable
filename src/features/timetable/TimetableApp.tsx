@@ -1923,8 +1923,15 @@ const handleDownloadExcel = useCallback(async () => {
                   <InterpretationCardSection
                     drafts={constraintDrafts}
                     confirmed={confirmedConstraints}
-                    onConfirmSpec={(rawId) => {
-                      confirmDraft(rawId, constraintDrafts)
+                    onConfirmSpec={(rawId, spec) => {
+                      const updatedDrafts = constraintDrafts.map((draft) =>
+                        draft.rawConstraintId === rawId ? { ...draft, proposedSpecs: [spec] } : draft
+                      )
+                      const updatedDraft = updatedDrafts.find((draft) => draft.rawConstraintId === rawId)
+                      if (updatedDraft) {
+                        updateDraft(updatedDraft)
+                        confirmDraft(rawId, updatedDrafts)
+                      }
                     }}
                     onEditSpec={(rawId, spec) => {
                       const existing = constraintDrafts.find((d) => d.rawConstraintId === rawId)

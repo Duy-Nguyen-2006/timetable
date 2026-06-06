@@ -68,7 +68,7 @@ def test_safe_predicate_false_returns_violation() -> None:
 
 
 def test_predicate_nameerror_does_not_silently_pass() -> None:
-    src = "def check(schedule):\n    return unknown_name  # NameError\n"
+    src = "def check(schedule):\n    raise NameError('missing value')\n"
     spec = _spec("c5", src)
     result = validate_schedule([], [spec])
     # Predicate errored → must NOT silently treat as satisfied.
@@ -93,11 +93,11 @@ def test_predicate_typeerror_does_not_silently_pass() -> None:
 
 
 def test_predicate_timeout_is_killed() -> None:
-    # A predicate that sleeps 10s must be killed by the 5s timeout bound.
+    # A predicate that loops forever must be killed by the 5s timeout bound.
     src = (
-        "import time\n"
         "def check(schedule):\n"
-        "    time.sleep(10)\n"
+        "    while True:\n"
+        "        pass\n"
         "    return True\n"
     )
     spec = _spec("c8", src)
@@ -118,11 +118,11 @@ FORBIDDEN_CASES = [
     ("locals", "locals()"),
     ("vars", "vars()"),
     ("print", "print('x')"),
-    ("__class__", "x = (1).__class__"),
-    ("__bases__", "x = (1).__class__.__bases__"),
-    ("__subclasses__", "x = (1).__class__.__subclasses__()"),
-    ("__mro__", "x = (1).__class__.__mro__"),
-    ("__builtins__", "x = __builtins__"),
+    ("__class__", "(1).__class__"),
+    ("__bases__", "(1).__class__.__bases__"),
+    ("__subclasses__", "(1).__class__.__subclasses__()"),
+    ("__mro__", "(1).__class__.__mro__"),
+    ("__builtins__", "__builtins__"),
 ]
 
 
