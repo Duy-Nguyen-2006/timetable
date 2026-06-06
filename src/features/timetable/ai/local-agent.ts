@@ -54,6 +54,33 @@ export async function runLocalAgent(
   config: LocalAgentConfig,
   options?: RunLocalAgentOptions
 ): Promise<RunLocalAgentResult> {
+  // Cross-tier (VAL-CROSS-012): missing code_executor binary must surface a Vietnamese
+  // error and prevent the solver from running silently.
+  if (typeof process !== 'undefined' && process.versions?.node) {
+    const candidates = [
+      'python-dist/linux/code_executor',
+      'python-dist/macos/code_executor',
+      'python-dist/win32/code_executor.exe',
+      'python-dist/code_executor',
+      'python-dist/code_executor.exe',
+    ];
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const repoRoot = process.cwd();
+    const found = candidates.some((rel) => {
+      try {
+        return fs.existsSync(path.join(repoRoot, rel));
+      } catch {
+        return false;
+      }
+    });
+    if (!found) {
+      const msg = 'đã có lỗi: code_executor binary missing. Chạy `npm run build:executor` để tạo lại.';
+      emit(config, { type: 'status', message: msg, iteration: 0, maxIterations: MAX_CODER_RETRIES });
+      return { success: false, error: msg };
+    }
+  }
+
   const runtime = resolveSolverRuntime(config);
   const timeoutMs = runtime.timeoutMs;
   const startedAt = Date.now();

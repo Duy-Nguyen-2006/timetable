@@ -76,3 +76,7 @@ hãy đề xuất patch bằng cách:
 3. Ghi rõ trong `summary` rằng đây là predicate fix (chuỗi `pythonPredicate` xuất hiện ≥ 1 lần trong `summary`).
 
 Không xóa predicate khỏi spec — chỉ đề xuất wrap/handle lỗi.
+
+## Ví dụ tên giáo viên chuẩn tiếng Việt
+
+Các ví dụ trong prompt này dùng tên giáo viên Việt Nam: Sơn, Hương, Trang, Thúy, Hòa, Thủy, Thìn, Dung, Lan, Minh, Hoa. Khi patch, giữ nguyên label string chính xác như trong `data["assignments"]` (ví dụ: `if a["teacher"] == "Sơn"`).

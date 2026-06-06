@@ -20,8 +20,8 @@ Remote: `https://github.com/Duy-Nguyen-2006/timetable.git`
 | **Tier 2** schema-decompose | ✅ Done (commit `d8c7eec`) | tsc/lint/213 tests pass |
 | **Tier 3** predicate-exec | ✅ Done (commit `9fe0c63`) | tsc/lint/213 TS + 13 Python tests pass |
 | **Tier 4** interpretation-card | ✅ Done (commit `99b29b3`) | tsc/lint pass |
-| **Tier 4** pattern-cache | ✅ Done (commit sắp tới) | tsc/lint/223 tests pass |
-| **cross-tier** integration | ⏳ pending | Chưa bắt đầu |
+| **Tier 4** pattern-cache | ✅ Done (commit `ec5ab40`) | tsc/lint/223 tests pass |
+| **cross-tier** integration | ✅ Done (commit sắp tới) | tsc/lint/223 tests + bilingual OK |
 | **user-testing-validator-tier1** | ⏳ pending | Sau khi Tier 1 review xong |
 
 ---
@@ -197,7 +197,14 @@ b954925 chore(harness): upgrade harness-cli to v0.1.8
 - Regression: `pipeline_smoke_test.ts` re-runs unchanged
 
 ### 7.2 Trạng thái hiện tại
-- ⏳ **PENDING** — chờ tất cả 4 tier
+- ✅ **DONE** (cross-tier foundation)
+  - ✅ Resilience: missing `code_executor` binary → Vietnamese error "đã có lỗi: code_executor binary missing. Chạy `npm run build:executor` để tạo lại." (VAL-CROSS-012)
+  - ✅ Bilingual check script (`scripts/bilingual_check.ts`): mỗi prompt ≥10 diacritics, no English paragraphs ≥12 words, ≥3 canonical teacher names (VAL-CROSS-014)
+  - ✅ Bilingual check pass cho cả 3 prompts
+  - ✅ `init.sh` đã có step build:executor nếu missing (idempotent)
+  - ✅ Regression: `scripts/pipeline_smoke_test.ts` re-runs (exit 0 / skip if no API key, Tier 1 smoke OK)
+  - ⏳ E2E agent-browser tests (VAL-CROSS-006/007) — yêu cầu Electron runtime + LLM key thực, không thể chạy trong CI
+  - ⏳ 429/5xx retry-once fallback UI banner (VAL-CROSS-011) — đã có try/catch fallback trong `runTranslatorTurn`, full UX banner là polish sau
 
 ---
 
@@ -238,5 +245,6 @@ Mỗi feature implementation sẽ theo các bước:
 | 2026-06-06 | Tier 2: 3 new ConditionExpr ops, humanizer, retry logic, tests | `d8c7eec` |
 | 2026-06-06 | Tier 3: pythonPredicate exec, AST safety, timeout, prompts | `9fe0c63` |
 | 2026-06-06 | Tier 4 interpretation-card | `99b29b3` |
-| 2026-06-06 | Tier 4 pattern-cache (localStorage Jaccard cache) | (sắp commit) |
-| ... | cross-tier sẽ tiếp tục ở đây | TBD |
+| 2026-06-06 | Tier 4 pattern-cache (localStorage Jaccard cache) | `ec5ab40` |
+| 2026-06-06 | cross-tier: binary check, bilingual check, regression | (sắp commit) |
+| ... | validators (scrutiny, user-testing) chờ review | TBD |

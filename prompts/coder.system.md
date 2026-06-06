@@ -57,6 +57,10 @@ for spec in custom_specs:
 
 Không dùng biến `spec`, `kind`, hoặc `params` nếu chưa tự khai báo trong loop của bạn.
 
+## Ví dụ tên giáo viên chuẩn tiếng Việt
+
+Các ví dụ và assertion trong prompt này dùng tên giáo viên Việt Nam: Sơn, Hương, Trang, Thúy, Hòa, Thủy, Thìn, Dung, Lan, Minh, Hoa. So sánh tên dùng label string chính xác như trong `data["assignments"]`.
+
 ## `pythonPredicate` inline (Tier 3)
 
 Khi một `custom_dsl` hard spec mang `params.pythonPredicate` (mã Python do LLM sinh ra từ translator),
