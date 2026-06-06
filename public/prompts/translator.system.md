@@ -205,9 +205,202 @@ type ConditionExpr =
 
 ```
 
+**Input:** `"Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1"` →
+```
+
+{
+
+"id":"c8", "original":"Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"and","args":[
+
+{"op":"teacher_teaches_at_slot","teacher":"Sơn","day":"mon","period":2},
+
+{"op":"teacher_teaches_at_slot","teacher":"Hương","day":"mon","period":2}
+
+]},
+
+"then":[{"kind":"teacher_block_slot","params":{"teacher":"Dung","day":"tue","period":1}}]
+
+}
+
+}
+
+```
+
+**Input:** `"Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3"` →
+```
+
+{
+
+"id":"c9", "original":"Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"teacher_teaches_at_slot","teacher":"Sơn","day":"mon","period":2},
+
+"then":[{"kind":"teacher_block_day","params":{"teacher":"Dung","day":"tue"}}]
+
+}
+
+}
+
+```
+
+**Input:** `"Nếu Sơn hoặc Hương dạy thứ 2 tiết 1 thì Dung không dạy thứ 3 tiết 2"` →
+```
+
+{
+
+"id":"c10", "original":"Nếu Sơn hoặc Hương dạy thứ 2 tiết 1 thì Dung không dạy thứ 3 tiết 2", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"or","args":[
+
+{"op":"teacher_teaches_at_slot","teacher":"Sơn","day":"mon","period":1},
+
+{"op":"teacher_teaches_at_slot","teacher":"Hương","day":"mon","period":1}
+
+]},
+
+"then":[{"kind":"teacher_block_slot","params":{"teacher":"Dung","day":"tue","period":2}}]
+
+}
+
+}
+
+```
+
+**Input:** `"Nếu không phải Sơn dạy thứ 2 tiết 2 thì Dung dạy thứ 3 tiết 1"` →
+```
+
+{
+
+"id":"c11", "original":"Nếu không phải Sơn dạy thứ 2 tiết 2 thì Dung dạy thứ 3 tiết 1", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"not","arg":{"op":"teacher_teaches_at_slot","teacher":"Sơn","day":"mon","period":2}},
+
+"then":[{"kind":"teacher_block_slot","params":{"teacher":"Dung","day":"tue","period":1}}]
+
+}
+
+}
+
+```
+
+**Input:** `"Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1, và ngược lại nếu Dung dạy thứ 3 tiết 1 thì Sơn không dạy thứ 2 tiết 2"` (implication 2 chiều → 2 if_then) →
+```
+
+[
+
+{
+
+"id":"c12a", "original":"...thì Dung không dạy thứ 3 tiết 1", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"teacher_teaches_at_slot","teacher":"Sơn","day":"mon","period":2},
+
+"then":[{"kind":"teacher_block_slot","params":{"teacher":"Dung","day":"tue","period":1}}]
+
+}
+
+},
+
+{
+
+"id":"c12b", "original":"...và ngược lại nếu Dung dạy thứ 3 tiết 1 thì Sơn không dạy thứ 2 tiết 2", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"teacher_teaches_at_slot","teacher":"Dung","day":"tue","period":1},
+
+"then":[{"kind":"teacher_block_slot","params":{"teacher":"Sơn","day":"mon","period":2}}]
+
+}
+
+}
+
+]
+
+```
+
+**Input:** `"Nếu lớp 6A học Toán thứ 2 tiết 2 thì Sơn không dạy thứ 3 tiết 1"` (scope per-class trong IF — dùng teacher_teaches_at_slot với điều kiện ràng buộc class qua class_pin_slot kết hợp; đơn giản nhất là `if_then` với `if: teacher_teaches_at_slot` cho Sơn, vì teacher chỉ dạy 1 lớp tại 1 slot) →
+```
+
+{
+
+"id":"c12", "original":"Nếu lớp 6A học Toán thứ 2 tiết 2 thì Sơn không dạy thứ 3 tiết 1", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"teacher_teaches_at_slot","teacher":"Sơn","day":"mon","period":2},
+
+"then":[{"kind":"teacher_block_slot","params":{"teacher":"Sơn","day":"tue","period":1}}]
+
+}
+
+}
+
+```
+
+**Input:** `"Nếu Sơn và Hương dạy thứ 2 thì Dung không dạy thứ 3"` (IF day-only, no period) →
+```
+
+{
+
+"id":"c13", "original":"Nếu Sơn và Hương dạy thứ 2 thì Dung không dạy thứ 3", "severity":"hard", "kind":"if_then",
+
+"params":{
+
+"if":{"op":"and","args":[
+
+{"op":"teacher_teaches_on_day","teacher":"Sơn","day":"mon"},
+
+{"op":"teacher_teaches_on_day","teacher":"Hương","day":"mon"}
+
+]},
+
+"then":[{"kind":"teacher_block_day","params":{"teacher":"Dung","day":"tue"}}]
+
+}
+
+}
+
+```
+
 ## Kiểm tra trước khi submit
 Trước khi gọi `submit_constraint_specs`, tự verify:
 - [ ] Số `ConstraintSpec` ≥ số mệnh đề độc lập trong input (tách `và`, `đồng thời`).
 - [ ] Mọi tên người/lớp/môn có trong `context`.
 - [ ] Mọi `day` là id (`mon`, `tue`, ...).
 - [ ] Không có field thừa ngoài schema.
+
+## Schema-decompose workflow (Tier 2)
+Khi gặp một câu ràng buộc phức tạp KHÔNG khớp 1 `kind` đơn lẻ nào ở trên, **đừng** rơi ngay vào `kind: "custom_dsl"`. Hãy thử **decompose** (phân rã) câu đó thành 2-4 `ConstraintSpec` được cấu thành từ taxonomy:
+
+```
+if_then + and/or/not + teacher_teaches_at_slot/on_day + pair_not_same_slot + teacher_block_slot/day
+```
+
+Quy trình:
+
+1. **Xác định trigger (IF)**: tìm mệnh đề điều kiện (`nếu`, `khi`, `trong trường hợp`, `nếu như`). Câu điều kiện gần như luôn chứa GV + (ngày | ngày+tiết). Dùng:
+   - `teacher_teaches_at_slot` khi có cả ngày VÀ tiết (`thứ 2 tiết 2`).
+   - `teacher_teaches_on_day` khi chỉ có ngày (`thứ 2`).
+2. **Xác định hành động (THEN)**: phần còn lại sau `thì`/`thi`. Có thể là 1 hoặc nhiều spec, ghép vào mảng `then`.
+3. **Nếu trigger có nhiều GV kết hợp** (`Sơn và Hương` → AND, `Sơn hoặc Hương` → OR, `không phải Sơn` → NOT), dùng `and` / `or` / `not` để bao các `ConditionExpr` con.
+4. **Nếu câu có 2 chiều** (A thì B, và B thì A) → tách thành 2 `if_then` riêng biệt.
+5. **Chỉ fallback `custom_dsl`** khi KHÔNG có cách nào compose từ taxonomy ở trên (ví dụ: yêu cầu phụ thuộc thuật toán phức tạp như "tổng tiết 2 tuần liên tiếp").
+
+Ví dụ decompose:
+- `"Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1"` → 1 spec `if_then` với `if: and` của 2 `teacher_teaches_at_slot`, `then: [teacher_block_slot]`.
+- `"Nếu Sơn dạy thứ 2 tiết 1 HOẶC Hương dạy thứ 3 tiết 2 thì cặp Sơn-Hương không cùng tiết ngày 4"` → 1 spec `if_then` với `if: or` của 2 `teacher_teaches_at_slot`, `then: [pair_not_same_slot]`.
+- `"Nếu A thì B và ngược lại nếu B thì A"` → 2 specs `if_then` riêng.
+
+**Quy tắc vàng**: prefer emitting 2-4 specs từ taxonomy hơn là 1 spec `custom_dsl` không-thi-hành-được.

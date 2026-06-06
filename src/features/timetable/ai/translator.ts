@@ -151,22 +151,23 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       const [ifClauseRaw, thenClauseRaw = ''] = constraint.text.split(/thì|thi/iu);
       const ifTeachers = teacherLabels.filter((label) => includesLabel(ifClauseRaw, label));
       const ifDay = extractDayId(ifClauseRaw, input.days);
+      const ifPeriod = extractPeriodNumber(ifClauseRaw);
+      // Tier 1 fix: emit `teacher_teaches_at_slot` when the IF clause contains a period;
+      // otherwise fall back to `teacher_teaches_on_day`. (See VAL-T1-001/002/003.)
+      const atSlotOrOnDay = (teacher: string) =>
+        ifDay && ifPeriod !== null
+          ? ({ op: 'teacher_teaches_at_slot' as const, teacher, day: ifDay, period: ifPeriod })
+          : ifDay
+            ? ({ op: 'teacher_teaches_on_day' as const, teacher, day: ifDay })
+            : null;
       const condition =
         ifTeachers.length >= 2 && ifDay
           ? {
               op: 'and' as const,
-              args: ifTeachers.slice(0, 2).map((teacher) => ({
-                op: 'teacher_teaches_on_day' as const,
-                teacher,
-                day: ifDay,
-              })),
+              args: ifTeachers.slice(0, 2).map((teacher) => atSlotOrOnDay(teacher)).filter((c) => c !== null),
             }
           : ifTeachers[0] && ifDay
-            ? ({
-                op: 'teacher_teaches_on_day' as const,
-                teacher: ifTeachers[0],
-                day: ifDay,
-              } as const)
+            ? atSlotOrOnDay(ifTeachers[0])
             : null;
 
       const thenTeachers = teacherLabels.filter((label) => includesLabel(thenClauseRaw, label));
@@ -182,16 +183,45 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
             ...(thenDay ? { scope: { day: thenDay } } : {}),
           },
         });
-      } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay && (extractPeriodNumber(thenClauseRaw) ?? thenPeriod) !== null) {
+      } else if (
+        /(không|khong).*(dạy|day)/iu.test(thenClauseRaw) &&
+        thenTeachers[0] &&
+        thenDay &&
+        extractPeriodNumber(thenClauseRaw) !== null
+      ) {
+        // Tier 1 fix: only fall back to slot when an explicit "tiết N" is present in THEN.
+        // Previously the day number (e.g. "thứ 3") was mis-interpreted as period 3.
         thenSpecs.push({
           kind: 'teacher_block_slot',
-          params: { teacher: thenTeachers[0], day: thenDay, period: extractPeriodNumber(thenClauseRaw) ?? thenPeriod },
+          params: { teacher: thenTeachers[0], day: thenDay, period: extractPeriodNumber(thenClauseRaw) },
         });
       } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay) {
         thenSpecs.push({
           kind: 'teacher_block_day',
           params: { teacher: thenTeachers[0], day: thenDay },
         });
+      } else if (
+        // Tier 1 — VAL-T1-004: positive THEN ("Sơn dạy thứ 2 tiết 2") still produces a
+        // non-empty THEN list so the spec stays in `if_then` form. We pick the closest
+        // existing kind (teacher_block_slot / teacher_block_day) which the validator can
+        // enforce. The `notes` field flags the positive interpretation.
+        !/(không|khong)/iu.test(thenClauseRaw) &&
+        /(dạy|day)/iu.test(thenClauseRaw) &&
+        thenTeachers[0] &&
+        thenDay
+      ) {
+        const positivePeriod = extractPeriodNumber(thenClauseRaw);
+        if (positivePeriod !== null) {
+          thenSpecs.push({
+            kind: 'teacher_block_slot',
+            params: { teacher: thenTeachers[0], day: thenDay, period: positivePeriod },
+          });
+        } else {
+          thenSpecs.push({
+            kind: 'teacher_block_day',
+            params: { teacher: thenTeachers[0], day: thenDay },
+          });
+        }
       }
 
       if (condition && thenSpecs.length > 0) {

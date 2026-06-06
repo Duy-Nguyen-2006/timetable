@@ -245,3 +245,48 @@ test('preflight blocks when any constraint unconfirmed', () => {
   assert.equal(result.canSolve, false);
   assert.ok(result.blockReasons.includes('constraint_unconfirmed'));
 });
+
+test('VAL-T1-007: humanizeConstraintSpec renders period for if_then teacher_teaches_at_slot', () => {
+  const line = humanizeConstraintSpec({
+    id: 'c1',
+    original: 'Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1',
+    severity: 'hard',
+    kind: 'if_then',
+    params: {
+      if: { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'mon', period: 2 },
+      then: [{ kind: 'teacher_block_slot', params: { teacher: 'Dung', day: 'tue', period: 1 } }],
+    },
+  });
+  assert.match(line, /Thứ 2/);
+  assert.match(line, /tiết 2/);
+  assert.match(line, /Thứ 3/);
+  assert.match(line, /tiết 1/);
+  assert.doesNotMatch(line, /\(điều kiện chưa xác định\)/);
+});
+
+test('VAL-T1-007b: humanizeConstraintSpec renders period for if_then with AND-of-2-slot', () => {
+  const line = humanizeConstraintSpec({
+    id: 'c8',
+    original: 'Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1',
+    severity: 'hard',
+    kind: 'if_then',
+    params: {
+      if: {
+        op: 'and',
+        args: [
+          { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'mon', period: 2 },
+          { op: 'teacher_teaches_at_slot', teacher: 'Hương', day: 'mon', period: 2 },
+        ],
+      },
+      then: [{ kind: 'teacher_block_slot', params: { teacher: 'Dung', day: 'tue', period: 1 } }],
+    },
+  });
+  assert.match(line, /Sơn/);
+  assert.match(line, /Hương/);
+  assert.match(line, /Thứ 2/);
+  assert.match(line, /tiết 2/);
+  assert.match(line, /Dung/);
+  assert.match(line, /Thứ 3/);
+  assert.match(line, /tiết 1/);
+  assert.doesNotMatch(line, /\(điều kiện chưa xác định\)/);
+});

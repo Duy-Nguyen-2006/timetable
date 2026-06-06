@@ -147,6 +147,57 @@ const config: LocalAgentConfig = {
     console.log('scheduleEntries', result.finalResult.schedule?.length ?? 0);
     console.log('violations', result.finalResult.violations?.length ?? 0);
   }
+
+  // Tier 1 — VAL-T1-010: extra smoke case for the IF-AND-THEN pattern.
+  // The Tier 1 rule parser now handles this deterministically (no LLM needed),
+  // but the smoke asserts the parser emits `if_then` with `period: 2` in `params.if`.
+  console.log('---');
+  console.log('Tier 1 IF-AND-THEN smoke case (VAL-T1-010)');
+  try {
+    const translator = await import('../src/features/timetable/ai/translator');
+    const fallbackFromRuleParser = translator.__translatorInternal.fallbackFromRuleParser;
+    const tier1Input: AgentInputPayload = {
+      days: [
+        { id: 'monday', label: 'Thứ 2' },
+        { id: 'tuesday', label: 'Thứ 3' },
+        { id: 'wednesday', label: 'Thứ 4' },
+        { id: 'thursday', label: 'Thứ 5' },
+        { id: 'friday', label: 'Thứ 6' },
+      ],
+      sessions: [{ id: 'morning', label: 'Sáng' }],
+      periodCounts: { monday: 4, tuesday: 4, wednesday: 4, thursday: 4, friday: 4 },
+      deletedPeriods: {},
+      assignments: [
+        { id: 'a1', teacher: { id: 't1', label: 'Sơn' }, subject: { id: 's1', label: 'Toán' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 4 },
+        { id: 'a2', teacher: { id: 't2', label: 'Hương' }, subject: { id: 's2', label: 'Văn' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 3 },
+        { id: 'a3', teacher: { id: 't3', label: 'Dung' }, subject: { id: 's3', label: 'Anh' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 3 },
+      ],
+      constraints: [
+        {
+          type: 'required',
+          text: 'Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1',
+        },
+      ],
+    };
+    const specs = fallbackFromRuleParser(tier1Input);
+    const ifThenSpec = specs.find((s) => s.kind === 'if_then');
+    if (!ifThenSpec) {
+      console.error('TIER1_SMOKE_FAIL: no if_then spec produced');
+      process.exit(1);
+    }
+    const cond = ifThenSpec.params.if as { op?: string; args?: Array<Record<string, unknown>> };
+    const args = Array.isArray(cond.args) ? cond.args : [];
+    const periodInIf = args.some((a) => a && a.period === 2);
+    if (cond.op !== 'and' || args.length !== 2 || !periodInIf) {
+      console.error('TIER1_SMOKE_FAIL: expected if.op=and with 2 args each containing period=2, got', JSON.stringify(cond));
+      process.exit(1);
+    }
+    console.log('Tier 1 IF-AND-THEN smoke OK: params.if has period 2 for both Sơn and Hương');
+  } catch (err) {
+    console.error('TIER1_SMOKE_ERROR', err instanceof Error ? err.stack : String(err));
+    process.exit(1);
+  }
+
   process.exit(result.success ? 0 : 1);
 })().catch((err) => {
   console.error('SMOKE_ERROR', err instanceof Error ? err.stack : String(err));

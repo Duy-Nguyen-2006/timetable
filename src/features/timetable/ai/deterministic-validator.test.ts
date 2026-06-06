@@ -396,4 +396,71 @@ describe('validator edge cases', () => {
     assert.equal(report.hardCoverageComplete, false);
     assert.deepEqual(report.hardUncheckedConstraintIds, ['unchecked_hard_spec']);
   });
+
+  // =========================================================================
+  // Tier 1 — VAL-T1-013/014: if_then with teacher_teaches_at_slot in IF
+  // =========================================================================
+
+  it('if_then with single teacher_teaches_at_slot in IF catches slot mismatch', () => {
+    const ifThenSlotSpec = spec('if_then_slot', 'if_then', {
+      if: { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'mon', period: 2 },
+      then: [{ kind: 'teacher_block_day', params: { teacher: 'Thúy', day: 'tue' } }],
+    });
+    // IF true (Sơn on mon/2) AND Thúy on tue → violation
+    const failReport = validateSchedule(
+      [
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6B', 'tue', 1, 'Văn', 'Thúy'),
+      ],
+      [ifThenSlotSpec]
+    );
+    assert.equal(failReport.violations.length, 1);
+    assert.match(failReport.violations[0].message, /IF_THEN/);
+
+    // IF false (Sơn on mon/1 not mon/2) → no violation even if Thúy on tue
+    const passReport = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Toán', 'Sơn'),
+        entry('6B', 'tue', 1, 'Văn', 'Thúy'),
+      ],
+      [ifThenSlotSpec]
+    );
+    assert.equal(passReport.violations.length, 0);
+  });
+
+  it('if_then with AND-of-2-slot in IF (canonical Tier 1) catches THEN violation only when both branches true', () => {
+    const ifThenAndSpec = spec('if_then_and_slot', 'if_then', {
+      if: {
+        op: 'and',
+        args: [
+          { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'mon', period: 2 },
+          { op: 'teacher_teaches_at_slot', teacher: 'Hương', day: 'mon', period: 2 },
+        ],
+      },
+      then: [{ kind: 'teacher_block_slot', params: { teacher: 'Dung', day: 'tue', period: 1 } }],
+    });
+
+    // Both IF true (Sơn AND Hương at mon/2, different classes to avoid class clash),
+    // Dung on tue/1 → exactly 1 IF_THEN violation
+    const failReport = validateSchedule(
+      [
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6B', 'mon', 2, 'Văn', 'Hương'),
+        entry('6C', 'tue', 1, 'Anh', 'Dung'),
+      ],
+      [ifThenAndSpec]
+    );
+    assert.equal(failReport.violations.length, 1);
+    assert.match(failReport.violations[0].message, /IF_THEN/);
+
+    // Only Sơn present (Hương absent on mon/2) → IF is false → no IF_THEN violation
+    const passReport = validateSchedule(
+      [
+        entry('6A', 'mon', 2, 'Toán', 'Sơn'),
+        entry('6C', 'tue', 1, 'Anh', 'Dung'),
+      ],
+      [ifThenAndSpec]
+    );
+    assert.equal(passReport.violations.length, 0);
+  });
 });

@@ -8,6 +8,52 @@ function paramStr(value: unknown): string {
   return String(value);
 }
 
+/** Render a single `ConditionExpr` (teacher_teaches_at_slot | teacher_teaches_on_day | and | or | not) in Vietnamese. */
+function renderConditionExpr(cond: {
+  op?: string;
+  teacher?: string;
+  day?: string;
+  period?: number;
+  args?: Array<Record<string, unknown>>;
+  arg?: Record<string, unknown>;
+} | undefined): string {
+  if (!cond || typeof cond !== 'object' || !cond.op) return '(điều kiện chưa xác định)';
+  const teacher = typeof cond.teacher === 'string' ? cond.teacher : '';
+  const day = cond.day ? dayInText(cond.day) : '';
+  const period = typeof cond.period === 'number' ? cond.period : null;
+
+  if (cond.op === 'teacher_teaches_at_slot' && teacher && day && period !== null) {
+    return `Giáo viên ${teacher} dạy ${day}, tiết ${period}`;
+  }
+  if (cond.op === 'teacher_teaches_on_day' && teacher && day) {
+    return `Giáo viên ${teacher} dạy vào ${day}`;
+  }
+  if (cond.op === 'and' && Array.isArray(cond.args) && cond.args.length > 0) {
+    const parts = cond.args.map((a) => renderConditionExpr(a as Parameters<typeof renderConditionExpr>[0]));
+    if (cond.args.length === 2) {
+      return `${parts[0]} và ${parts[1]}`;
+    }
+    return parts.join(', ');
+  }
+  if (cond.op === 'or' && Array.isArray(cond.args) && cond.args.length > 0) {
+    const parts = cond.args.map((a) => renderConditionExpr(a as Parameters<typeof renderConditionExpr>[0]));
+    if (cond.args.length === 2) {
+      return `${parts[0]} hoặc ${parts[1]}`;
+    }
+    return `${parts.slice(0, -1).join(', ')} hoặc ${parts[parts.length - 1]}`;
+  }
+  if (cond.op === 'not' && cond.arg) {
+    return `không (${renderConditionExpr(cond.arg as Parameters<typeof renderConditionExpr>[0])})`;
+  }
+  if (teacher && day && period !== null) {
+    return `Giáo viên ${teacher} dạy ${day}, tiết ${period}`;
+  }
+  if (teacher && day) {
+    return `Giáo viên ${teacher} dạy ${day}`;
+  }
+  return '(điều kiện chưa xác định)';
+}
+
 function dayInText(dayId: unknown): string {
   const label = resolveDayLabel(dayId);
   return label || paramStr(dayId);
@@ -148,21 +194,18 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
     case 'session_limit':
       return `${prefix}Giới hạn ${paramStr(p.max)} tiết tại ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
     case 'if_then': {
-      const cond = p.if as { op?: string; teacher?: string; day?: string; period?: number } | undefined;
+      const cond = p.if as
+        | {
+            op?: string;
+            teacher?: string;
+            day?: string;
+            period?: number;
+            args?: Array<Record<string, unknown>>;
+            arg?: Record<string, unknown>;
+          }
+        | undefined;
       const thenList = Array.isArray(p.then) ? p.then : [];
-      const condTeacher = cond?.teacher ?? '';
-      const condDay = cond?.day ? dayInText(cond.day) : '';
-      const condPeriod = cond?.period;
-      let condText = '';
-      if (cond?.op === 'teacher_teaches_at_slot' && condTeacher && condDay && condPeriod) {
-        condText = `Giáo viên ${condTeacher} dạy ${condDay}, tiết ${condPeriod}`;
-      } else if (cond?.op === 'teacher_teaches_on_day' && condTeacher && condDay) {
-        condText = `Giáo viên ${condTeacher} dạy vào ${condDay}`;
-      } else if (condTeacher && condDay) {
-        condText = `Giáo viên ${condTeacher} dạy ${condDay}`;
-      } else {
-        condText = '(điều kiện chưa xác định)';
-      }
+      const condText = renderConditionExpr(cond);
       const thenDesc = thenList.map((t: { kind?: string; params?: Record<string, unknown> }) => {
         const tp = t.params ?? {};
         if (t.kind === 'teacher_block_day') return `Giáo viên ${paramStr(tp.teacher)} không dạy ${dayInText(tp.day)}`;

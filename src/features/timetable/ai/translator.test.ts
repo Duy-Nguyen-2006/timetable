@@ -681,3 +681,271 @@ test('sanitize downgrades model-emitted Dataset 7 base custom_dsl constraints', 
   assert.equal(result.some((spec) => spec.severity === 'hard' && spec.kind === 'custom_dsl'), false);
   assert.equal(result.every((spec) => spec.tags?.includes('auto_base')), true);
 });
+
+// =========================================================================
+// Tier 1 — IF-clause period fix (VAL-T1-001, 002, 003, 004)
+// =========================================================================
+
+const ifThenInput = (): AgentInputPayload => ({
+  days: [
+    { id: 'mon', label: 'Thứ 2' },
+    { id: 'tue', label: 'Thứ 3' },
+  ],
+  sessions: [{ id: 'morning', label: 'Sáng' }],
+  periodCounts: { mon: 5, tue: 5 },
+  deletedPeriods: {},
+  assignments: [
+    {
+      id: 'asg_son',
+      teacher: { id: 't1', label: 'Sơn' },
+      subject: { id: 's1', label: 'Toán' },
+      class: { id: 'c1', label: '6A' },
+      weeklyPeriods: 3,
+    },
+    {
+      id: 'asg_huong',
+      teacher: { id: 't2', label: 'Hương' },
+      subject: { id: 's2', label: 'Văn' },
+      class: { id: 'c1', label: '6A' },
+      weeklyPeriods: 3,
+    },
+    {
+      id: 'asg_dung',
+      teacher: { id: 't3', label: 'Dung' },
+      subject: { id: 's3', label: 'Anh' },
+      class: { id: 'c1', label: '6A' },
+      weeklyPeriods: 3,
+    },
+  ],
+  constraints: [],
+});
+
+test('VAL-T1-001: IF-AND-THEN with 2-slot IF preserves period in params.if', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'required', text: 'Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; args: Array<{ op: string; teacher: string; day: string; period: number }> };
+  assert.equal(cond.op, 'and');
+  assert.equal(cond.args.length, 2);
+  for (const arg of cond.args) {
+    assert.equal(arg.op, 'teacher_teaches_at_slot');
+    assert.equal(arg.day, 'mon');
+    assert.equal(arg.period, 2);
+  }
+  const teachers = cond.args.map((arg) => arg.teacher).sort();
+  assert.deepEqual(teachers, ['Hương', 'Sơn']);
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'teacher_block_slot');
+  assert.equal(thenList[0].params.teacher, 'Dung');
+  assert.equal(thenList[0].params.day, 'tue');
+  assert.equal(thenList[0].params.period, 1);
+});
+
+test('VAL-T1-002: single-teacher IF with slot emits teacher_teaches_at_slot (no AND)', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'required', text: 'Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; teacher: string; day: string; period: number };
+  assert.equal(cond.op, 'teacher_teaches_at_slot');
+  assert.equal(cond.teacher, 'Sơn');
+  assert.equal(cond.day, 'mon');
+  assert.equal(cond.period, 2);
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'teacher_block_day');
+  assert.equal(thenList[0].params.teacher, 'Dung');
+  assert.equal(thenList[0].params.day, 'tue');
+});
+
+test('VAL-T1-003: AND-of-day-only IF (no period) emits and of teacher_teaches_on_day', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'required', text: 'Nếu Sơn và Hương dạy thứ 2 thì Dung không dạy thứ 3' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; args: Array<{ op: string; teacher: string; day: string; period?: number }> };
+  assert.equal(cond.op, 'and');
+  assert.equal(cond.args.length, 2);
+  for (const arg of cond.args) {
+    assert.equal(arg.op, 'teacher_teaches_on_day');
+    assert.equal(arg.day, 'mon');
+    assert.equal((arg as { period?: number }).period, undefined);
+  }
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'teacher_block_day');
+});
+
+test('VAL-T1-004: reverse-direction IF does not swap if/then and stays as if_then', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'required', text: 'Nếu Dung không dạy thứ 3 thì Sơn dạy thứ 2 tiết 2' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; teacher: string; day: string };
+  assert.equal(cond.op, 'teacher_teaches_on_day');
+  assert.equal(cond.teacher, 'Dung');
+  assert.equal(cond.day, 'tue');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.ok(Array.isArray(thenList));
+  assert.ok(thenList.length > 0, 'THEN must be non-empty');
+  for (const t of thenList) {
+    assert.notEqual(t.kind, 'custom_dsl', 'THEN must not contain synthetic custom_dsl');
+  }
+});
+
+// =========================================================================
+// Tier 1 — Diacritics / titles (VAL-T1-011) and multi-line paste (VAL-T1-012)
+// =========================================================================
+
+test('VAL-T1-011a: diacritics + title prefix "Cô Lan" yields bare name in params.teacher', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    assignments: [
+      ...sampleInput.assignments,
+      {
+        id: 'asg_lan',
+        teacher: { id: 't_lan', label: 'Lan' },
+        subject: { id: 's_lan', label: 'Văn' },
+        class: { id: 'c_lan', label: '6B' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Cô Lan không dạy thứ 2' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'teacher_block_day');
+  assert.equal(specs[0].params.teacher, 'Lan');
+  // parseConstraint hardcodes 'monday' for "thứ 2"
+  assert.equal(specs[0].params.day, 'monday');
+});
+
+test('VAL-T1-011b: diacritics + title prefix "Thầy B" yields bare name in params.teacher', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    assignments: [
+      {
+        id: 'asg_b',
+        teacher: { id: 't_b', label: 'B' },
+        subject: { id: 's_b', label: 'Toán' },
+        class: { id: 'c_b', label: '6A' },
+        weeklyPeriods: 3,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Thầy B không dạy thứ 3 tiết 4' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'teacher_block_slot');
+  assert.equal(specs[0].params.teacher, 'B');
+  // parseConstraint hardcodes 'tuesday' for "thứ 3"
+  assert.equal(specs[0].params.day, 'tuesday');
+  assert.equal(specs[0].params.period, 4);
+});
+
+test('VAL-T1-011c: digit-suffixed teacher name "Sơn 2" round-trips with bare name', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    assignments: [
+      {
+        id: 'asg_son2',
+        teacher: { id: 't_son2', label: 'Sơn 2' },
+        subject: { id: 's_son2', label: 'Toán' },
+        class: { id: 'c_son2', label: '6A' },
+        weeklyPeriods: 3,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Sơn 2 không dạy thứ 2' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'teacher_block_day');
+  assert.equal(specs[0].params.teacher, 'Sơn 2');
+  // parseConstraint hardcodes 'monday' for "thứ 2"
+  assert.equal(specs[0].params.day, 'monday');
+});
+
+test('VAL-T1-012a: multi-line paste split on newline yields 2 specs', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      {
+        type: 'required',
+        text: 'Sơn không dạy thứ 2\nHương không dạy tiết 1',
+      },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 2);
+  assert.deepEqual(specs.map((spec) => spec.id), ['c1', 'c2']);
+  assert.equal(specs[0].kind, 'teacher_block_day');
+  assert.equal(specs[0].params.teacher, 'Sơn');
+  // parseConstraint hardcodes 'monday' for "thứ 2"
+  assert.equal(specs[0].params.day, 'monday');
+  assert.equal(specs[1].kind, 'teacher_block_period');
+  assert.equal(specs[1].params.teacher, 'Hương');
+  assert.equal(specs[1].params.period, 1);
+});
+
+test('VAL-T1-012b: multi-line paste split on semicolon yields 2 specs', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      {
+        type: 'required',
+        text: 'Sơn không dạy thứ 2; Hương không dạy tiết 1',
+      },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 2);
+  assert.equal(specs[0].kind, 'teacher_block_day');
+  assert.equal(specs[0].params.teacher, 'Sơn');
+  assert.equal(specs[1].kind, 'teacher_block_period');
+  assert.equal(specs[1].params.teacher, 'Hương');
+});
+
+// =========================================================================
+// Tier 1 — Determinism (VAL-T1-009): same input → deep-equal specs
+// =========================================================================
+
+test('VAL-T1-009: determinism — two invocations of fallback parser return deep-equal specs', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'required', text: 'Nếu Sơn và Hương dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1' },
+    ],
+  };
+  const first = __translatorInternal.fallbackFromRuleParser(input);
+  const second = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(first.length, second.length);
+  assert.deepEqual(first, second);
+});
