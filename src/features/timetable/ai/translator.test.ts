@@ -625,6 +625,32 @@ test('fallback parser marks unparsed hard constraints explicitly', () => {
   assert.equal(specs[0].notes, 'fallback_parser:UNPARSED_HARD');
 });
 
+test('fallback parser converts hard solver-unencodable built-ins to custom_dsl', () => {
+  const specs = __translatorInternal.fallbackFromRuleParser({
+    ...sampleInput,
+    constraints: [{ type: 'required', text: 'Toán rải ít nhất 2 ngày' }],
+  });
+
+  assert.equal(specs[0].kind, 'custom_dsl');
+  assert.equal(specs[0].params.unsupportedKind, 'assignment_spread_days');
+  assert.match(specs[0].notes ?? '', /SOLVER_UNENCODABLE:assignment_spread_days/);
+});
+
+test('sanitize converts model hard solver-unencodable built-ins to custom_dsl', () => {
+  const result = __translatorInternal.sanitizeSpecs(sampleInput, [
+    {
+      id: 'm1',
+      original: 'Toán rải ít nhất 2 ngày',
+      severity: 'hard',
+      kind: 'subject_min_days',
+      params: { subject: 'Toán', minDays: 2 },
+    },
+  ]);
+
+  assert.equal(result[0].kind, 'custom_dsl');
+  assert.equal(result[0].params.unsupportedKind, 'subject_min_days');
+});
+
 test('fallback parser maps "tránh môn nặng cùng 1 buổi" to class_max_heavy_subjects_per_session', () => {
   const heavyInput: AgentInputPayload = {
     ...sampleInput,

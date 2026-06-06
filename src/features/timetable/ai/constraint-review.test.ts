@@ -225,6 +225,37 @@ test('preflight allows when hard confirmed', () => {
   assert.equal(result.canSolve, true);
 });
 
+test('preflight blocks confirmed hard specs that checker can validate but solver cannot encode', () => {
+  const raw: RawConstraintInput[] = [
+    { id: 'r1', text: 'Toán rải ít nhất 2 ngày', type: 'required', createdAt: new Date().toISOString() },
+  ];
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'c1',
+      original: raw[0].text,
+      severity: 'hard',
+      kind: 'subject_min_days',
+      params: { subject: 'Toán', minDays: 2 },
+    },
+  ];
+  const confirmed: ConfirmedConstraint[] = [
+    {
+      id: 'conf1',
+      rawConstraintId: 'r1',
+      specs,
+      confirmedBy: 'user',
+      confirmedAt: new Date().toISOString(),
+      summary: 'unsupported hard',
+    },
+  ];
+
+  const result = assertSolvableConstraintState(raw, [], confirmed);
+
+  assert.equal(result.canSolve, false);
+  assert.ok(result.blockReasons.includes('hard_spec_unchecked'));
+  assert.match(result.messages.join('\n'), /chưa mã hoá được vào solver/);
+});
+
 test('humanizeDraft empty specs', () => {
   const draft = buildDraftFromSpecs(
     'd1',

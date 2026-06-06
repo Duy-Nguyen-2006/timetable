@@ -3,15 +3,15 @@
 // debug bundles so reproductions stay traceable across refactors.
 
 export const PROMPT_VERSIONS = {
-  translator: '3.0.0',
+  translator: '3.0.1',
   planner: '3.0.0',
-  coder: '3.2.2',
+  coder: '3.2.3',
   repair: '3.0.1',
 } as const;
 
-export const SOLVER_TEMPLATE_VERSION = '1.4.1';
+export const SOLVER_TEMPLATE_VERSION = '1.4.2';
 
-export const CONSTRAINT_REGISTRY_VERSION = '1.3.0';
+export const CONSTRAINT_REGISTRY_VERSION = '1.4.0';
 
 export type PromptStage = keyof typeof PROMPT_VERSIONS;
 

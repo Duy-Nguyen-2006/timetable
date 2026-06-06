@@ -4,6 +4,7 @@ import { parseConstraint } from '@/lib/constraint-parser';
 
 import type { ConstraintSpec } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
+import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
 import { invokeChat, type ChatPayload } from './chat-client';
 import { buildTranslatorPeriods, buildTranslatorPeriodsByDay, periodsForSession } from './translator-periods';
@@ -1155,7 +1156,29 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
     });
   });
 
-  return specs.map((spec) => applyConstraintWeight(spec, weightByText.get(spec.original)));
+  return specs
+    .map((spec) => applyConstraintWeight(spec, weightByText.get(spec.original)))
+    .map(markHardUnencodable);
+}
+
+
+function markHardUnencodable(spec: ConstraintSpec): ConstraintSpec {
+  if (spec.severity !== 'hard' || spec.kind === 'custom_dsl' || SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
+    return spec;
+  }
+  return {
+    id: spec.id,
+    original: spec.original,
+    severity: 'hard',
+    kind: 'custom_dsl',
+    params: {
+      naturalLanguage: spec.original,
+      unsupportedKind: spec.kind,
+      originalParams: spec.params,
+    },
+    weight: spec.weight,
+    notes: `fallback_parser:SOLVER_UNENCODABLE:${spec.kind}`,
+  };
 }
 
 function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): ConstraintSpec[] {
@@ -1202,6 +1225,10 @@ function sanitizeSpecs(input: AgentInputPayload, specs: ConstraintSpec[]): Const
 
     if (base.kind === 'custom_dsl' && base.original.trim() && isAutoBaseConstraintText(base.original)) {
       return markAutoBaseSpec(base);
+    }
+
+    if (base.severity === 'hard' && base.kind !== 'custom_dsl' && !SOLVER_ENCODABLE_KINDS.has(base.kind)) {
+      return markHardUnencodable(base);
     }
 
     if (base.kind === 'custom_dsl' && base.original.trim()) {
@@ -1369,6 +1396,10 @@ export async function runTranslatorTurn(
   input: AgentInputPayload,
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<TranslatorTurnResult> {
+  if (input.constraints.length === 0) {
+    return { constraintSpecs: [], rawResponse: '', usageTokens: 0 };
+  }
+
   // Pre-parse với deterministic rule parser. Constraints parse được rõ ràng
   // (kind !== 'custom_dsl') không cần gửi LLM — tiết kiệm latency và token.
   const deterministicSpecs = fallbackFromRuleParser(input);

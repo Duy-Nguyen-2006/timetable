@@ -21,6 +21,7 @@ jobs:
       - run: ./.venv/bin/pip install -U pip pytest ortools
       - run: npm run lint
       - run: npm run test:prompt
+      - run: npx tsx scripts/check_constraint_parity.ts --strict
       - run: npx tsx --test "src/**/*.test.ts"
       - run: npm run test:electron
       - run: npm run build

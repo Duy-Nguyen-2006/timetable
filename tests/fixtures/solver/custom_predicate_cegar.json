@@ -1,0 +1,20 @@
+{
+  "classes": ["6A"],
+  "days": ["mon"],
+  "periods": [1, 2],
+  "periodsByDay": { "mon": [1, 2] },
+  "assignments": [
+    { "id": "a1", "class": "6A", "subject": "Toán", "teacher": "Sơn", "weeklyPeriods": 1 }
+  ],
+  "constraints": [
+    {
+      "id": "c1",
+      "original": "Toán không ở tiết 1 theo predicate",
+      "severity": "hard",
+      "kind": "custom_dsl",
+      "params": {
+        "pythonPredicate": "def check(schedule):\n    return all(entry.get('period') != 1 for entry in schedule)"
+      }
+    }
+  ]
+}

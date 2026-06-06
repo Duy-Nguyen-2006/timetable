@@ -72,12 +72,17 @@ export function consumeBudget(
   usageTokens: number | undefined,
   ...fallbackChunks: string[]
 ): void {
-  if (typeof usageTokens === 'number' && Number.isFinite(usageTokens) && usageTokens > 0) {
+  if (typeof usageTokens === 'number' && Number.isFinite(usageTokens)) {
+    if (usageTokens <= 0) return;
     budget.consumeUsage(usageTokens);
   } else {
     budget.consumeText(...fallbackChunks);
   }
   budget.ensureWithinLimit();
+}
+
+export function usedLlmTokens(stage: { rawResponse?: string; usageTokens?: number }): boolean {
+  return Boolean(stage.rawResponse?.trim()) || Boolean(stage.usageTokens && stage.usageTokens > 0);
 }
 
 export function buildViolationSignature(

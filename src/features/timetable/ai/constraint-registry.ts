@@ -91,6 +91,49 @@ export const CHECKED_KINDS = new Set<ConstraintKind>(
   CONSTRAINT_REGISTRY.filter((m) => m.hasChecker).map((m) => m.kind)
 );
 
+export const SOLVER_ENCODABLE_KIND_LIST = [
+  'teacher_block_day',
+  'teacher_block_period',
+  'teacher_block_slot',
+  'teacher_max_per_day',
+  'teacher_max_consecutive',
+  'teacher_max_working_days',
+  'teacher_allowed_days',
+  'teacher_allowed_periods',
+  'teacher_max_classes_per_day',
+  'teacher_pair_not_same_slot',
+  'teacher_homeroom_first_period',
+  'subject_pin_period',
+  'subject_not_last_period',
+  'subject_consecutive',
+  'subject_max_consecutive',
+  'subject_allowed_days',
+  'class_block_day',
+  'class_block_period',
+  'class_block_slot',
+  'class_no_double_subject_day',
+  'class_subjects_not_same_day',
+  'class_max_subjects_per_day',
+  'class_max_heavy_subjects_per_day',
+  'class_max_heavy_subjects_per_session',
+  'class_first_period_required',
+  'subject_flag_ceremony_slot',
+  'assignment_pin_slot',
+  'assignment_block_slot',
+  'assignment_allowed_slots',
+  'weekly_periods_exact',
+  'if_then',
+  'pair_not_same_slot',
+  'session_limit',
+  'subject_group_daily_limit',
+] as const satisfies readonly ConstraintKind[];
+
+export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);
+
 export function getConstraintMeta(kind: ConstraintKind): ConstraintMeta | undefined {
   return CONSTRAINT_REGISTRY.find((m) => m.kind === kind);
+}
+
+export function isSolverEncodableKind(kind: ConstraintKind): boolean {
+  return SOLVER_ENCODABLE_KINDS.has(kind);
 }

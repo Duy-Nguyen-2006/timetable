@@ -4,7 +4,7 @@ import type {
   PreflightResult,
   RawConstraintInput,
 } from './constraint-review-types';
-import { CHECKED_KINDS } from './constraint-registry';
+import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 
 const UNRESOLVED_DRAFT: ParsedConstraintDraft['status'][] = [
   'unparsed',
@@ -105,9 +105,9 @@ export function assertSolvableConstraintState(
 
   for (const c of confirmed) {
     for (const spec of c.specs) {
-      if (spec.severity === 'hard' && !CHECKED_KINDS.has(spec.kind)) {
+      if (spec.severity === 'hard' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
         blockReasons.push('hard_spec_unchecked');
-        messages.push(`Ràng buộc bắt buộc không kiểm tra được: ${spec.kind} (${spec.id}).`);
+        messages.push(`Ràng buộc bắt buộc chưa mã hoá được vào solver: ${spec.kind} (${spec.id}).`);
       }
     }
   }

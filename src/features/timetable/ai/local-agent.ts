@@ -19,6 +19,7 @@ import {
   MAX_VIOLATION_REPAIR_ROUNDS,
   TOKEN_CAP_PER_RUN,
 } from './local-agent-limits';
+import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import { getCachedStage } from './stage-cache';
 import { PIPELINE_VERSIONS } from './pipeline-versions';
 import {
@@ -37,6 +38,7 @@ import {
   stableHash,
   hashKey,
   normalizeRoundTripMessage,
+  usedLlmTokens,
 } from './local-agent-utils';
 
 export interface RunLocalAgentOptions {
@@ -105,12 +107,20 @@ export async function runLocalAgent(
         message: `Dùng ${deduped.length} ràng buộc đã xác nhận (bỏ qua translator)`,
       });
     } else {
-      const translatorCacheKey = `translator:${stableHash({
+      const translatorCacheKey = `translator:${hashKey({
         model: pickStageConfig(config, 'translator').model,
         promptVersion: PIPELINE_VERSIONS.prompt.translator,
         registryVersion: PIPELINE_VERSIONS.constraintRegistry,
-        assignments: input.assignments,
-        constraints: input.constraints,
+        constraintTexts: input.constraints.map((constraint) => ({
+          type: constraint.type,
+          text: constraint.text,
+          weight: constraint.weight ?? null,
+        })),
+        contextLabels: {
+          teachers: [...new Set(input.assignments.map((assignment) => assignment.teacher.label))],
+          subjects: [...new Set(input.assignments.map((assignment) => assignment.subject.label))],
+          classes: [...new Set(input.assignments.map((assignment) => assignment.class.label))],
+        },
         days: input.days,
         sessions: input.sessions,
         periodCounts: input.periodCounts,
@@ -126,7 +136,7 @@ export async function runLocalAgent(
         JSON.stringify(input.constraints),
         translator.rawResponse ?? ''
       );
-      if (!translatorCached.hit) totalToolCalls += 1;
+      if (!translatorCached.hit && usedLlmTokens(translator)) totalToolCalls += 1;
       deduped = dedupeConstraintSpecs(translator.constraintSpecs);
       emit(config, {
         type: 'stage_completed',
@@ -134,6 +144,19 @@ export async function runLocalAgent(
         message: `Translator done (${translator.constraintSpecs.length} specs, ${deduped.length} after dedupe)`,
       });
     }
+    const unsupportedHardSpecs = deduped.filter(
+      (spec) => spec.severity === 'hard' && spec.kind !== 'custom_dsl' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)
+    );
+    if (unsupportedHardSpecs.length > 0) {
+      const preview = unsupportedHardSpecs
+        .slice(0, 5)
+        .map((spec) => `${spec.kind} (${spec.id})`)
+        .join(', ');
+      const msg = `Không thể chạy solver: ${unsupportedHardSpecs.length} ràng buộc bắt buộc chưa được mã hoá CP-SAT (${preview}).`;
+      emit(config, { type: 'error', message: msg, fatal: true });
+      return { success: false, error: msg };
+    }
+
     const compressed = compressPayload(input, deduped);
     const solverConstraintSpecs = deduped.filter(
       (spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base'))
@@ -170,7 +193,7 @@ export async function runLocalAgent(
     );
     const planner = plannerCached.value;
     consumeBudget(budget, plannerCached.hit ? 0 : planner.usageTokens, JSON.stringify(planner.plan), planner.rawResponse ?? '');
-    if (!plannerCached.hit) totalToolCalls += 1;
+    if (!plannerCached.hit && usedLlmTokens(planner)) totalToolCalls += 1;
     board.setPlan(planner.plan);
     emit(config, { type: 'stage_completed', stage: 'planner', message: 'Planner done' });
 
@@ -296,7 +319,7 @@ export async function runLocalAgent(
             });
             continue;
           }
-          if (!coderCacheHit) totalToolCalls += 1;
+          if (!coderCacheHit && usedLlmTokens(coder)) totalToolCalls += 1;
           consumeBudget(
             budget,
             coderCacheHit ? 0 : coder.usageTokens,

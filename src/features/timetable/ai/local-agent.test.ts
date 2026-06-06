@@ -59,6 +59,7 @@ test('runLocalAgent accepts feasible solver results and passes worker hints', as
   const originalFetch = globalThis.fetch;
   const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
   let executeBody: any = null;
+  let chatCalls = 0;
 
   (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
   globalThis.fetch = (async (input, init) => {
@@ -70,6 +71,7 @@ test('runLocalAgent accepts feasible solver results and passes worker hints', as
       return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
     }
     if (url.endsWith('/api/ai/chat')) {
+      chatCalls += 1;
       const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: Array<{ role: string; content: string }> };
       const systemPrompt = body.messages?.[0]?.content;
       if (systemPrompt === 'planner') {
@@ -115,6 +117,7 @@ test('runLocalAgent accepts feasible solver results and passes worker hints', as
     assert.equal(result.success, true);
     assert.equal(result.finalResult?.solverStatus, 'feasible');
     assert.match(result.finalResult?.message ?? '', /chưa chứng minh là tối ưu/);
+    assert.equal(chatCalls, 0);
     assert.equal(executeBody?.solverWorkers, 4);
     assert.equal(executeBody?.input?.warmStartSchedule?.length, 1);
   } finally {
@@ -278,7 +281,7 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
             weeklyPeriods: 0,
           },
         ],
-        constraints: [],
+        constraints: [{ type: 'required', text: 'custom runtime guard' }],
       },
       { baseURL: 'http://example.test', apiKey: 'test', model: 'test' }
     );

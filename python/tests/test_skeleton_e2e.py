@@ -124,3 +124,13 @@ def _workspace():
         yield tmp
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_custom_predicate_cegar_cuts_bad_solution() -> None:
+    payload = json.loads((FIXTURES / "custom_predicate_cegar.json").read_text(encoding="utf-8"))
+    with _workspace() as workspace:
+        result = _run_skeleton(workspace, payload, 'model.Maximize(slots[("a1", "mon", 1)])')
+    assert result["status"] in ("optimal", "feasible"), result
+    assert result.get("customCegarRounds", 0) >= 1, result
+    assert result["schedule"][0]["period"] == 2, result["schedule"]
+    assert result["customChecks"][0]["ok"] is True, result["customChecks"]

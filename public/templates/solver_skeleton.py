@@ -1201,6 +1201,25 @@ result = {
     "schedule": [],
 }
 
+def _schedule_from_values(values):
+    schedule_out = []
+    for a in assignments:
+        for d in days:
+            for p in periods_for_day(d):
+                if values.get((a["id"], d, p)) == 1:
+                    schedule_out.append(
+                        {
+                            "assignmentId": a["id"],
+                            "class": a["class"],
+                            "day": d,
+                            "period": p,
+                            "subject": a["subject"],
+                            "teacher": a["teacher"],
+                        }
+                    )
+    return schedule_out
+
+
 def _verify_custom_predicates(schedule_out):
     checks = []
     safe_builtins = {
@@ -1243,22 +1262,39 @@ def _verify_custom_predicates(schedule_out):
     return checks
 
 
+def _custom_hard_failed(checks):
+    hard_custom_ids = {
+        spec.get("id")
+        for spec in data.get("constraints", [])
+        if spec.get("kind") == "custom_dsl" and spec.get("severity", "hard") == "hard"
+    }
+    return any(check.get("id") in hard_custom_ids and check.get("checked") and not check.get("ok") for check in checks)
+
+
 if best_values is not None:
-    for a in assignments:
-        for d in days:
-            for p in periods_for_day(d):
-                if best_values.get((a["id"], d, p)) == 1:
-                    result["schedule"].append(
-                        {
-                            "assignmentId": a["id"],
-                            "class": a["class"],
-                            "day": d,
-                            "period": p,
-                            "subject": a["subject"],
-                            "teacher": a["teacher"],
-                        }
-                    )
-    result["customChecks"] = _verify_custom_predicates(result["schedule"])
+    custom_checks = _verify_custom_predicates(_schedule_from_values(best_values))
+    cegar_round = 0
+    max_cegar_rounds = int(_os.environ.get("CUSTOM_PREDICATE_CEGAR_ROUNDS", "25") or 25)
+    while _custom_hard_failed(custom_checks) and cegar_round < max_cegar_rounds:
+        chosen = [var for key, var in slots.items() if best_values.get(key) == 1]
+        if not chosen:
+            break
+        model.Add(sum(chosen) <= len(chosen) - 1)
+        cegar_round += 1
+        solver.parameters.max_time_in_seconds = _max_seconds
+        status = solver.Solve(model)
+        result["status"] = solver.StatusName(status).lower()
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            best_values = None
+            break
+        best_values = {key: solver.Value(var) for key, var in slots.items()}
+        custom_checks = _verify_custom_predicates(_schedule_from_values(best_values))
+    result["customCegarRounds"] = cegar_round
+    result["customChecks"] = custom_checks
+
+if best_values is not None:
+    result["schedule"] = _schedule_from_values(best_values)
+    result["customChecks"] = result.get("customChecks") or _verify_custom_predicates(result["schedule"])
     result["unsupportedSoftKinds"] = unsupported_soft_kinds
     with open("result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)

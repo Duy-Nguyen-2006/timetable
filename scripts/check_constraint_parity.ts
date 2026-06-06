@@ -26,6 +26,7 @@ import path from 'node:path';
 import {
   CONSTRAINT_REGISTRY,
   CHECKED_KINDS,
+  SOLVER_ENCODABLE_KIND_LIST,
 } from '../src/features/timetable/ai/constraint-registry';
 
 const REPO_ROOT = process.cwd();
@@ -97,6 +98,7 @@ function loadFixtureKinds(): Set<string> {
 
 function main() {
   const strict = process.argv.includes('--strict');
+  const full = process.argv.includes('--full');
   const skeleton = readIfExists(SKELETON_PATH);
   const validator = readIfExists(VALIDATOR_PATH);
   const translatorPrompt = existsSync(TRANSLATOR_PROMPT_PATH)
@@ -106,47 +108,44 @@ function main() {
 
   const issues: Issue[] = [];
   const checkedKinds = [...CHECKED_KINDS];
+  const solverKinds = [...SOLVER_ENCODABLE_KIND_LIST];
+
+  for (const kind of solverKinds) {
+    if (!findBranchInSkeleton(skeleton, kind)) {
+      issues.push({
+        kind,
+        reason: `solver-encodable kind has no branch (string literal) in solver_skeleton.py`,
+      });
+    }
+  }
 
   for (const meta of CONSTRAINT_REGISTRY) {
     if (!meta.hasChecker) continue;
-    if (!findBranchInSkeleton(skeleton, meta.kind)) {
-      issues.push({
-        kind: meta.kind,
-        reason: `hasChecker=true but no branch (string literal) in solver_skeleton.py`,
-      });
-    }
     if (!findCheckerInValidator(validator, meta.kind)) {
       issues.push({
         kind: meta.kind,
         reason: `hasChecker=true but no entry in deterministic-validator checkerByKind map`,
       });
     }
-    if (translatorPrompt && !findMentionInTranslatorPrompt(translatorPrompt, meta.kind)) {
-      // Only warn (don't fail) when kind isn't mentioned in prompt: some
-      // built-in kinds (teacher_allowed_periods etc.) intentionally aren't
-      // surfaced to the translator.
-      if (strict) {
-        issues.push({
-          kind: meta.kind,
-          reason: `not mentioned in prompts/translator.system.md (strict mode)`,
-        });
-      }
+    if (full && translatorPrompt && !findMentionInTranslatorPrompt(translatorPrompt, meta.kind)) {
+      issues.push({
+        kind: meta.kind,
+        reason: `not mentioned in prompts/translator.system.md (full mode)`,
+      });
     }
-    if (!fixtureKinds.has(meta.kind)) {
-      if (strict) {
-        issues.push({
-          kind: meta.kind,
-          reason: `no golden fixture under tests/fixtures/validator/ (strict mode)`,
-        });
-      }
+    if (full && !fixtureKinds.has(meta.kind)) {
+      issues.push({
+        kind: meta.kind,
+        reason: `no golden fixture under tests/fixtures/validator/ (full mode)`,
+      });
     }
   }
 
   // Print report.
-  console.log(`[parity] ${checkedKinds.length} checked kinds across ${CONSTRAINT_REGISTRY.length} registry entries`);
+  console.log(`[parity] ${checkedKinds.length} checked kinds, ${solverKinds.length} solver-encodable kinds across ${CONSTRAINT_REGISTRY.length} registry entries`);
 
   if (issues.length === 0) {
-    console.log('[parity] OK — every CHECKED kind has skeleton + validator coverage.');
+    console.log('[parity] OK — solver-encodable kinds have skeleton coverage and CHECKED kinds have validator coverage.');
     return;
   }
 

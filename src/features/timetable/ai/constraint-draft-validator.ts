@@ -1,6 +1,6 @@
 import type { AgentInputPayload } from './types';
 import type { ConstraintSpec } from './constraint-spec';
-import { CHECKED_KINDS, CONSTRAINT_REGISTRY, getConstraintMeta } from './constraint-registry';
+import { CONSTRAINT_REGISTRY, SOLVER_ENCODABLE_KINDS, getConstraintMeta } from './constraint-registry';
 import { buildClarificationQuestions } from './constraint-clarification';
 import { normalizeConstraintText } from './translator-text';
 import type {
@@ -101,10 +101,10 @@ function validateSpecShape(spec: ConstraintSpec): ConstraintParseIssue[] {
       });
     }
   }
-  if (spec.severity === 'hard' && !CHECKED_KINDS.has(spec.kind)) {
+  if (spec.severity === 'hard' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
     issues.push({
       code: 'hard_unchecked',
-      message: `Ràng buộc bắt buộc “${spec.kind}” không có kiểm tra deterministic.`,
+      message: `Ràng buộc bắt buộc “${spec.kind}” chưa mã hoá được vào solver.`,
     });
   }
   return issues;

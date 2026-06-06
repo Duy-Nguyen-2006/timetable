@@ -38,7 +38,25 @@ function loadPlannerSystemPrompt(): Promise<string> {
     .catch(() => 'You are a CP-SAT planner. Output strict JSON plan.');
 }
 
-function fallbackPlan(datasetDigest: Plan['domainSize'], constraints: ConstraintSpec[]): Plan {
+
+const PLANNER_LLM_ESTIMATED_VAR_THRESHOLD = 250_000;
+
+function estimatedVarCount(domainSize: Plan['domainSize']): number {
+  return domainSize.estimatedVars ?? domainSize.estimated ?? 0;
+}
+
+export function shouldUseDeterministicPlan(input: {
+  datasetDigest: Plan['domainSize'];
+  constraintSpecs: ConstraintSpec[];
+  previousAttemptSummary?: string;
+}): boolean {
+  if (input.previousAttemptSummary?.trim()) return false;
+  if (input.constraintSpecs.some((spec) => spec.kind === 'custom_dsl' && spec.severity === 'hard')) return false;
+  const estimated = estimatedVarCount(input.datasetDigest);
+  return estimated <= PLANNER_LLM_ESTIMATED_VAR_THRESHOLD;
+}
+
+export function fallbackPlan(datasetDigest: Plan['domainSize'], constraints: ConstraintSpec[]): Plan {
   return {
     decisionVars: 'slots[(assignment_id, day, period)] = BoolVar',
     domainSize: datasetDigest,
@@ -75,6 +93,14 @@ export async function runPlannerTurn(
   },
   invokeChat: ChatInvoke = defaultInvokeChat
 ): Promise<PlannerTurnResult> {
+  if (shouldUseDeterministicPlan(input)) {
+    return {
+      plan: fallbackPlan(input.datasetDigest, input.constraintSpecs),
+      rawResponse: '',
+      usageTokens: 0,
+    };
+  }
+
   const systemPrompt = await loadPlannerSystemPrompt();
   const payload = {
     baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
