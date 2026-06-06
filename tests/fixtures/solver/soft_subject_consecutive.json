@@ -1,0 +1,13 @@
+{
+  "classes": ["6A"],
+  "days": ["mon", "tue", "wed"],
+  "periods": [1, 2, 3, 4],
+  "periodsByDay": { "mon": [1, 2, 3, 4], "tue": [1, 2, 3, 4], "wed": [1, 2, 3, 4] },
+  "assignments": [
+    { "id": "v1", "class": "6A", "subject": "Văn", "teacher": "Dung", "weeklyPeriods": 4 },
+    { "id": "t1", "class": "6A", "subject": "Toán", "teacher": "Sơn", "weeklyPeriods": 4 }
+  ],
+  "constraints": [
+    { "id": "c_consec_soft", "original": "Văn nên liên tiếp 2 tiết", "severity": "soft", "kind": "subject_consecutive", "params": { "subject": "Văn", "length": 2 } }
+  ]
+}

@@ -134,3 +134,38 @@ def test_custom_predicate_cegar_cuts_bad_solution() -> None:
     assert result.get("customCegarRounds", 0) >= 1, result
     assert result["schedule"][0]["period"] == 2, result["schedule"]
     assert result["customChecks"][0]["ok"] is True, result["customChecks"]
+
+
+def test_soft_subject_consecutive_satisfies_preference() -> None:
+    """Soft `subject_consecutive` must be encoded as a soft penalty so the solver
+    actually tries to schedule the required consecutive blocks instead of silently
+    dropping the spec (regression test for "miss 2" bug on DATASET 1).
+    """
+    payload = json.loads((FIXTURES / "soft_subject_consecutive.json").read_text(encoding="utf-8"))
+    with _workspace() as workspace:
+        result = _run_skeleton(workspace, payload)
+    assert result["status"] in ("optimal", "feasible"), result
+    van_entries = [e for e in result["schedule"] if e["assignmentId"] == "v1"]
+    assert len(van_entries) == 4, van_entries
+    # 4 Văn periods / 2 = 2 required runs of length 2. Solver should satisfy both
+    # because the dataset has plenty of room and there's no competing hard blocker.
+    by_day: dict[str, list[int]] = {}
+    for e in van_entries:
+        by_day.setdefault(e["day"], []).append(int(e["period"]))
+    runs_of_two = 0
+    for periods in by_day.values():
+        periods.sort()
+        streak = 1
+        for i in range(1, len(periods)):
+            if periods[i] == periods[i - 1] + 1:
+                streak += 1
+            else:
+                if streak >= 2:
+                    runs_of_two += 1
+                streak = 1
+        if streak >= 2:
+            runs_of_two += 1
+    assert runs_of_two >= 2, (
+        f"soft subject_consecutive produced only {runs_of_two} runs of length 2; "
+        f"expected at least 2 (solver is silently dropping soft spec). entries={van_entries}"
+    )

@@ -358,6 +358,13 @@ def build_custom_constraints(model, slots, data):
         elif kind == "subject_max_consecutive":
             _add_subject_max_consecutive(spec, soft_terms_ref=soft_terms)
 
+        elif kind == "subject_consecutive":
+            # (fix bug: soft subject_consecutive was silently dropped because
+            # _add_subject_consecutive only had a hard path. Solver now adds a
+            # "missed_runs" soft term so it actively tries to satisfy the
+            # consecutive-block preference instead of ignoring the spec.)
+            _add_subject_consecutive(spec, soft_terms_ref=soft_terms)
+
         elif kind in ("subject_preferred_periods", "teacher_preferred_periods"):
             entity_key = "subject" if kind == "subject_preferred_periods" else "teacher"
             entity = params.get(entity_key)
@@ -540,13 +547,14 @@ def build_custom_constraints(model, slots, data):
         model.Add(lit == 0)
         return lit
 
-    def _add_subject_consecutive(spec, guard=None):
+    def _add_subject_consecutive(spec, guard=None, soft_terms_ref=None):
         params = spec.get("params", {})
         subj = params.get("subject")
         length = int(params.get("length", 2) or 2)
         if length <= 1:
             return
         target_classes = set(params.get("classes") or data["classes"])
+        weight = _soft_weight(spec)
         for a in assignments:
             if a["subject"] != subj or a["class"] not in target_classes:
                 continue
@@ -578,10 +586,20 @@ def build_custom_constraints(model, slots, data):
                         if day_runs[k][0] - day_runs[j][0] < length:
                             model.Add(day_runs[j][1] + day_runs[k][1] <= 1)
                 run_vars.extend(r for _, r in day_runs)
-            if run_vars:
+            if not run_vars:
+                continue
+            if soft_terms_ref is None:
                 ct = model.Add(sum(run_vars) >= required_runs)
                 if guard is not None:
                     ct.OnlyEnforceIf(guard)
+            else:
+                # Soft: minimize missed required runs (clipped at 0).
+                # Aligns with validator's "missing run" semantic.
+                missed = model.NewIntVar(0, required_runs, f"missed_runs_{a['id']}_{subj}_{length}")
+                ct = model.Add(missed >= required_runs - sum(run_vars))
+                if guard is not None:
+                    ct.OnlyEnforceIf(guard)
+                soft_terms_ref.append((weight, missed))
 
     def _apply_then_constraint(then_spec, guard):
         kind = then_spec.get("kind")
