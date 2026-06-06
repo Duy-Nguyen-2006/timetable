@@ -201,6 +201,28 @@ export function stableHash(value: unknown): string {
   return JSON.stringify(sortObjectDeep(value));
 }
 
+/**
+ * Real FNV-1a 32-bit hash, hex-encoded. Use this for cache keys where we
+ * want a bounded-length fingerprint instead of a multi-KB JSON string.
+ * Browser- and Node-safe (no Web Crypto needed, fully sync).
+ */
+function fnv1a32(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * Deterministic, bounded-length cache key. Sorts object keys deeply before
+ * hashing so structurally-equal inputs (key order aside) collide.
+ */
+export function hashKey(value: unknown): string {
+  return fnv1a32(stableHash(value));
+}
+
 export function constraintSignature(spec: ConstraintSpec): string {
   return JSON.stringify({
     kind: spec.kind,

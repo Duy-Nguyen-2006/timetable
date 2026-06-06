@@ -287,7 +287,6 @@ test('runLocalAgent repairs runtime failures before returning coder exhausted', 
     assert.match(result.error ?? '', /Coder could not produce an executable schedule/i);
     assert.ok(coderCalls >= 3);
     assert.equal(repairPayload?.currentCode, "# c1\npass");
-    assert.equal(repairPayload?.constraintCode, "# c1\npass");
     assert.equal(repairPayload?.compileOrRunError, "");
   } finally {
     globalThis.fetch = originalFetch;

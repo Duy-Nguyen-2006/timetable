@@ -1,0 +1,14 @@
+{
+  "classes": ["6A"],
+  "days": ["mon", "tue"],
+  "periods": [1, 2],
+  "periodsByDay": { "mon": [1, 2], "tue": [1, 2] },
+  "assignments": [
+    { "id": "a1", "class": "6A", "subject": "Toán", "teacher": "Sơn",   "weeklyPeriods": 2 },
+    { "id": "a2", "class": "6A", "subject": "Văn",  "teacher": "Hương", "weeklyPeriods": 2 }
+  ],
+  "constraints": [
+    { "id": "c1", "original": "Toán đúng 2 tiết", "severity": "hard", "kind": "weekly_periods_exact", "params": { "assignmentId": "a1", "count": 2 } },
+    { "id": "c2", "original": "Văn đúng 2 tiết",  "severity": "hard", "kind": "weekly_periods_exact", "params": { "assignmentId": "a2", "count": 2 } }
+  ]
+}

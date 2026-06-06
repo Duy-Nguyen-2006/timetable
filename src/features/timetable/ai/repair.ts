@@ -3,9 +3,9 @@ import { z } from 'zod';
 import type { Plan, Violation } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import type { AIProviderConfig, ChatUsage, RepairTurnResult } from './types';
-import { invokeChat } from './chat-client';
+import { invokeChat, type ChatPayload } from './chat-client';
 
-type ChatInvoke = (payload: Record<string, unknown>) => Promise<{ content?: string; usage?: ChatUsage }>;
+type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
 
 const repairResponseSchema = z.object({
   summary: z.string(),
@@ -20,7 +20,7 @@ const repairResponseSchema = z.object({
   assumptions: z.array(z.string()),
 });
 
-const defaultInvokeChat = (payload: Record<string, unknown>) => invokeChat(payload as any);
+const defaultInvokeChat: ChatInvoke = (payload) => invokeChat(payload);
 
 function loadRepairSystemPrompt(): Promise<string> {
   return fetch('/prompts/repair.system.md')
@@ -41,10 +41,10 @@ export async function runRepairTurn(
     violations: Violation[];
     compileOrRunError?: string;
   },
-  invokeChat: ChatInvoke = defaultInvokeChat
+  invokeChatFn: ChatInvoke = defaultInvokeChat
 ): Promise<RepairTurnResult> {
   const systemPrompt = await loadRepairSystemPrompt();
-  const chatPayload = {
+  const chatPayload: ChatPayload = {
     baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
     apiKey: config.apiKey,
     model: config.model,
@@ -52,10 +52,11 @@ export async function runRepairTurn(
       { role: 'system', content: systemPrompt },
       {
         role: 'user',
+        // currentCode is the source of truth; do NOT also send constraintCode
+        // (was duplicate of currentCode, wasting ~constraint-code size per round).
         content: JSON.stringify({
           plan: payload.plan,
           currentCode: payload.constraintCode,
-          constraintCode: payload.constraintCode,
           violations: payload.violations.map((violation) => ({
             constraintId: violation.constraintId,
             kind: violation.kind,
@@ -101,7 +102,7 @@ export async function runRepairTurn(
     },
   };
 
-  const response = await invokeChat(chatPayload);
+  const response = await invokeChatFn(chatPayload);
   const parsed = repairResponseSchema.parse(parseModelJson(response.content));
   return {
     ...parsed,

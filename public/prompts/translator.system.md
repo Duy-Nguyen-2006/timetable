@@ -404,3 +404,26 @@ Ví dụ decompose:
 - `"Nếu A thì B và ngược lại nếu B thì A"` → 2 specs `if_then` riêng.
 
 **Quy tắc vàng**: prefer emitting 2-4 specs từ taxonomy hơn là 1 spec `custom_dsl` không-thi-hành-được.
+
+## `pythonPredicate` fallback (Tier 3)
+
+Khi một ràng buộc KHÔNG thể decompose bằng taxonomy ở trên (ví dụ: logic đếm chuỗi tuần, cân bằng phức tạp, hoặc mệnh đề toán học),
+bạn được phép fallback sang `kind: "custom_dsl"` + `severity: "hard"` + `params.pythonPredicate` chứa mã Python.
+
+**Bắt buộc**:
+- `pythonPredicate` phải định nghĩa đúng hàm `def check(schedule, assignments) -> bool | list[dict]`.
+- Khi trả về `True` → ràng buộc thỏa mãn. Khi trả về `False` → 1 violation. Khi trả về `list[dict]` → mỗi dict là 1 violation (`message` là key bắt buộc).
+- KHÔNG dùng tên cấm: `exec`, `eval`, `compile`, `input`, `breakpoint`, `globals`, `locals`, `vars`, `print`, `open`, `__import__`, hay truy cập `__class__`/`__bases__`/`__subclasses__`/`__mro__`/`__builtins__`.
+- Không vượt quá 5 giây runtime (validator sẽ kill).
+- Ví dụ hợp lệ:
+
+```python
+def check(schedule, assignments):
+    # Mỗi giáo viên không dạy quá 4 buổi/tuần
+    counts = {}
+    for entry in schedule:
+        counts[entry["teacher"]] = counts.get(entry["teacher"], 0) + 1
+    return all(c <= 4 for c in counts.values())
+```
+
+**Quy tắc ưu tiên**: ưu tiên 1 → taxonomy op; ưu tiên 2 → `if_then`/`and`/`or`/`not`; ưu tiên 3 → `pythonPredicate`.

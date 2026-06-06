@@ -35,6 +35,7 @@ import {
   resolveSolverRuntime,
   shouldRepairExecutableFailure,
   stableHash,
+  hashKey,
   normalizeRoundTripMessage,
 } from './local-agent-utils';
 
@@ -254,17 +255,28 @@ export async function runLocalAgent(
           try {
             const cacheableCoder = !previousAttemptSummary.trim();
             if (cacheableCoder) {
+              // Key coder cache on the things that actually change the LLM output:
+              //   - model, prompt/template/registry versions
+              //   - only custom_dsl hard specs (built-in constraints are zero-LLM)
+              //   - plan
+              // DO NOT include the full skeleton text in the key (was 1269 lines,
+              // making the cache key multi-KB and unlikely to ever collide). The
+              // template version is already a sufficient fingerprint.
+              const coderStageConfig = pickStageConfig(config, 'coder');
+              const customHardSpecs = compressed.constraints.filter(
+                (spec) => spec.kind === 'custom_dsl' && spec.severity === 'hard'
+              );
+              const cacheKey = `coder:${hashKey({
+                model: coderStageConfig.model,
+                promptVersion: PIPELINE_VERSIONS.prompt.coder,
+                templateVersion: PIPELINE_VERSIONS.solverTemplate,
+                registryVersion: PIPELINE_VERSIONS.constraintRegistry,
+                customHardSpecs,
+                plan: planner.plan,
+              })}`;
               const cached = await getCachedStage(
-                `coder:${stableHash({
-                  model: pickStageConfig(config, 'coder').model,
-                  promptVersion: PIPELINE_VERSIONS.prompt.coder,
-                  templateVersion: PIPELINE_VERSIONS.solverTemplate,
-                  registryVersion: PIPELINE_VERSIONS.constraintRegistry,
-                  constraintSpecs: compressed.constraints,
-                  plan: planner.plan,
-                  skeletonVersion: skeleton,
-                })}`,
-                () => runCoderTurn(pickStageConfig(config, 'coder'), coderInput)
+                cacheKey,
+                () => runCoderTurn(coderStageConfig, coderInput)
               );
               coder = cached.value;
               coderCacheHit = cached.hit;
