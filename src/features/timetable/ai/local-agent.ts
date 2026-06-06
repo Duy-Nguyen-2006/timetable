@@ -61,18 +61,17 @@ export async function runLocalAgent(
   // error and prevent the solver from running silently.
   if (typeof process !== 'undefined' && process.versions?.node) {
     const candidates = [
-      'python-dist/linux/code_executor',
-      'python-dist/macos/code_executor',
-      'python-dist/win32/code_executor.exe',
-      'python-dist/code_executor',
-      'python-dist/code_executor.exe',
+      'linux/code_executor',
+      'macos/code_executor',
+      'win32/code_executor.exe',
+      'code_executor',
+      'code_executor.exe',
     ];
     const fs = await import('node:fs');
     const path = await import('node:path');
-    const repoRoot = process.cwd();
     const found = candidates.some((rel) => {
       try {
-        return fs.existsSync(path.join(repoRoot, rel));
+        return fs.existsSync(path.join(process.cwd(), 'python-dist', rel));
       } catch {
         return false;
       }

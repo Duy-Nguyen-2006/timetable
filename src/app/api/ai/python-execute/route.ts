@@ -27,12 +27,11 @@ function truncateOutput(raw: string, maxLines = 100): string {
 
 function runExecutor(code: string, input: unknown, timeoutMs: number, solverWorkers?: number): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const repoRoot = process.cwd();
     const jobDir = path.join(
       os.tmpdir(),
       `tack-exec-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
     );
-    const executorPath = path.join(repoRoot, 'python', 'code_executor.py');
+    const executorPath = path.join(process.cwd(), 'python', 'code_executor.py');
     fs.mkdirSync(jobDir, { recursive: true });
     // Stringify không pretty-print để tiết kiệm băng thông disk I/O.
     fs.writeFileSync(path.join(jobDir, 'input.json'), JSON.stringify(input ?? {}), 'utf8');
@@ -123,7 +122,7 @@ function runExecutor(code: string, input: unknown, timeoutMs: number, solverWork
           Array.isArray((partialResult as any).schedule) &&
           (partialResult as any).schedule.length > 0
         ) {
-          const artifactDir = path.join(process.cwd(), '.ai_results');
+          const artifactDir = path.join(os.tmpdir(), 'tack-ai-results');
           fs.mkdirSync(artifactDir, { recursive: true });
           const artifactPath = path.join(artifactDir, `result_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
           fs.writeFileSync(artifactPath, JSON.stringify(partialResult), 'utf8');
@@ -176,11 +175,11 @@ function runExecutor(code: string, input: unknown, timeoutMs: number, solverWork
         const resolvedResultPath =
           resultPath && path.isAbsolute(resultPath) ? path.resolve(resultPath) : '';
         const tmpRoot = path.resolve(os.tmpdir());
-        const cwdRoot = path.resolve(process.cwd());
+        const jobRoot = path.resolve(jobDir);
         const safeResultPath =
           resolvedResultPath &&
           (resolvedResultPath.startsWith(tmpRoot + path.sep) ||
-            resolvedResultPath.startsWith(cwdRoot + path.sep))
+            resolvedResultPath.startsWith(jobRoot + path.sep))
             ? resolvedResultPath
             : '';
         if (resolvedResultPath && !safeResultPath) {
