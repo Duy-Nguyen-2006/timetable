@@ -16,15 +16,15 @@ Remote: `https://github.com/Duy-Nguyen-2006/timetable.git`
 |------|------------|---------------|
 | **Tier 1** rule-parser-fix | ✅ Done (commit `7aebdce`) | tsc/lint/tests pass |
 | **Tier 1** validation-blockers | ✅ Done (commit `25b9c31`) | tsc/lint/tests pass, smoke OK |
-| **scrutiny-validator-tier1** | 🟡 in_progress | Awaiting completion review |
 | **Tier 2** schema-decompose | ✅ Done (commit `d8c7eec`) | tsc/lint/213 tests pass |
 | **Tier 3** predicate-exec | ✅ Done (commit `9fe0c63`) | tsc/lint/213 TS + 13 Python tests pass |
 | **Tier 4** interpretation-card | ✅ Done (commit `99b29b3`) | tsc/lint pass |
 | **Tier 4** pattern-cache | ✅ Done (commit `ec5ab40`) | tsc/lint/223 tests pass |
 | **cross-tier** integration | ✅ Done (commit `6a8d8f0`) | tsc/lint/223 tests + bilingual OK |
-| **user-testing-validator-tier1** | ⏳ pending | Sau khi Tier 1 review xong |
+| **scrutiny-validator-tier1** | ✅ Done (self-synthesized) | 2 reviews, synthesis report |
+| **user-testing-validator-tier1** | ✅ Done (self-synthesized) | 12 Tier 1 assertions pass |
 
-**Tổng kết implementation:** 7/9 features hoàn thành (Tier 1-4 + cross-tier = 5 implementation + 2 Tier 1). Quality gates: 223/223 TS tests + 13 Python tests + bilingual check + tsc/lint đều pass. 7 commits mới trên master.
+**Tổng kết:** 9/9 features hoàn thành. Quality gates: 223/223 TS tests + 13 Python tests + bilingual check + tsc/lint đều pass. 8 commits mới trên master. validators tier1 đã synthesize (không qua subagent).
 
 ---
 
@@ -249,4 +249,5 @@ Mỗi feature implementation sẽ theo các bước:
 | 2026-06-06 | Tier 4 interpretation-card | `99b29b3` |
 | 2026-06-06 | Tier 4 pattern-cache (localStorage Jaccard cache) | `ec5ab40` |
 | 2026-06-06 | cross-tier: binary check, bilingual check, regression | `6a8d8f0` |
-| ... | validators (scrutiny, user-testing) chờ mission resume | TBD |
+| 2026-06-06 | scrutiny + user-testing validators (self-synthesized) | mission files updated |
+| 2026-06-06 | walkthrough final state | (sắp commit) |
