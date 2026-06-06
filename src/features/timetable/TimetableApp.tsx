@@ -27,6 +27,10 @@ import { runLocalAgent } from './ai/local-agent'
 import { constraintItemsToRaw, validateConfirmedSolveRequest } from './ai/solver-constraint-gate'
 import { ConstraintInputPanel } from './constraints/ConstraintInputPanel'
 import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
+import {
+  ConstraintInterpretationCard,
+  type InterpretationCandidate,
+} from './constraints/ConstraintInterpretationCard'
 import { useConstraintReview } from './constraints/useConstraintReview'
 import {
   buildDatasetSignature,
@@ -1916,6 +1920,23 @@ const handleDownloadExcel = useCallback(async () => {
                     />
                   </div>
 
+                  <InterpretationCardSection
+                    drafts={constraintDrafts}
+                    confirmed={confirmedConstraints}
+                    onConfirmSpec={(rawId) => {
+                      confirmDraft(rawId, constraintDrafts)
+                    }}
+                    onEditSpec={(rawId, spec) => {
+                      const existing = constraintDrafts.find((d) => d.rawConstraintId === rawId)
+                      if (existing) {
+                        updateDraft({ ...existing, proposedSpecs: [spec] })
+                      }
+                    }}
+                    onDismissSpec={() => {
+                      // user dismissed; do nothing destructive
+                    }}
+                  />
+
                 </section>
               ) : (
                 <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
@@ -2484,4 +2505,71 @@ const handleDownloadExcel = useCallback(async () => {
       />
     </>
   );
+}
+
+/**
+ * Tier 4 — renders ConstraintInterpretationCard for any draft that needs clarification
+ * (confidence='low' or custom_dsl hard). Surfaces 2-3 candidates and lets the user confirm / edit / dismiss.
+ */
+function InterpretationCardSection({
+  drafts,
+  confirmed,
+  onConfirmSpec,
+  onEditSpec,
+  onDismissSpec,
+}: {
+  drafts: import('./ai/constraint-review-types').ParsedConstraintDraft[];
+  confirmed: import('./ai/constraint-review-types').ConfirmedConstraint[];
+  onConfirmSpec: (rawId: string, spec: import('./ai/constraint-spec').ConstraintSpec) => void;
+  onEditSpec: (rawId: string, spec: import('./ai/constraint-spec').ConstraintSpec) => void;
+  onDismissSpec: () => void;
+}) {
+  const confirmedRawIds = new Set(confirmed.map((c) => c.rawConstraintId));
+  const ambiguous = drafts.filter(
+    (d) =>
+      !confirmedRawIds.has(d.rawConstraintId) &&
+      (d.confidence === 'low' ||
+        d.proposedSpecs.some((s) => s.kind === 'custom_dsl' && s.severity === 'hard')),
+  );
+  if (ambiguous.length === 0) return null;
+
+  return (
+    <div className="mt-4 space-y-3">
+      {ambiguous.map((draft) => {
+        const candidates: InterpretationCandidate[] = draft.proposedSpecs.slice(0, 3).map((spec) => ({
+          spec,
+          description: humanizeSpecSummary(spec),
+        }));
+        return (
+          <ConstraintInterpretationCard
+            key={draft.id}
+            draft={draft}
+            candidates={candidates}
+            onConfirm={(spec) => onConfirmSpec(draft.rawConstraintId, spec)}
+            onEdit={(spec) => onEditSpec(draft.rawConstraintId, spec)}
+            onDismiss={onDismissSpec}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function humanizeSpecSummary(spec: import('./ai/constraint-spec').ConstraintSpec): string {
+  if (spec.kind === 'custom_dsl' && spec.pythonPredicate) {
+    return 'Mẫu tự do (Python)';
+  }
+  if (spec.kind === 'custom_dsl') {
+    return 'Ràng buộc tự do';
+  }
+  if (spec.kind === 'if_then') {
+    return 'Có điều kiện (nếu… thì…)';
+  }
+  if (spec.kind.startsWith('teacher_block')) {
+    return 'Giáo viên không dạy vào';
+  }
+  if (spec.kind.startsWith('class_block')) {
+    return 'Lớp không học vào';
+  }
+  return spec.kind;
 }
