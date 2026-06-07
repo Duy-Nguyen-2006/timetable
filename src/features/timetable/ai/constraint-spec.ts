@@ -72,6 +72,11 @@ export type ConstraintKind =
   | 'subject_group'
   | 'subject_group_daily_limit'
   | 'subject_session_max_periods'
+  // THEN positive atoms (F-6, F-7): used inside `if_then.params.then[]`.
+  | 'teacher_required_day'
+  | 'teacher_required_slot'
+  | 'teacher_pair_required_same_day'
+  | 'teacher_pair_required_same_slot'
   | 'custom_dsl';
 
 export type ConditionExpr =

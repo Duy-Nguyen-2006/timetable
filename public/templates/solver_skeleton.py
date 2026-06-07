@@ -694,6 +694,78 @@ def build_custom_constraints(model, slots, data):
         elif kind == "subject_consecutive":
             _add_subject_consecutive(then_spec, guard)
 
+        elif kind == "teacher_required_day":
+            # F-6: teacher MUST teach at least 1 period on this day.
+            t = params.get("teacher")
+            d = params.get("day")
+            if not t or not d:
+                return
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            day_slots = _slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in _periods_for(d))
+            if not day_slots:
+                return
+            ct = model.Add(sum(day_slots) >= 1)
+            if guard is not None:
+                ct.OnlyEnforceIf(guard)
+
+        elif kind == "teacher_required_slot":
+            # F-6: teacher MUST teach exactly this (day, period) slot.
+            t = params.get("teacher")
+            d = params.get("day")
+            p = params.get("period")
+            if not t or not d or p is None:
+                return
+            try:
+                p_int = int(p)
+            except (TypeError, ValueError):
+                return
+            if p_int not in _periods_for(d):
+                return
+            teacher_asgs = [a for a in assignments if a["teacher"] == t]
+            for a in teacher_asgs:
+                var = _slot_var(a, d, p_int)
+                if var is not None:
+                    ct = model.Add(var == 1)
+                    if guard is not None:
+                        ct.OnlyEnforceIf(guard)
+
+        elif kind == "teacher_pair_required_same_day":
+            # F-7: mỗi teacher trong cặp MUST teach at least 1 period on this day.
+            teachers = params.get("teachers", [])
+            d = params.get("day")
+            if not teachers or not d:
+                return
+            for t in teachers:
+                teacher_asgs = [a for a in assignments if a["teacher"] == t]
+                day_slots = _slot_vars(_slot_var(a, d, p) for a in teacher_asgs for p in _periods_for(d))
+                if not day_slots:
+                    continue
+                ct = model.Add(sum(day_slots) >= 1)
+                if guard is not None:
+                    ct.OnlyEnforceIf(guard)
+
+        elif kind == "teacher_pair_required_same_slot":
+            # F-7: mỗi teacher trong cặp MUST teach this exact (day, period) slot.
+            teachers = params.get("teachers", [])
+            d = params.get("day")
+            p = params.get("period")
+            if not teachers or not d or p is None:
+                return
+            try:
+                p_int = int(p)
+            except (TypeError, ValueError):
+                return
+            if p_int not in _periods_for(d):
+                return
+            for t in teachers:
+                teacher_asgs = [a for a in assignments if a["teacher"] == t]
+                for a in teacher_asgs:
+                    var = _slot_var(a, d, p_int)
+                    if var is not None:
+                        ct = model.Add(var == 1)
+                        if guard is not None:
+                            ct.OnlyEnforceIf(guard)
+
         else:
             raise NotImplementedError(f"Unsupported if_then then kind: {kind}")
 

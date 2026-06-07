@@ -82,6 +82,11 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'subject_group', label: 'Subject group', group: 'subject', hasChecker: false, requiredParams: ['subjects'] },
   { kind: 'subject_group_daily_limit', label: 'Subject group daily limit', group: 'subject', hasChecker: true, requiredParams: ['subjects', 'max'] },
   { kind: 'subject_session_max_periods', label: 'Subject session max periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'session', 'max'] },
+  // THEN positive atoms (F-6, F-7): used inside if_then.params.then[].
+  { kind: 'teacher_required_day', label: 'Teacher required day', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'day'] },
+  { kind: 'teacher_required_slot', label: 'Teacher required slot', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'day', 'period'] },
+  { kind: 'teacher_pair_required_same_day', label: 'Teacher pair required same day', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'day'] },
+  { kind: 'teacher_pair_required_same_slot', label: 'Teacher pair required same slot', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'day', 'period'] },
   { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: ['pythonPredicate'] },
 ];
 
@@ -169,6 +174,11 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
   'subject_group',
   'subject_group_daily_limit',
   'subject_session_max_periods',
+  // THEN positive atoms (F-6, F-7)
+  'teacher_required_day',
+  'teacher_required_slot',
+  'teacher_pair_required_same_day',
+  'teacher_pair_required_same_slot',
 ] as const satisfies readonly ConstraintKind[];
 
 export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);
