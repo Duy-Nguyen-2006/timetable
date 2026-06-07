@@ -92,7 +92,7 @@ export function buildViolationSignature(
 ): string {
   const signature = hardViolations
     .map((violation) => `${violation.constraintId}:${violation.kind}`)
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .join('|');
   const roundTripSignature = roundTripOk
     ? 'rt:ok'

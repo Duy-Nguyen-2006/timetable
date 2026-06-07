@@ -5,6 +5,8 @@ import { __translatorInternal } from './translator';
 import type { AgentInputPayload } from './types';
 import type { ConstraintSpec } from './constraint-spec';
 
+const compareText = (a: string, b: string) => a.localeCompare(b);
+
 const sampleInput: AgentInputPayload = {
   days: [
     { id: 'mon', label: 'Thứ 2' },
@@ -784,7 +786,7 @@ test('VAL-T1-001: IF-AND-THEN with 2-slot IF preserves period in params.if', () 
     assert.equal(arg.day, 'mon');
     assert.equal(arg.period, 2);
   }
-  const teachers = cond.args.map((arg) => arg.teacher).sort();
+  const teachers = cond.args.map((arg) => arg.teacher).sort(compareText);
   assert.deepEqual(teachers, ['Hương', 'Sơn']);
   const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
   assert.equal(thenList[0].kind, 'teacher_block_slot');
@@ -902,12 +904,12 @@ test('VAL-T2-002 (F-1+F-2+F-6): "không dạy" cho 2 GV IF, "phải dạy" cho 2
   assert.equal(cond.op, 'not');
   assert.equal(cond.arg.op, 'and');
   assert.equal(cond.arg.args.length, 2);
-  assert.deepEqual(cond.arg.args.map((a) => a.teacher).sort(), ['Hương', 'Sơn']);
+  assert.deepEqual(cond.arg.args.map((a) => a.teacher).sort(compareText), ['Hương', 'Sơn']);
   assert.ok(cond.arg.args.every((a) => a.day === 'tue'));
   const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
   assert.equal(thenList.length, 2);
   assert.ok(thenList.every((t) => t.kind === 'teacher_required_day'));
-  const thenTeachers = thenList.map((t) => t.params.teacher).sort();
+  const thenTeachers = thenList.map((t) => String(t.params.teacher)).sort(compareText);
   assert.deepEqual(thenTeachers, ['Dung', 'Sơn']);
   assert.ok(thenList.every((t) => t.params.day === 'wednesday'));
 });
@@ -922,7 +924,7 @@ test('VAL-T2-003 (F-2): 3 teachers trong IF → AND có 3 args', () => {
   const cond = specs[0].params.if as { op: string; args: Array<{ teacher: string }> };
   assert.equal(cond.op, 'and');
   assert.equal(cond.args.length, 3);
-  assert.deepEqual(cond.args.map((a) => a.teacher).sort(), ['Dung', 'Hương', 'Sơn']);
+  assert.deepEqual(cond.args.map((a) => a.teacher).sort(compareText), ['Dung', 'Hương', 'Sơn']);
 });
 
 test('VAL-T2-004 (F-3): IF có "hoặc" → OR của 2 branches', () => {
@@ -935,8 +937,8 @@ test('VAL-T2-004 (F-3): IF có "hoặc" → OR của 2 branches', () => {
   const cond = specs[0].params.if as { op: string; args: Array<{ teacher: string; day: string }> };
   assert.equal(cond.op, 'or');
   assert.equal(cond.args.length, 2);
-  assert.deepEqual(cond.args.map((a) => a.teacher).sort(), ['Hương', 'Sơn']);
-  assert.deepEqual(cond.args.map((a) => a.day).sort(), ['mon', 'tue']);
+  assert.deepEqual(cond.args.map((a) => a.teacher).sort(compareText), ['Hương', 'Sơn']);
+  assert.deepEqual(cond.args.map((a) => a.day).sort(compareText), ['mon', 'tue']);
 });
 
 test('VAL-T2-005 (F-4): IF lớp × môn × slot → class_teacher_at_slot', () => {
@@ -963,7 +965,7 @@ test('VAL-T2-006 (F-5): IF cặp GV "cùng dạy" cùng ngày → teacher_pair_t
   assert.equal(specs[0].kind, 'if_then');
   const cond = specs[0].params.if as { op: string; teachers: string[]; day: string };
   assert.equal(cond.op, 'teacher_pair_teaches_same_day');
-  assert.deepEqual(cond.teachers.sort(), ['Hương', 'Sơn']);
+  assert.deepEqual(cond.teachers.sort(compareText), ['Hương', 'Sơn']);
   assert.equal(cond.day, 'mon');
   // THEN "Dung nghỉ" unparseable → thenSpecsRaw rỗng; if_then vẫn claim với notes UNPARSED_THEN
   const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
@@ -1025,7 +1027,7 @@ test('VAL-T2-010 (F-7): THEN 2 GV "phải dạy cùng tiết" → teacher_pair_r
   const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
   // subPeriod = null vì "cùng tiết thứ 4" không có "tiết N" → teacher_pair_required_same_day
   assert.equal(thenList[0].kind, 'teacher_pair_required_same_day');
-  assert.deepEqual((thenList[0].params.teachers as string[]).sort(), ['Dung', 'Hương']);
+  assert.deepEqual((thenList[0].params.teachers as string[]).sort(compareText), ['Dung', 'Hương']);
   assert.equal(thenList[0].params.day, 'wednesday');
 });
 

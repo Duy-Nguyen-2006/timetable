@@ -15,6 +15,7 @@ type Fixture = {
 };
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), '../../../../tests/fixtures/validator');
+const compareText = (a: string, b: string) => a.localeCompare(b);
 
 const fixtureFiles = readdirSync(fixturesDir).filter((file) => file.endsWith('.json'));
 
@@ -28,8 +29,8 @@ for (const file of fixtureFiles) {
     }));
 
     const report = validateSchedule(fixture.schedule, specs);
-    const violationIds = [...new Set(report.violations.map((violation) => violation.constraintId))].sort();
+    const violationIds = [...new Set(report.violations.map((violation) => violation.constraintId))].sort(compareText);
 
-    assert.deepEqual(violationIds, [...fixture.expectedViolationIds].sort());
+    assert.deepEqual(violationIds, [...fixture.expectedViolationIds].sort(compareText));
   });
 }

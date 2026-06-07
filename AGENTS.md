@@ -16,6 +16,13 @@ This repo uses Harness. Before work, read:
 
 Use the Rust Harness CLI at `scripts/bin/harness-cli` as the main operational
 tool.
+
+## SonarQube / CodeReviewer
+
+- Prefer Docker SonarQube for local scans; the ZIP `CodeReviewer` path needs a full JDK 21 and is less reliable here.
+- Keep `SONAR_HOST_URL` and `SONAR_TOKEN` in the environment only; never commit tokens or admin passwords.
+- Re-scan with `npx @sonar/scan -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.token="$SONAR_TOKEN" -Dsonar.projectKey=timetable -Dsonar.sources=src,electron,scripts` and keep exclusions consistent with `Bug.md`.
+- Fix SonarQube BUG issues before code smells, then run `npm run lint` and `npm test`.
 <!-- HARNESS:END -->
   GNU nano 9.0                                                                                 Backup.md                                                                                 Modified
 - Rule : Luôn có câu "Sax báo cáo" ở cuối mỗi câu trả lời

@@ -49,7 +49,7 @@ export function tokenize(text: string): string[] {
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .trim();
   const tokens = normalized.split(/\s+/).filter(Boolean);
-  return Array.from(new Set(tokens)).sort();
+  return Array.from(new Set(tokens)).sort((a, b) => a.localeCompare(b));
 }
 
 export function jaccardSimilarity(a: string[], b: string[]): number {

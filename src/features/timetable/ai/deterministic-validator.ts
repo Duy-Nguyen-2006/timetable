@@ -1465,7 +1465,7 @@ const checkTeacherRequiredDay: CheckFn = (spec, schedule) => {
 const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
-  const period = toPeriod(spec.params.period);
+  const period = toPeriod(String(spec.params.period ?? ''));
   if (!teacher || !day || period === null) return [];
   const teacherEntries = schedule.filter((e) => e.teacher === teacher);
   const has = teacherEntries.some(
@@ -1505,7 +1505,7 @@ const checkTeacherPairRequiredSameDay: CheckFn = (spec, schedule) => {
 const checkTeacherPairRequiredSameSlot: CheckFn = (spec, schedule) => {
   const teachers = Array.isArray(spec.params.teachers) ? (spec.params.teachers as string[]) : [];
   const day = String(spec.params.day ?? '');
-  const period = toPeriod(spec.params.period);
+  const period = toPeriod(String(spec.params.period ?? ''));
   if (teachers.length === 0 || !day || period === null) return [];
   const violations: Violation[] = [];
   for (const teacher of teachers) {

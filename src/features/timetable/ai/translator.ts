@@ -854,8 +854,6 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         const effectiveMax = maxConsecutive - 1;
         const klass = classLabels.find((label) => includesLabel(constraint.text, label));
         const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
-        const expandAllSubjects =
-          /(cùng\s*1\s*môn|cung\s*1\s*mon|mọi\s*môn|moi\s*mon|bất\s*kỳ|bat\s*ky)/iu.test(constraint.text) && !subject;
         if (subject) {
           return {
             id,
@@ -871,7 +869,7 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           } satisfies ConstraintSpec;
         }
         const uniqueSubjects = [...new Set(input.assignments.map((a) => a.subject.label))];
-        const targets = expandAllSubjects || uniqueSubjects.length > 1 ? uniqueSubjects : uniqueSubjects;
+        const targets = uniqueSubjects;
         return targets.map((subj, idx) => ({
           id: targets.length === 1 ? id : `${id}_${idx + 1}`,
           original: constraint.text,

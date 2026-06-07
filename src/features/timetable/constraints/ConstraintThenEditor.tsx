@@ -61,7 +61,7 @@ export function ConstraintThenEditor({
   const teacherLabels = useMemo(() => {
     const set = new Set<string>();
     for (const a of agentInput.assignments) set.add(a.teacher.label);
-    return [...set].filter(Boolean).sort();
+    return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b));
   }, [agentInput.assignments]);
 
   const dayLabels = useMemo(() => {
@@ -111,7 +111,7 @@ export function ConstraintThenEditor({
       });
     const updatedSpec: ConstraintSpec = {
       ...spec,
-      params: { ...spec.params, then },
+      params: { ...spec.params, ['then']: then },
     };
     onSave(updatedSpec);
     onOpenChange(false);
