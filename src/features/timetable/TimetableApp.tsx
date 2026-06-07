@@ -254,6 +254,13 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
         })),
       ]
 
+      // Quick import is the source of truth: prevent the localStorage
+      // hydration effect (declared below) from reloading the previous
+      // dataset's constraint list on top of the freshly imported one,
+      // and clear any leftover parsed/confirmed state from the old dataset.
+      constraintWorkspaceLoaded.current = true
+      invalidateReview()
+
       setSelectedDays(quickData.selectedDays)
       setSelectedSessions(quickData.selectedSessions)
       setPeriods(quickData.periods)
@@ -363,6 +370,12 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
   useEffect(() => {
     if (constraintWorkspaceLoaded.current) return
+    if (quickDatasetText) {
+      // Quick import owns the new dataset; the quickDatasetText effect
+      // already marked the workspace as loaded.
+      constraintWorkspaceLoaded.current = true
+      return
+    }
     const ws = readConstraintWorkspace()
     if (ws?.constraintList.length) {
       setConstraintList(ws.constraintList)
@@ -372,7 +385,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       })
     }
     constraintWorkspaceLoaded.current = true
-  }, [hydrateFromWorkspace])
+  }, [hydrateFromWorkspace, quickDatasetText])
 
   const datasetSignature = useMemo(
     () => (assignmentList.length ? buildDatasetSignature(constraintAgentInput) : ''),
