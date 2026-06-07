@@ -1850,7 +1850,7 @@ const handleDownloadExcel = useCallback(async () => {
 
                 </section>
               ) : page === 'constraints' ? (
-                <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+                <section className="constraint-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
                   <div className={navBarClass}>
                     <button type="button" onClick={() => setPage('assignments')} className={navBackClass}>
                       <ArrowLeft size={14} strokeWidth={1.5} />

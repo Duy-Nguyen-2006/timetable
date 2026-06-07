@@ -78,18 +78,27 @@ export function ConstraintInputPanel({ draft, onDraftChange, onImport, totalCoun
       {draft.type === 'preferred' && (
         <div className="mt-3 flex items-center gap-2">
           <span className="text-xs text-white/40">Độ ưu tiên:</span>
-          {([['Thấp', 3], ['TB', 5], ['Cao', 8]] as const).map(([label, val]) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => onDraftChange({ weight: val })}
-              className={`rounded px-2.5 py-1 text-xs font-medium transition ${
-                draft.weight === val ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+          {(
+            [
+              { label: 'Thấp', val: 3, unselected: 'text-emerald-400/60 hover:text-emerald-300 hover:bg-emerald-500/10', selected: 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/50' },
+              { label: 'TB', val: 5, unselected: 'text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/10', selected: 'bg-amber-500/20 text-amber-200 border border-amber-500/50' },
+              { label: 'Cao', val: 8, unselected: 'text-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10', selected: 'bg-rose-500/20 text-rose-200 border border-rose-500/50' },
+            ] as const
+          ).map(({ label, val, unselected, selected }) => {
+            const isActive = draft.weight === val
+            return (
+              <button
+                key={val}
+                type="button"
+                onClick={() => onDraftChange({ weight: val })}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition ${
+                  isActive ? selected : unselected
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
           <span className="ml-1 text-xs text-white/25">{draft.weight}/10</span>
         </div>
       )}
