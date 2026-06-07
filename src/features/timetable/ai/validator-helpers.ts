@@ -38,6 +38,27 @@ export function evaluateCondition(condition: ConditionExpr, schedule: ScheduleEn
           entry.day === condition.day &&
           toPeriod(entry.period) === condition.period
       );
+    case 'teacher_pair_teaches_same_day':
+      return condition.teachers.every((teacher) =>
+        schedule.some((entry) => entry.teacher === teacher && entry.day === condition.day)
+      );
+    case 'teacher_pair_teaches_same_slot':
+      return condition.teachers.every((teacher) =>
+        schedule.some(
+          (entry) =>
+            entry.teacher === teacher &&
+            entry.day === condition.day &&
+            toPeriod(entry.period) === condition.period
+        )
+      );
+    case 'class_teacher_at_slot':
+      return schedule.some(
+        (entry) =>
+          entry.class === condition.class &&
+          entry.subject === condition.subject &&
+          entry.day === condition.day &&
+          toPeriod(entry.period) === condition.period
+      );
     case 'and':
       return condition.args.every((arg) => evaluateCondition(arg, schedule));
     case 'or':
