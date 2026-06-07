@@ -78,7 +78,7 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'pair_not_same_slot', label: 'Pair not same slot', group: 'global', hasChecker: true, requiredParams: ['assignmentIds'] },
   { kind: 'pair_same_slot', label: 'Pair same slot', group: 'global', hasChecker: true, requiredParams: ['assignmentIds'] },
   { kind: 'mutual_exclusion', label: 'Mutual exclusion', group: 'global', hasChecker: true, requiredParams: ['assignmentIds'] },
-  { kind: 'session_limit', label: 'Session limit', group: 'global', hasChecker: true, requiredParams: ['day', 'period', 'max'] },
+  { kind: 'session_limit', label: 'Session limit', group: 'global', hasChecker: true, requiredParams: ['teacher', 'maxPeriods', 'session'] },
   { kind: 'subject_group', label: 'Subject group', group: 'subject', hasChecker: false, requiredParams: ['subjects'] },
   { kind: 'subject_group_daily_limit', label: 'Subject group daily limit', group: 'subject', hasChecker: true, requiredParams: ['subjects', 'max'] },
   { kind: 'subject_session_max_periods', label: 'Subject session max periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'session', 'max'] },

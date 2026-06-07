@@ -71,14 +71,20 @@ export function extractDayId(text: string, days: Array<{ id: string; label: stri
   const contextId = lookupDayIdByNumber(text, days);
   if (contextId) return contextId;
 
-  // Third pass: hardcoded English fallback (when days array is empty or short).
-  if (/thứ\s*2|thu\s*2/iu.test(text)) return 'monday';
-  if (/thứ\s*3|thu\s*3/iu.test(text)) return 'tuesday';
-  if (/thứ\s*4|thu\s*4/iu.test(text)) return 'wednesday';
-  if (/thứ\s*5|thu\s*5/iu.test(text)) return 'thursday';
-  if (/thứ\s*6|thu\s*6/iu.test(text)) return 'friday';
-  if (/thứ\s*7|thu\s*7/iu.test(text)) return 'saturday';
-  if (/chủ\s*nhật|chu\s*nhat|\bcn\b/iu.test(text)) return 'sunday';
+  // Third pass: hardcoded English fallback — chỉ chạy khi days array ngắn (< 7).
+  // Với mỗi hardcoded ID, CHỈ return nếu ID đó thực sự có trong days array.
+  // Tránh silent fail-open khi dataset 5 ngày (T2-T6) mà user nói "thứ 7"
+  // → trả 'saturday' không tồn tại, sanitize sẽ phải reject về custom_dsl.
+  if (days.length < HARDCODED_DAY_IDS.length) {
+    const dayIds = new Set(days.map((d) => d.id));
+    if (/thứ\s*2|thu\s*2/iu.test(text) && dayIds.has('monday')) return 'monday';
+    if (/thứ\s*3|thu\s*3/iu.test(text) && dayIds.has('tuesday')) return 'tuesday';
+    if (/thứ\s*4|thu\s*4/iu.test(text) && dayIds.has('wednesday')) return 'wednesday';
+    if (/thứ\s*5|thu\s*5/iu.test(text) && dayIds.has('thursday')) return 'thursday';
+    if (/thứ\s*6|thu\s*6/iu.test(text) && dayIds.has('friday')) return 'friday';
+    if (/thứ\s*7|thu\s*7/iu.test(text) && dayIds.has('saturday')) return 'saturday';
+    if (/chủ\s*nhật|chu\s*nhat|\bcn\b/iu.test(text) && dayIds.has('sunday')) return 'sunday';
+  }
 
   return null;
 }

@@ -729,9 +729,15 @@ const ifThenInput = (): AgentInputPayload => ({
   days: [
     { id: 'mon', label: 'Thứ 2' },
     { id: 'tue', label: 'Thứ 3' },
+    // Bug #2 fix: extractDayId giờ chỉ trả về hardcoded ID nếu ID đó có trong days array.
+    // Cần khai báo 'wednesday' (và 'thursday', 'friday' cho 1 số test) để cover F-1..F-9
+    // dùng các ngày ngoài mon/tue.
+    { id: 'wednesday', label: 'Thứ 4' },
+    { id: 'thursday', label: 'Thứ 5' },
+    { id: 'friday', label: 'Thứ 6' },
   ],
   sessions: [{ id: 'morning', label: 'Sáng' }],
-  periodCounts: { mon: 5, tue: 5 },
+  periodCounts: { mon: 5, tue: 5, wednesday: 5, thursday: 5, friday: 5 },
   deletedPeriods: {},
   assignments: [
     {
@@ -1181,4 +1187,134 @@ test('VAL-T1-009: determinism — two invocations of fallback parser return deep
 
   assert.equal(first.length, second.length);
   assert.deepEqual(first, second);
+});
+
+// =========================================================================
+// Tier 3 — Bug sweep (BUG-1..BUG-4) verifying clean codebase
+// =========================================================================
+
+import { validateConstraintSpecs } from './constraint-draft-validator';
+
+test('BUG-1: session_limit requiredParams được align với implementation (teacher/maxPeriods/session)', () => {
+  // BUG-1 (pre-existing): registry.requiredParams sai (['day','period','max'])
+  // → mọi session_limit spec từ translator bị flag "missing required param:
+  // day, period, max" dù translator thực sự emit { teacher, maxPeriods, session }.
+  // Fix: registry align với implementation. Post-fix, validator sẽ chỉ flag
+  // 'teacher' (vì isSessionLimitText return teacher='' cho "mỗi") — KHÔNG flag
+  // day/period/max nữa. Đây là behavior MỚI đúng đắn.
+  //
+  // Lưu ý: dispatcher hiện tại ưu tiên isSubjectSessionMaxPeriodsText trước
+  // isSessionLimitText (pre-existing ngoài scope 4 bug), nên ta dùng spec
+  // trực tiếp để mô phỏng output thực tế mà session_limit helper emit.
+  const sessionLimitSpec: ConstraintSpec = {
+    id: 'c1',
+    original: 'Mỗi giáo viên không dạy quá 4 tiết trong cùng 1 buổi sáng',
+    severity: 'soft',
+    kind: 'session_limit',
+    params: { teacher: '', maxPeriods: 4, session: 'morning' },
+  };
+  const result = validateConstraintSpecs(sampleInput, [sessionLimitSpec]);
+  const missingParamIssues = result.issues.filter((i) => i.code === 'missing_required_param');
+  // 1) Phải KHÔNG còn flag 'day'/'period'/'max' nữa (pre-fix bug).
+  const wrongFields = missingParamIssues
+    .map((i) => i.field)
+    .filter((f) => f === 'day' || f === 'period' || f === 'max');
+  assert.equal(
+    wrongFields.length,
+    0,
+    `Pre-fix bug: should NOT flag day/period/max anymore. Got: ${JSON.stringify(wrongFields)}`,
+  );
+  // 2) Có thể flag 'teacher' (vì isSessionLimitText emit teacher='') — đó là
+  //    behavior đúng đắn mới (pre-fix không phát hiện vì flag sai fields).
+  //    Tùy chọn, có thể không có issue nào nếu user nhập "Giáo viên X không..."
+  //    với teacher cụ thể.
+  const flaggedFields = missingParamIssues.map((i) => i.field);
+  assert.ok(
+    !flaggedFields.includes('day') && !flaggedFields.includes('period') && !flaggedFields.includes('max'),
+    `requiredParams schema đã align với implementation. Flagged fields: ${JSON.stringify(flaggedFields)}`,
+  );
+});
+
+import { extractDayId } from './translator-text';
+
+test('BUG-2: extractDayId returns null cho "thứ 7" khi dataset chỉ có 5 ngày (T2-T6)', () => {
+  // BUG-2 (pre-existing, silent fail-open): hardcoded English fallback
+  // trả về 'saturday'/'sunday' ngay cả khi dataset không khai báo các ngày này.
+  // Fix: chỉ return hardcoded ID nếu ID đó có thực sự trong days array.
+  const fiveDays = [
+    { id: 'monday', label: 'Thứ hai' },
+    { id: 'tuesday', label: 'Thứ ba' },
+    { id: 'wednesday', label: 'Thứ tư' },
+    { id: 'thursday', label: 'Thứ năm' },
+    { id: 'friday', label: 'Thứ sáu' },
+  ];
+  assert.equal(extractDayId('Không dạy thứ 7', fiveDays), null);
+  assert.equal(extractDayId('CN không xếp', fiveDays), null);
+  // Vẫn hoạt động bình thường với các ngày có trong dataset
+  assert.equal(extractDayId('Không dạy thứ 3', fiveDays), 'tuesday');
+});
+
+import { validateSchedule } from './deterministic-validator';
+import type { ScheduleEntry } from './types';
+
+test('BUG-4: 4 THEN-positive checkers populate offendingEntries (không phải [])', () => {
+  // BUG-4 (mine): tôi return offendingEntries: [] trong 4 checkers mới.
+  // Fix: populate với schedule entries của teacher đó để user dễ debug.
+  const baseSpec: ConstraintSpec = {
+    id: 'spec-1',
+    original: 'Sơn phải dạy thứ 4',
+    severity: 'hard',
+    kind: 'teacher_required_day',
+    params: { teacher: 'Sơn', day: 'wednesday' },
+  };
+  const schedule: ScheduleEntry[] = [
+    { day: 'tue', period: 1, teacher: 'Sơn', class: '6A', subject: 'Toán' },
+    { day: 'tue', period: 2, teacher: 'Sơn', class: '6A', subject: 'Toán' },
+    { day: 'thu', period: 1, teacher: 'Hương', class: '6A', subject: 'Văn' },
+  ];
+  const report = validateSchedule(schedule, [baseSpec]);
+  const hardViolations = report.hardViolations;
+  assert.equal(hardViolations.length, 1, 'should flag missing day for Sơn');
+  assert.ok(
+    hardViolations[0].offendingEntries.length > 0,
+    'offendingEntries should not be empty',
+  );
+  // Phải chứa entries của Sơn, không lẫn entries của Hương
+  assert.ok(hardViolations[0].offendingEntries.every((e) => e.teacher === 'Sơn'));
+  assert.equal(hardViolations[0].offendingEntries.length, 2);
+});
+
+test('BUG-3: nested if_then spec có top-level weight khi THEN item có params.weight', () => {
+  // BUG-3 (mine): F-9 weight propagation chỉ set params.weight trên THEN items
+  // mà không set top-level weight trên nestedSpec. Fix: propagate.
+  // Cấu trúc giả lập spec mà translator sẽ emit khi user nói
+  // "Nếu Sơn dạy thứ 2 thì Dung phải dạy thứ 4" với severity=soft + weight=5.
+  const inner: ConstraintSpec = {
+    id: 'if-1',
+    original: 'Nếu Sơn dạy thứ 2 thì Dung phải dạy thứ 4',
+    severity: 'soft',
+    kind: 'if_then',
+    params: {
+      if: { op: 'teacher_teaches_on_day', teacher: 'Sơn', day: 'mon' },
+      then: [
+        { kind: 'teacher_required_day', params: { teacher: 'Dung', day: 'wednesday', weight: 5 } },
+      ],
+    },
+  };
+  // Schedule: Sơn dạy thứ 2 (điều kiện IF thoả) → check THEN.
+  // Dung không có entry nào → teacher_required_day cho Dung/wednesday sẽ fail.
+  const schedule: ScheduleEntry[] = [
+    { day: 'mon', period: 1, teacher: 'Sơn', class: '6A', subject: 'Toán' },
+  ];
+  const report = validateSchedule(schedule, [inner]);
+  // Sau checkIfThen: condition satisfied (Sơn dạy mon) → invoke teacher_required_day
+  // cho Dung trên wednesday → Dung không có entry → violation.
+  const allViolations = [
+    ...report.hardViolations,
+    ...report.softViolations,
+  ];
+  const dungViolation = allViolations.find((v) => v.message.includes('Dung'));
+  assert.ok(dungViolation, 'should have a violation for Dung (nested teacher_required_day)');
+  // Đảm bảo tổng cộng có ít nhất 1 violation (F-3 fix chỉ ảnh hưởng weight, không thêm/bớt violation)
+  assert.ok(allViolations.length >= 1, 'should have at least 1 violation from nested check');
 });

@@ -441,6 +441,10 @@ const checkIfThen: CheckFn = (spec, schedule, ctx) => {
   const violations: Violation[] = [];
   for (let index = 0; index < thenList.length; index += 1) {
     const thenItem = thenList[index];
+    // F-9 fix: nếu THEN item có params.weight (do translator set cho soft IF/THEN),
+    // propagate lên top-level weight trên nestedSpec để các consumer downstream
+    // (humanizer, future solver) có thể đọc được.
+    const itemWeight = Number(thenItem?.params?.weight);
     const nestedSpec: ConstraintSpec = {
       id: `${spec.id}:then:${index + 1}`,
       original: spec.original,
@@ -448,6 +452,7 @@ const checkIfThen: CheckFn = (spec, schedule, ctx) => {
       kind: (thenItem.kind ?? 'custom_dsl') as ConstraintSpec['kind'],
       params: thenItem.params ?? {},
       notes: spec.notes,
+      ...(Number.isFinite(itemWeight) && itemWeight > 0 ? { weight: itemWeight } : {}),
     };
     const checker = checkerByKind[nestedSpec.kind];
     if (!checker) continue;
@@ -1439,17 +1444,19 @@ const checkTeacherHomeroomFirstPeriod: CheckFn = (spec, schedule) => {
 
 // THEN positive atoms (F-6, F-7): dùng bên trong `if_then.params.then[]`.
 // "phải dạy" — flag nếu teacher không có entry khớp với (teacher, day[, period]).
+// Trả offendingEntries = tất cả entries của teacher đó để user dễ debug.
 const checkTeacherRequiredDay: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
   if (!teacher || !day) return [];
-  const has = schedule.some((e) => e.teacher === teacher && e.day === day);
+  const teacherEntries = schedule.filter((e) => e.teacher === teacher);
+  const has = teacherEntries.some((e) => e.day === day);
   if (!has) {
     return [{
       constraintId: spec.id,
       kind: spec.kind,
       message: `Giáo viên ${teacher} phải dạy ngày ${day} nhưng không có tiết nào.`,
-      offendingEntries: [],
+      offendingEntries: teacherEntries,
     }];
   }
   return [];
@@ -1460,15 +1467,16 @@ const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
   const day = String(spec.params.day ?? '');
   const period = toPeriod(spec.params.period);
   if (!teacher || !day || period === null) return [];
-  const has = schedule.some(
-    (e) => e.teacher === teacher && e.day === day && toPeriod(e.period) === period
+  const teacherEntries = schedule.filter((e) => e.teacher === teacher);
+  const has = teacherEntries.some(
+    (e) => e.day === day && toPeriod(e.period) === period
   );
   if (!has) {
     return [{
       constraintId: spec.id,
       kind: spec.kind,
       message: `Giáo viên ${teacher} phải dạy ${day} tiết ${period} nhưng không xếp được.`,
-      offendingEntries: [],
+      offendingEntries: teacherEntries,
     }];
   }
   return [];
@@ -1480,13 +1488,14 @@ const checkTeacherPairRequiredSameDay: CheckFn = (spec, schedule) => {
   if (teachers.length === 0 || !day) return [];
   const violations: Violation[] = [];
   for (const teacher of teachers) {
-    const has = schedule.some((e) => e.teacher === teacher && e.day === day);
+    const teacherEntries = schedule.filter((e) => e.teacher === teacher);
+    const has = teacherEntries.some((e) => e.day === day);
     if (!has) {
       violations.push({
         constraintId: spec.id,
         kind: spec.kind,
         message: `Giáo viên ${teacher} (cặp bắt buộc) phải dạy ngày ${day} nhưng không có tiết nào.`,
-        offendingEntries: [],
+        offendingEntries: teacherEntries,
       });
     }
   }
@@ -1500,15 +1509,16 @@ const checkTeacherPairRequiredSameSlot: CheckFn = (spec, schedule) => {
   if (teachers.length === 0 || !day || period === null) return [];
   const violations: Violation[] = [];
   for (const teacher of teachers) {
-    const has = schedule.some(
-      (e) => e.teacher === teacher && e.day === day && toPeriod(e.period) === period
+    const teacherEntries = schedule.filter((e) => e.teacher === teacher);
+    const has = teacherEntries.some(
+      (e) => e.day === day && toPeriod(e.period) === period
     );
     if (!has) {
       violations.push({
         constraintId: spec.id,
         kind: spec.kind,
         message: `Giáo viên ${teacher} (cặp bắt buộc) phải dạy ${day} tiết ${period} nhưng không xếp được.`,
-        offendingEntries: [],
+        offendingEntries: teacherEntries,
       });
     }
   }
