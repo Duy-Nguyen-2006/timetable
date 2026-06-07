@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { parseConstraintDraftsWithRaws } from '../ai/constraint-parse-service';
+import { reparseRejectedConstraint } from '../ai/constraint-reparse-service';
 import { assertSolvableConstraintState } from '../ai/constraint-preflight';
-import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
+import type { ConfirmedConstraint, ParsedConstraintDraft, ReparseAttempt } from '../ai/constraint-review-types';
 import {
   confirmedFromDraftsAfterUserAccept,
   constraintItemsToRaw,
@@ -17,6 +18,8 @@ import {
   defaultFormValues,
   type ConstraintFormTemplateId,
 } from './constraint-form-schema';
+
+const MAX_REPARSE_ATTEMPTS = 3;
 
 export type ConstraintReviewHydration = {
   constraintDrafts?: ParsedConstraintDraft[];
@@ -31,6 +34,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
     () => initial?.confirmedConstraints ?? []
   );
   const [parseLoading, setParseLoading] = useState(false);
+  const [reparseLoading, setReparseLoading] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [newConstraintIds, setNewConstraintIds] = useState<Set<string>>(() => new Set());
   const hydratedRef = useRef(false);
@@ -112,6 +116,114 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
       current.filter((c) => c.rawConstraintId !== updated.rawConstraintId)
     );
   }, []);
+
+  /**
+   * Reject the current interpretation and request AI to re-parse.
+   * Returns the new draft with updated displayText, or null if max attempts reached.
+   */
+  const rejectAndReparse = useCallback(
+    async (
+      rawConstraint: { id: string; text: string; type: 'required' | 'preferred'; weight?: number },
+      currentDraft: ParsedConstraintDraft,
+      agentInput: AgentInputPayload,
+      provider: AIProviderConfig
+    ): Promise<ParsedConstraintDraft | null> => {
+      const attempts = currentDraft.reparseCount ?? 0;
+      if (attempts >= MAX_REPARSE_ATTEMPTS) {
+        return null;
+      }
+
+      setReparseLoading(true);
+      try {
+        const previousAttempts: ReparseAttempt[] = [
+          ...(currentDraft.previousAttempts ?? []),
+          {
+            summary: currentDraft.explanation || '',
+            displayText: currentDraft.displayText || currentDraft.original,
+            spec: currentDraft.proposedSpecs[0],
+            semantic: currentDraft.semanticRepresentation,
+            source: currentDraft.proposedSpecs[0] ? 'built_in' : 'semantic',
+            confidence: currentDraft.confidence,
+            assumptions: [],
+            createdAt: new Date().toISOString(),
+          },
+        ];
+
+        const context = {
+          teachers: agentInput.assignments.map((a) => a.teacher.label),
+          classes: agentInput.assignments.map((a) => a.class.label),
+          subjects: agentInput.assignments.map((a) => a.subject.label),
+          days: agentInput.days,
+          periods: agentInput.sessions.flatMap((session) =>
+            Array.from({ length: agentInput.periodCounts[session.id] ?? 0 }, (_, i) => ({
+              session: session.id,
+              period: i + 1,
+            }))
+          ),
+          assignments: agentInput.assignments.map((a) => ({
+            id: a.id,
+            teacher: a.teacher.label,
+            class: a.class.label,
+            subject: a.subject.label,
+            weeklyPeriods: a.weeklyPeriods,
+          })),
+        };
+
+        const result = await reparseRejectedConstraint(
+          {
+            rawConstraint: {
+              id: rawConstraint.id,
+              text: rawConstraint.text,
+              type: rawConstraint.type,
+              weight: rawConstraint.weight,
+            },
+            rejectedDraft: {
+              summary: currentDraft.explanation || '',
+              displayText: currentDraft.displayText || currentDraft.original,
+              spec: currentDraft.proposedSpecs[0],
+            },
+            previousAttempts: previousAttempts.map((a) => ({
+              summary: a.summary,
+              displayText: a.displayText,
+              source: a.source,
+              confidence: a.confidence,
+            })),
+            context,
+          },
+          provider
+        );
+
+        const updatedDraft: ParsedConstraintDraft = {
+          ...currentDraft,
+          displayText: result.displayText,
+          reparseCount: attempts + 1,
+          previousAttempts,
+          proposedSpecs: result.candidate.specs ?? currentDraft.proposedSpecs,
+          semanticRepresentation: result.candidate.semantic,
+          confidence: result.candidate.confidence,
+          status: result.status === 'unsupported' ? 'unsupported' : 'parsed',
+        };
+
+        setConstraintDrafts((current) => {
+          const has = current.some((d) => d.rawConstraintId === updatedDraft.rawConstraintId);
+          if (has) {
+            return current.map((d) =>
+              d.rawConstraintId === updatedDraft.rawConstraintId ? updatedDraft : d
+            );
+          }
+          return [...current, updatedDraft];
+        });
+
+        return updatedDraft;
+      } catch (e) {
+        setParseError(e instanceof Error ? e.message : 'Diễn giải lại thất bại');
+        return null;
+      } finally {
+        setReparseLoading(false);
+      }
+    },
+    []
+  );
 
   const applyTemplate = useCallback(
     (
@@ -211,12 +323,14 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
     constraintDrafts,
     confirmedConstraints,
     parseLoading,
+    reparseLoading,
     parseError,
     hydrateFromWorkspace,
     invalidateReview,
     confirmDraft,
     ignoreDraft,
     updateDraft,
+    rejectAndReparse,
     applyTemplate,
     markConstraintsAdded,
     removeConstraintReview,

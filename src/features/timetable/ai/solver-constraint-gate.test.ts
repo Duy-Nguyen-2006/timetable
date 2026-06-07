@@ -51,6 +51,7 @@ test('validateConfirmedSolveRequest allows confirmed teacher_block_day', () => {
       confirmedBy: 'user',
       confirmedAt: new Date().toISOString(),
       summary: 'ok',
+      displayText: 'Sơn không dạy thứ 2',
     },
   ];
   const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Sơn không dạy thứ 2' }]);
@@ -76,6 +77,7 @@ test('buildAgentInputWithConfirmedSpecs flattens specs', () => {
       confirmedBy: 'user',
       confirmedAt: '',
       summary: '',
+      displayText: 'Sơn không dạy thứ 2',
     },
   ];
   const { preTranslatedSpecs } = buildAgentInputWithConfirmedSpecs(baseInput, confirmed);

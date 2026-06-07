@@ -85,6 +85,8 @@ export function confirmedFromDraftsAfterUserAccept(drafts: ParsedConstraintDraft
       confirmedBy: 'user' as const,
       confirmedAt: now,
       summary: humanizeDraft(d),
+      displayText: d.displayText || humanizeDraft(d),
+      semanticRepresentation: d.semanticRepresentation,
     }));
 }
 

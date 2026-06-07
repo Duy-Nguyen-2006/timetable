@@ -215,6 +215,7 @@ test('preflight allows when hard confirmed', () => {
       confirmedBy: 'user',
       confirmedAt: new Date().toISOString(),
       summary: humanizeConstraintSpec(specs[0]),
+      displayText: humanizeConstraintSpec(specs[0]),
     },
   ];
   const draft = buildDraftFromSpecs('d1', { id: 'r1', text: raw[0].text, type: 'required' }, specs, baseInput, {
@@ -249,6 +250,7 @@ test('preflight passes confirmed hard specs that are now solver-encodable', () =
       confirmedBy: 'user',
       confirmedAt: new Date().toISOString(),
       summary: 'unsupported hard',
+      displayText: 'unsupported hard',
     },
   ];
 

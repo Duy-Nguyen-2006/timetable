@@ -20,6 +20,7 @@ type ConstraintReviewPanelProps = {
   newConstraintIds: Set<string>;
   agentInput: AgentInputPayload;
   parseLoading: boolean;
+  reparseLoading?: boolean;
   parseError: string | null;
   canSolve: boolean;
   solveBlockHint: string | null;
@@ -29,6 +30,7 @@ type ConstraintReviewPanelProps = {
   onDeleteConstraint: (id: string) => void;
   onSaveDraft: (updated: ParsedConstraintDraft) => void;
   onApplyTemplate: (constraint: ConstraintItem, templateId: ConstraintFormTemplateId) => void;
+  onRejectAndReparse?: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
 };
 
 export function ConstraintReviewPanel({
@@ -37,6 +39,7 @@ export function ConstraintReviewPanel({
   confirmed,
   newConstraintIds,
   parseLoading,
+  reparseLoading,
   parseError,
   canSolve,
   solveBlockHint,
@@ -47,6 +50,7 @@ export function ConstraintReviewPanel({
   onDeleteConstraint,
   onSaveDraft,
   onApplyTemplate,
+  onRejectAndReparse,
 }: ConstraintReviewPanelProps) {
   const [editConstraintId, setEditConstraintId] = useState<string | null>(null);
   const [templateForId, setTemplateForId] = useState<string | null>(null);
@@ -129,6 +133,12 @@ export function ConstraintReviewPanel({
               onPickTemplate={() => setTemplateForId(constraint.id)}
               onEditThen={() => setThenEditForId(constraint.id)}
               onDelete={() => onDeleteConstraint(constraint.id)}
+              onRejectAndReparse={
+                onRejectAndReparse && draftByRaw.get(constraint.id)
+                  ? () => onRejectAndReparse(constraint, draftByRaw.get(constraint.id)!)
+                  : undefined
+              }
+              isReparsing={reparseLoading}
             />
           ))
         ) : (

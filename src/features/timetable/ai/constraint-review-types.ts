@@ -1,4 +1,5 @@
 import type { ConstraintSpec } from './constraint-spec';
+import type { SemanticConstraint } from './semantic-constraint';
 
 export type RawConstraintInput = {
   id: string;
@@ -15,6 +16,14 @@ export type ConstraintParseStatus =
   | 'unparsed'
   | 'unsupported'
   | 'ignored';
+
+export type ConstraintUnderstandingStatus =
+  | 'parsed_waiting_approval'
+  | 'approved'
+  | 'rejected_reparsing'
+  | 'reparsed_waiting_approval'
+  | 'unsupported'
+  | 'failed_to_understand';
 
 export type ConstraintParseIssueCode =
   | 'unknown_entity'
@@ -42,6 +51,17 @@ export type ConstraintParseIssue = {
   candidates?: string[];
 };
 
+export type ReparseAttempt = {
+  summary: string;
+  displayText: string;
+  spec?: ConstraintSpec;
+  semantic?: SemanticConstraint;
+  source: 'built_in' | 'semantic';
+  confidence: 'high' | 'medium' | 'low';
+  assumptions: string[];
+  createdAt: string;
+};
+
 export type ParsedConstraintDraft = {
   id: string;
   rawConstraintId: string;
@@ -54,6 +74,12 @@ export type ParsedConstraintDraft = {
   clarificationQuestions?: ConstraintClarificationQuestion[];
   source: 'rule' | 'translator' | 'manual' | 'template';
   confirmedAt?: string;
+  /** Re-parse tracking */
+  previousAttempts?: ReparseAttempt[];
+  reparseCount?: number;
+  semanticRepresentation?: SemanticConstraint;
+  /** The approved display text shown to user */
+  displayText?: string;
 };
 
 export type ConfirmedConstraint = {
@@ -63,6 +89,9 @@ export type ConfirmedConstraint = {
   confirmedBy: 'user' | 'system_template';
   confirmedAt: string;
   summary: string;
+  /** The user-approved Vietnamese display text */
+  displayText: string;
+  semanticRepresentation?: SemanticConstraint;
 };
 
 export type PreflightBlockReason =

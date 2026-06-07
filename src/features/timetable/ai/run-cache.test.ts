@@ -46,6 +46,7 @@ test('buildRunCacheDigest changes when confirmedConstraints added', () => {
       confirmedBy: 'user',
       confirmedAt: '',
       summary: '',
+      displayText: 'Sơn không dạy thứ 2',
     },
   ];
   const withConfirmed = buildRunCacheDigest(input, provider, confirmed);
@@ -69,6 +70,7 @@ test('buildRunCacheDigest stable for same confirmed set', () => {
       confirmedBy: 'user',
       confirmedAt: '',
       summary: '',
+      displayText: 'Sơn không dạy thứ 2',
     },
   ];
   assert.equal(

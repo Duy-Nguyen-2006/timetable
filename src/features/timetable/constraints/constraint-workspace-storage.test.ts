@@ -30,6 +30,7 @@ test('digestConfirmedConstraintSpecs stable for same specs', () => {
       confirmedBy: 'user',
       confirmedAt: '',
       summary: '',
+      displayText: 'Sơn không dạy thứ 2',
     },
   ];
   const a = digestConfirmedConstraintSpecs(confirmed);

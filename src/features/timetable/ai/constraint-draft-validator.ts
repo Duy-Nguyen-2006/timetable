@@ -2,6 +2,7 @@ import type { AgentInputPayload } from './types';
 import type { ConstraintSpec } from './constraint-spec';
 import { CONSTRAINT_REGISTRY, SOLVER_ENCODABLE_KINDS, getConstraintMeta } from './constraint-registry';
 import { buildClarificationQuestions } from './constraint-clarification';
+import { humanizeDraft } from './constraint-humanizer';
 import { matchTeacherLabels, normalizeConstraintText, splitThenClause } from './translator-text';
 import type {
   ConstraintParseIssue,
@@ -262,6 +263,19 @@ export function buildDraftFromSpecs(
   });
   const clarificationQuestions =
     status === 'needs_review' ? buildClarificationQuestions(raw.text) : undefined;
+
+  const draftSummary = humanizeDraft({
+    id: draftId,
+    rawConstraintId: raw.id,
+    original: raw.text,
+    proposedSpecs: specs,
+    status,
+    confidence: recomputedConfidence ?? meta.confidence,
+    explanation: meta.explanation ?? '',
+    issues,
+    source: meta.source,
+  });
+
   return {
     id: draftId,
     rawConstraintId: raw.id,
@@ -273,6 +287,7 @@ export function buildDraftFromSpecs(
     issues,
     clarificationQuestions,
     source: meta.source,
+    displayText: draftSummary,
   };
 }
 

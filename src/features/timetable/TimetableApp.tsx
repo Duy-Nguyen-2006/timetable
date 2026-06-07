@@ -132,11 +132,13 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     constraintDrafts,
     confirmedConstraints,
     parseLoading,
+    reparseLoading,
     parseError,
     invalidateReview,
     confirmDraft,
     ignoreDraft,
     updateDraft,
+    rejectAndReparse,
     applyTemplate,
     markConstraintsAdded,
     removeConstraintReview,
@@ -1930,6 +1932,20 @@ const handleDownloadExcel = useCallback(async () => {
                       onApplyTemplate={(c, templateId) =>
                         applyTemplate(c, templateId, constraintAgentInput, constraintDrafts.find((d) => d.rawConstraintId === c.id))
                       }
+                      onRejectAndReparse={
+                        aiProvider
+                          ? (constraint, draft) => {
+                              if (!aiProvider) return
+                              void rejectAndReparse(
+                                { id: constraint.id, text: constraint.text, type: constraint.type, weight: constraint.weight },
+                                draft,
+                                constraintAgentInput,
+                                aiProvider
+                              )
+                            }
+                          : undefined
+                      }
+                      reparseLoading={reparseLoading}
                     />
                   </div>
 

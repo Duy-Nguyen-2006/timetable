@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Check, Circle, Info, Pencil, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, Circle, Info, Pencil, Trash2, Loader2 } from 'lucide-react';
 
 import { humanizeDraft } from '../ai/constraint-humanizer';
 import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
@@ -18,8 +18,12 @@ type ConstraintDraftCardProps = {
   onPickTemplate: () => void;
   onEditThen?: () => void;
   onDelete: () => void;
+  onRejectAndReparse?: () => void;
   isNew?: boolean;
+  isReparsing?: boolean;
 };
+
+const MAX_REPARSE_ATTEMPTS = 3;
 
 export function ConstraintDraftCard({
   constraint,
@@ -32,9 +36,11 @@ export function ConstraintDraftCard({
   onPickTemplate,
   onEditThen,
   onDelete,
+  onRejectAndReparse,
+  isReparsing,
 }: ConstraintDraftCardProps) {
   const constraintType = constraintTypes[constraint.type] ?? constraintTypes.required;
-  const summary = confirmed?.summary ?? (draft ? humanizeDraft(draft) : constraint.text);
+  const summary = confirmed?.displayText ?? confirmed?.summary ?? (draft ? humanizeDraft(draft) : constraint.text);
   const status = draft?.status ?? 'unparsed';
   const needsClarification = Boolean(
     draft?.clarificationQuestions?.length ||
@@ -46,6 +52,11 @@ export function ConstraintDraftCard({
     status !== 'unsupported' &&
     !confirmed &&
     !needsClarification;
+
+  const hasReparsed = Boolean(draft?.reparseCount && draft.reparseCount > 0);
+  const canReparse = Boolean(onRejectAndReparse && !confirmed && !isReparsing && (draft?.reparseCount ?? 0) < MAX_REPARSE_ATTEMPTS);
+  const maxReparseReached = Boolean(draft?.reparseCount && draft.reparseCount >= MAX_REPARSE_ATTEMPTS);
+  const isUnsupported = status === 'unsupported' || maxReparseReached;
 
   return (
     <div className={`rounded-md border p-3 ${constraintType.boxClass}`}>
@@ -86,8 +97,17 @@ export function ConstraintDraftCard({
       {draft ? (
         <div className="mt-2 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5 text-sm text-white/70">
           <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Hệ thống hiểu là</p>
-          <p className="mt-1 whitespace-pre-line leading-relaxed">{summary}</p>
-          {draft.issues.length > 0 && (
+          <p className="mt-1 whitespace-pre-line leading-relaxed">
+            {isReparsing ? (
+              <span className="flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin text-sky-400" />
+                <span className="text-white/50">Đang diễn giải lại...</span>
+              </span>
+            ) : (
+              draft.displayText || summary
+            )}
+          </p>
+          {!isReparsing && draft.issues.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-xs text-amber-300/80">
               {draft.issues
                 .filter((issue) => issue.code !== 'possible_entity_loss' || !entityLossIssue)
@@ -108,14 +128,54 @@ export function ConstraintDraftCard({
         </div>
       ) : null}
 
+      {isUnsupported && !confirmed ? (
+        <div className="mt-2 flex items-start gap-2 rounded border border-red-500/40 bg-red-500/[0.08] px-3 py-2 text-xs text-red-200">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">Hệ thống chưa hiểu chính xác ràng buộc này.</p>
+            <p className="mt-0.5 text-[11px] text-red-200/80">
+              Bạn có thể sửa lại câu theo cách cụ thể hơn, hoặc tạm thời bỏ ràng buộc này.
+            </p>
+            {constraint.type === 'required' && (
+              <p className="mt-1 text-[11px] font-medium text-red-200/80">
+                Ràng buộc bắt buộc chưa được xác nhận sẽ không được dùng để xếp lịch.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {canConfirm ? (
-          <button type="button" onClick={onConfirm} className="inline-flex items-center gap-1 rounded-md bg-[#4DB848] px-3 py-1.5 text-xs font-medium text-[#0a0a0a] hover:bg-[#40993C]">
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1 rounded-md bg-[#4DB848] px-3 py-1.5 text-xs font-medium text-[#0a0a0a] hover:bg-[#40993C]"
+          >
             <Check size={12} strokeWidth={2} />
             Đúng rồi
           </button>
         ) : null}
-        {draft && !confirmed ? (
+        {canReparse ? (
+          <button
+            type="button"
+            onClick={onRejectAndReparse}
+            disabled={isReparsing}
+            className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-white/60 hover:bg-white/[0.04] disabled:opacity-50"
+          >
+            {isReparsing ? (
+              <>
+                <Loader2 size={12} className="animate-spin" />
+                Đang diễn giải...
+              </>
+            ) : hasReparsed ? (
+              'Vẫn không đúng'
+            ) : (
+              'Không đúng'
+            )}
+          </button>
+        ) : null}
+        {draft && !confirmed && !isUnsupported ? (
           <>
             <button type="button" onClick={onEdit} className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-white/60 hover:bg-white/[0.04]">
               <Pencil size={12} />
@@ -143,7 +203,7 @@ export function ConstraintDraftCard({
             Chỉnh sửa
           </button>
         ) : null}
-        {draft && !confirmed && constraint.type === 'preferred' ? (
+        {draft && !confirmed && (constraint.type === 'preferred' || isUnsupported) ? (
           <button type="button" onClick={onIgnore} className="rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-white/60 hover:bg-white/[0.04]">
             Bỏ qua
           </button>
