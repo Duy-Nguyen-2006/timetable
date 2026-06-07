@@ -23,10 +23,12 @@ import {
   isSubjectGroupDailyLimitText,
   isSubjectGroupText,
   markAutoBaseSpec,
+  matchTeacherLabels,
   normalizeConstraintText,
   parseGlobalClassSubjectDailyLimit,
   shouldMarkWeeklyAutoBase,
   splitFallbackConstraintText,
+  splitThenClause,
 } from './translator-text';
 
 type ChatInvoke = (payload: ChatPayload) => Promise<{ content?: string; usage?: ChatUsage }>;
@@ -171,57 +173,46 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
             ? atSlotOrOnDay(ifTeachers[0])
             : null;
 
-      const thenTeachers = teacherLabels.filter((label) => includesLabel(thenClauseRaw, label));
-      const thenDay = extractDayId(thenClauseRaw, input.days);
-      const thenPeriod = extractFirstNumber(thenClauseRaw);
+      // Tier 1 fix (multi-clause THEN): split "GV1 không dạy X, GV2 không dạy Y"
+      // into sub-clauses and build one thenSpec per (subClause, teacher) pair.
+      // Previously the code took `thenTeachers[0]` and ignored the rest, dropping
+      // every additional teacher the user mentioned.
+      const thenSubClauses = splitThenClause(thenClauseRaw);
       const thenSpecs: Array<{ kind: string; params: Record<string, unknown> }> = [];
 
-      if (/(không|khong).*(cùng|trùng).*(tiết|tiet)/iu.test(thenClauseRaw) && thenTeachers.length >= 2) {
-        thenSpecs.push({
-          kind: 'pair_not_same_slot',
-          params: {
-            teachers: thenTeachers.slice(0, 2),
-            ...(thenDay ? { scope: { day: thenDay } } : {}),
-          },
-        });
-      } else if (
-        /(không|khong).*(dạy|day)/iu.test(thenClauseRaw) &&
-        thenTeachers[0] &&
-        thenDay &&
-        extractPeriodNumber(thenClauseRaw) !== null
-      ) {
-        // Tier 1 fix: only fall back to slot when an explicit "tiết N" is present in THEN.
-        // Previously the day number (e.g. "thứ 3") was mis-interpreted as period 3.
-        thenSpecs.push({
-          kind: 'teacher_block_slot',
-          params: { teacher: thenTeachers[0], day: thenDay, period: extractPeriodNumber(thenClauseRaw) },
-        });
-      } else if (/(không|khong).*(dạy|day)/iu.test(thenClauseRaw) && thenTeachers[0] && thenDay) {
-        thenSpecs.push({
-          kind: 'teacher_block_day',
-          params: { teacher: thenTeachers[0], day: thenDay },
-        });
-      } else if (
-        // Tier 1 — VAL-T1-004: positive THEN ("Sơn dạy thứ 2 tiết 2") still produces a
-        // non-empty THEN list so the spec stays in `if_then` form. We pick the closest
-        // existing kind (teacher_block_slot / teacher_block_day) which the validator can
-        // enforce. The `notes` field flags the positive interpretation.
-        !/(không|khong)/iu.test(thenClauseRaw) &&
-        /(dạy|day)/iu.test(thenClauseRaw) &&
-        thenTeachers[0] &&
-        thenDay
-      ) {
-        const positivePeriod = extractPeriodNumber(thenClauseRaw);
-        if (positivePeriod !== null) {
+      for (const subClause of thenSubClauses) {
+        const subTeachers = matchTeacherLabels(subClause, teacherLabels);
+        if (subTeachers.length === 0) continue;
+        const subDay = extractDayId(subClause, input.days);
+        const subPeriod = extractPeriodNumber(subClause);
+
+        if (/(không|khong).*(cùng|trùng).*(tiết|tiet)/iu.test(subClause) && subTeachers.length >= 2) {
           thenSpecs.push({
-            kind: 'teacher_block_slot',
-            params: { teacher: thenTeachers[0], day: thenDay, period: positivePeriod },
+            kind: 'pair_not_same_slot',
+            params: {
+              teachers: subTeachers.slice(0, 2),
+              ...(subDay ? { scope: { day: subDay } } : {}),
+            },
           });
-        } else {
-          thenSpecs.push({
-            kind: 'teacher_block_day',
-            params: { teacher: thenTeachers[0], day: thenDay },
-          });
+          continue;
+        }
+
+        const isNegative = /(không|khong)/iu.test(subClause);
+        const isPositive = !isNegative && /(dạy|day)/iu.test(subClause);
+        if ((isNegative || isPositive) && subDay) {
+          for (const teacher of subTeachers) {
+            if (subPeriod !== null) {
+              thenSpecs.push({
+                kind: 'teacher_block_slot',
+                params: { teacher, day: subDay, period: subPeriod },
+              });
+            } else {
+              thenSpecs.push({
+                kind: 'teacher_block_day',
+                params: { teacher, day: subDay },
+              });
+            }
+          }
         }
       }
 

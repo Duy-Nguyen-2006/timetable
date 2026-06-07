@@ -26,7 +26,8 @@ export type ConstraintParseIssueCode =
   | 'low_confidence'
   | 'scope_too_broad'
   | 'llm_fallback_used'
-  | 'needs_user_clarification';
+  | 'needs_user_clarification'
+  | 'possible_entity_loss';
 
 export type ConstraintClarificationQuestion = {
   id: string;

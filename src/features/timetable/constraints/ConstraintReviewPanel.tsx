@@ -10,6 +10,7 @@ import type { ConstraintItem } from '../types';
 import { ConstraintDraftCard } from './ConstraintDraftCard';
 import { ConstraintEditDialog } from './ConstraintEditDialog';
 import { ConstraintTemplatePicker } from './ConstraintTemplatePicker';
+import { ConstraintThenEditor } from './ConstraintThenEditor';
 import type { ConstraintFormTemplateId } from './constraint-form-schema';
 
 type ConstraintReviewPanelProps = {
@@ -49,6 +50,7 @@ export function ConstraintReviewPanel({
 }: ConstraintReviewPanelProps) {
   const [editConstraintId, setEditConstraintId] = useState<string | null>(null);
   const [templateForId, setTemplateForId] = useState<string | null>(null);
+  const [thenEditForId, setThenEditForId] = useState<string | null>(null);
 
   const draftByRaw = new Map(drafts.map((d) => [d.rawConstraintId, d]));
   const confirmedByRaw = new Map(confirmed.map((c) => [c.rawConstraintId, c]));
@@ -125,6 +127,7 @@ export function ConstraintReviewPanel({
               onIgnore={() => onIgnoreDraft(constraint.id)}
               onEdit={() => setEditConstraintId(constraint.id)}
               onPickTemplate={() => setTemplateForId(constraint.id)}
+              onEditThen={() => setThenEditForId(constraint.id)}
               onDelete={() => onDeleteConstraint(constraint.id)}
             />
           ))
@@ -143,6 +146,36 @@ export function ConstraintReviewPanel({
           onSave={(updated) => {
             onSaveDraft(updated);
             setEditConstraintId(null);
+          }}
+        />
+      ) : null}
+
+      {thenEditForId ? (
+        <ConstraintThenEditor
+          open={Boolean(thenEditForId)}
+          onOpenChange={(open) => !open && setThenEditForId(null)}
+          spec={
+            draftByRaw.get(thenEditForId)?.proposedSpecs.find((s) => s.kind === 'if_then') ?? {
+              id: 'tmp',
+              original: '',
+              severity: 'hard',
+              kind: 'if_then',
+              params: { if: { op: 'teacher_teaches_on_day', teacher: '', day: 'monday' }, then: [] },
+            }
+          }
+          agentInput={agentInput}
+          suggestedTeachers={
+            draftByRaw
+              .get(thenEditForId)
+              ?.issues.find((i) => i.code === 'possible_entity_loss')
+              ?.candidates ?? []
+          }
+          onSave={(updatedSpec) => {
+            const existing = draftByRaw.get(thenEditForId);
+            if (existing) {
+              onSaveDraft({ ...existing, proposedSpecs: [updatedSpec] });
+            }
+            setThenEditForId(null);
           }}
         />
       ) : null}

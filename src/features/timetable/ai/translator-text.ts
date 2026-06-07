@@ -230,6 +230,40 @@ export function isSubjectGroupDailyLimitText(text: string): { groupName: string;
   return null;
 }
 
+/** Split a THEN clause into independent sub-clauses by comma.
+ *  "Sơn không dạy thứ 3 tiết 1, Hương không dạy thứ 4 tiết 3"
+ *    → ["Sơn không dạy thứ 3 tiết 1", "Hương không dạy thứ 4 tiết 3"]
+ *  We deliberately keep "A và B không dạy X" as one clause so its teachers stay paired. */
+export function splitThenClause(text: string): string[] {
+  if (!text) return [];
+  return text
+    .split(/,\s*/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Match teacher labels with word-boundary awareness and length-DESC ordering.
+ *  Prevents false positives where one teacher's name is a substring of another
+ *  (e.g. "Hương" inside "Phương"). Longer names are matched first and "consume"
+ *  their position so overlapping substrings cannot re-match. */
+export function matchTeacherLabels(text: string, labels: string[]): string[] {
+  const lowerText = text.toLocaleLowerCase('vi');
+  const sorted = [...labels].filter(Boolean).sort((a, b) => b.length - a.length);
+  const matched: string[] = [];
+  let remaining = lowerText;
+  for (const label of sorted) {
+    const lower = label.toLocaleLowerCase('vi');
+    const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Word boundary: not preceded/followed by a Unicode letter or digit.
+    const re = new RegExp(`(^|[^\\p{L}\\p{M}_0-9])(${escaped})(?=$|[^\\p{L}\\p{M}_0-9])`, 'u');
+    if (re.test(remaining)) {
+      matched.push(label);
+      remaining = remaining.replace(new RegExp(escaped, 'u'), ' '.repeat(lower.length));
+    }
+  }
+  return matched;
+}
+
 export function splitFallbackConstraintText(text: string): string[] {
   if (/(nếu|neu)[\s\S]*(thì|thi)/iu.test(text)) {
     return [text.trim()].filter(Boolean);

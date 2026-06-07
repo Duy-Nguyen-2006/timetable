@@ -16,6 +16,7 @@ type ConstraintDraftCardProps = {
   onIgnore: () => void;
   onEdit: () => void;
   onPickTemplate: () => void;
+  onEditThen?: () => void;
   onDelete: () => void;
   isNew?: boolean;
 };
@@ -29,6 +30,7 @@ export function ConstraintDraftCard({
   onIgnore,
   onEdit,
   onPickTemplate,
+  onEditThen,
   onDelete,
 }: ConstraintDraftCardProps) {
   const constraintType = constraintTypes[constraint.type] ?? constraintTypes.required;
@@ -38,6 +40,7 @@ export function ConstraintDraftCard({
     draft?.clarificationQuestions?.length ||
       draft?.issues.some((i) => i.code === 'needs_user_clarification')
   );
+  const entityLossIssue = draft?.issues.find((i) => i.code === 'possible_entity_loss');
   const canConfirm =
     Boolean(draft?.proposedSpecs.length) &&
     status !== 'unsupported' &&
@@ -60,6 +63,19 @@ export function ConstraintDraftCard({
 
       <p className="text-xs text-white/45">{constraint.text}</p>
 
+      {entityLossIssue ? (
+        <div
+          data-testid="entity-loss-warning"
+          className="mt-2 flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/[0.08] px-3 py-2 text-xs text-amber-200"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">Có thể hệ thống đang hiểu thiếu giáo viên</p>
+            <p className="mt-0.5 text-[11px] text-amber-200/80">{entityLossIssue.message}</p>
+          </div>
+        </div>
+      ) : null}
+
       {isNew && !draft ? (
         <div className="mt-2 flex items-center gap-2 rounded border border-sky-500/25 bg-sky-500/[0.06] px-3 py-2 text-xs text-sky-300/90">
           <AlertCircle size={14} className="shrink-0" />
@@ -73,9 +89,11 @@ export function ConstraintDraftCard({
           <p className="mt-1 whitespace-pre-line leading-relaxed">{summary}</p>
           {draft.issues.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-xs text-amber-300/80">
-              {draft.issues.map((issue, i) => (
-                <li key={`${issue.code}-${i}`}>• {issue.message}</li>
-              ))}
+              {draft.issues
+                .filter((issue) => issue.code !== 'possible_entity_loss' || !entityLossIssue)
+                .map((issue, i) => (
+                  <li key={`${issue.code}-${i}`}>• {issue.message}</li>
+                ))}
             </ul>
           )}
         </div>
@@ -103,6 +121,17 @@ export function ConstraintDraftCard({
               <Pencil size={12} />
               Sửa cách hiểu
             </button>
+            {entityLossIssue && onEditThen ? (
+              <button
+                type="button"
+                data-testid="entity-loss-edit-then"
+                onClick={onEditThen}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/[0.08] px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-500/[0.15]"
+              >
+                <Pencil size={12} />
+                Sửa THEN
+              </button>
+            ) : null}
             <button type="button" onClick={onPickTemplate} className="rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-white/60 hover:bg-white/[0.04]">
               Chọn mẫu
             </button>
