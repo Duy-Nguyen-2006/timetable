@@ -18,28 +18,52 @@ Use the Rust Harness CLI at `scripts/bin/harness-cli` as the main operational
 tool.
 <!-- HARNESS:END -->
 
-## SonarQube
+## SonarQube / CodeReviewer
 
-Static analysis for `src`, `electron`, `scripts` (project key `timetable`). Use Docker server `sonarqube-timetable` on port 9000; avoid ZIP `CodeReviewer` unless JDK 21 is installed.
+Use SonarQube as the local code-review scanner for `src`, `electron`, and `scripts` with project key `timetable`. Prefer the Docker server named `sonarqube-timetable`; avoid the ZIP `CodeReviewer` setup unless a full JDK 21 is installed.
 
-> Set `SONAR_HOST_URL` and `SONAR_TOKEN` in the shell only. Full Docker/token/exclusions/VPS steps live in **`Bug.md`** (scan export).
+### Quick Use
 
-### Always Do
+1. Start SonarQube:
 
-- Run `npm run lint` and `npm test` before a Sonar upload.
-- Scan from repo root with the same sources and exclusions as in `Bug.md`.
-- Fix Sonar **BUG** issues before code smells; run GitNexus impact before editing hot paths (e.g. `translator`, `deterministic-validator`).
+```bash
+docker start sonarqube-timetable || docker run -d --name sonarqube-timetable \
+  -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
+  -p 9000:9000 \
+  -v sonarqube_data:/opt/sonarqube/data \
+  -v sonarqube_extensions:/opt/sonarqube/extensions \
+  -v sonarqube_logs:/opt/sonarqube/logs \
+  sonarqube:community
+```
 
-### Never Do
+2. Open `http://localhost:9000`, generate a token in **My Account → Security**, then keep it only in the shell:
 
-- Commit tokens, admin passwords, or `.scannerwork/`.
+```bash
+export SONAR_HOST_URL=http://localhost:9000
+export SONAR_TOKEN=squ_xxxxxxxx
+```
 
-### Commands
+3. Run local checks, then scan from the repo root:
 
-| Task | What to run |
-|------|-------------|
-| Scan | `npx @sonar/scan -Dsonar.host.url="$SONAR_HOST_URL" -Dsonar.token="$SONAR_TOKEN" -Dsonar.projectKey=timetable -Dsonar.sources=src,electron,scripts` (+ `-Dsonar.exclusions=...` from `Bug.md`) |
-| Results | Open `$SONAR_HOST_URL/dashboard?id=timetable` |
+```bash
+npm run lint
+npm test
+npx @sonar/scan \
+  -Dsonar.host.url="$SONAR_HOST_URL" \
+  -Dsonar.token="$SONAR_TOKEN" \
+  -Dsonar.projectKey=timetable \
+  -Dsonar.sources=src,electron,scripts \
+  -Dsonar.exclusions='**/.next/**,**/node_modules/**,**/release/**,**/.venv-build/**,**/python-dist/**,**/*.tsbuildinfo,**/python/**'
+```
+
+4. Review results at `http://localhost:9000/dashboard?id=timetable`.
+
+### Rules
+
+- Fix Sonar **BUG** issues before code smells.
+- Run GitNexus impact before editing source hot paths such as `translator` or `deterministic-validator`.
+- Never commit Sonar tokens, admin passwords, or `.scannerwork/`.
+- Stop the local server with `docker stop sonarqube-timetable` when done.
   GNU nano 9.0                                                                                 Backup.md                                                                                 Modified
 - Rule : Luôn có câu "Sax báo cáo" ở cuối mỗi câu trả lời
 - Luôn push lên git sau mỗi chỉnh sửa
