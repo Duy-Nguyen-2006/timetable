@@ -226,7 +226,7 @@ export function ConstraintThenEditor({
                     aria-label="Xóa"
                     title="Xóa"
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={18} />
                   </button>
                 </li>
               ))}

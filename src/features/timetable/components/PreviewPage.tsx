@@ -14,7 +14,7 @@ export function PreviewPage({
   toggleDeletedPeriod,
 }) {
   return (
-    <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+    <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
       <div className={navBarClass}>
         <button type="button" onClick={() => setPage('periods')} className={navBackClass}>
           <ArrowLeft size={14} strokeWidth={1.5} />
@@ -133,7 +133,7 @@ export function PreviewPage({
                           </span>
                           {!isDeleted && (
                             <span className="flex h-4 w-4 shrink-0 items-center justify-center text-red-400/60 group-hover:text-red-400">
-                              <Trash2 size={11} strokeWidth={1.5} />
+                              <Trash2 size={16} strokeWidth={1.5} />
                             </span>
                           )}
                         </button>

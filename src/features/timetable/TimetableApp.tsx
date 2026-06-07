@@ -1095,7 +1095,7 @@ const handleDownloadExcel = useCallback(async () => {
           toggleDeletedPeriod={toggleDeletedPeriod}
         />
           ) : page === 'details' ? (
-            <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+            <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
             <div className={navBarClass}>
               <button
                 type="button"
@@ -1251,7 +1251,7 @@ const handleDownloadExcel = useCallback(async () => {
                               onClick={() => deleteTeacher(teacher)}
                               className="p-1 transition hover:bg-white/[0.04]"
                             >
-                              <Trash2 size={14} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
+                              <Trash2 size={20} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
                             </button>
                           </div>
                         )
@@ -1267,7 +1267,7 @@ const handleDownloadExcel = useCallback(async () => {
 
             </section>
             ) : page === 'subjects' ? (
-              <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+              <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
                 <div className={navBarClass}>
                 <button
                   type="button"
@@ -1440,7 +1440,7 @@ const handleDownloadExcel = useCallback(async () => {
                             onClick={() => deleteSubject(subject)}
                             className="p-1 transition hover:bg-white/[0.04]"
                           >
-                            <Trash2 size={14} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
+                            <Trash2 size={20} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
                           </button>
                         </div>
                       ))
@@ -1455,7 +1455,7 @@ const handleDownloadExcel = useCallback(async () => {
 
               </section>
               ) : page === 'classes' ? (
-                <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+                <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
                 <div className={navBarClass}>
                   <button
                     type="button"
@@ -1593,7 +1593,7 @@ const handleDownloadExcel = useCallback(async () => {
                               onClick={() => deleteClass(className)}
                               className="p-1 transition hover:bg-white/[0.04]"
                             >
-                              <Trash2 size={14} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
+                              <Trash2 size={20} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
                             </button>
                           </div>
                         ))
@@ -1608,7 +1608,7 @@ const handleDownloadExcel = useCallback(async () => {
 
                 </section>
                 ) : page === 'assignments' ? (
-                  <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+                  <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
                   <div className={navBarClass}>
                     <button type="button" onClick={() => setPage('classes')} className={navBackClass}>
                       <ArrowLeft size={14} strokeWidth={1.5} />
@@ -1832,7 +1832,7 @@ const handleDownloadExcel = useCallback(async () => {
                                         </div>
                                       </div>
                                       <button type="button" onClick={() => deleteAssignment(assignment.key)} className="mt-2 p-1 transition hover:bg-white/[0.04] xl:mt-0">
-                                        <Trash2 size={14} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
+                                        <Trash2 size={20} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
                                       </button>
                                     </div>
                                   </div>
@@ -1850,7 +1850,7 @@ const handleDownloadExcel = useCallback(async () => {
 
                 </section>
               ) : page === 'constraints' ? (
-                <section className="constraint-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+                <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
                   <div className={navBarClass}>
                     <button type="button" onClick={() => setPage('assignments')} className={navBackClass}>
                       <ArrowLeft size={14} strokeWidth={1.5} />
@@ -1946,7 +1946,7 @@ const handleDownloadExcel = useCallback(async () => {
 
                 </section>
               ) : (
-                <section className="relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
+                <section className="app-page relative flex min-h-screen w-full flex-col px-4 py-6 sm:px-8 lg:px-12 xl:px-16">
                   <div className={navBarClass}>
                     <button type="button" onClick={() => setPage('constraints')} className={navBackClass}>
                       <ArrowLeft size={14} strokeWidth={1.5} />

@@ -149,7 +149,7 @@ export function ConstraintDraftCard({
           </button>
         ) : null}
         <button type="button" onClick={onDelete} className="ml-auto p-1 transition hover:bg-white/[0.04]">
-          <Trash2 size={14} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
+          <Trash2 size={20} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
         </button>
       </div>
     </div>

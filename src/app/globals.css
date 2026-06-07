@@ -131,23 +131,23 @@
   }
 }
 
-/* === Constraint page: 1.5x font scaling === */
-.constraint-page {
-  --constraint-font-scale: 1.5;
+/* === App pages: 1.5x font scaling for easier reading === */
+.app-page {
+  --app-font-scale: 1.5;
 }
-.constraint-page .text-\[10px\] { font-size: calc(10px * var(--constraint-font-scale)); }
-.constraint-page .text-\[11px\] { font-size: calc(11px * var(--constraint-font-scale)); }
-.constraint-page .text-xs    { font-size: calc(0.75rem  * var(--constraint-font-scale)); line-height: calc(1rem  * var(--constraint-font-scale)); }
-.constraint-page .text-sm    { font-size: calc(0.875rem * var(--constraint-font-scale)); line-height: calc(1.25rem * var(--constraint-font-scale)); }
-.constraint-page .text-base  { font-size: calc(1rem     * var(--constraint-font-scale)); line-height: calc(1.5rem  * var(--constraint-font-scale)); }
-.constraint-page .text-lg    { font-size: calc(1.125rem * var(--constraint-font-scale)); line-height: calc(1.75rem * var(--constraint-font-scale)); }
-.constraint-page .text-xl    { font-size: calc(1.25rem  * var(--constraint-font-scale)); line-height: calc(1.75rem * var(--constraint-font-scale)); }
-.constraint-page .text-2xl   { font-size: calc(1.5rem   * var(--constraint-font-scale)); line-height: calc(2rem    * var(--constraint-font-scale)); }
-.constraint-page .text-3xl   { font-size: calc(1.875rem * var(--constraint-font-scale)); line-height: calc(2.25rem * var(--constraint-font-scale)); }
-.constraint-page .text-4xl   { font-size: calc(2.25rem  * var(--constraint-font-scale)); line-height: calc(2.5rem  * var(--constraint-font-scale)); }
-.constraint-page .text-5xl   { font-size: calc(3rem     * var(--constraint-font-scale)); line-height: 1; }
-.constraint-page textarea,
-.constraint-page input,
-.constraint-page button {
+.app-page .text-\[10px\] { font-size: calc(10px * var(--app-font-scale)); }
+.app-page .text-\[11px\] { font-size: calc(11px * var(--app-font-scale)); }
+.app-page .text-xs    { font-size: calc(0.75rem  * var(--app-font-scale)); line-height: calc(1rem  * var(--app-font-scale)); }
+.app-page .text-sm    { font-size: calc(0.875rem * var(--app-font-scale)); line-height: calc(1.25rem * var(--app-font-scale)); }
+.app-page .text-base  { font-size: calc(1rem     * var(--app-font-scale)); line-height: calc(1.5rem  * var(--app-font-scale)); }
+.app-page .text-lg    { font-size: calc(1.125rem * var(--app-font-scale)); line-height: calc(1.75rem * var(--app-font-scale)); }
+.app-page .text-xl    { font-size: calc(1.25rem  * var(--app-font-scale)); line-height: calc(1.75rem * var(--app-font-scale)); }
+.app-page .text-2xl   { font-size: calc(1.5rem   * var(--app-font-scale)); line-height: calc(2rem    * var(--app-font-scale)); }
+.app-page .text-3xl   { font-size: calc(1.875rem * var(--app-font-scale)); line-height: calc(2.25rem * var(--app-font-scale)); }
+.app-page .text-4xl   { font-size: calc(2.25rem  * var(--app-font-scale)); line-height: calc(2.5rem  * var(--app-font-scale)); }
+.app-page .text-5xl   { font-size: calc(3rem     * var(--app-font-scale)); line-height: 1; }
+.app-page textarea,
+.app-page input,
+.app-page button {
   font-size: inherit;
 }
