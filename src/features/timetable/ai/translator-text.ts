@@ -264,6 +264,38 @@ export function matchTeacherLabels(text: string, labels: string[]): string[] {
   return matched;
 }
 
+/** Match (teacher, subject, class) tuple from a text snippet, returning the
+ *  unique `assignmentId` whose metadata appears in the text. Returns null if
+ *  no assignment uniquely matches. Used by `if_then` THEN-clause to emit
+ *  `assignment_pin_slot` / `assignment_spread_days` (F-8).
+ *
+ *  Lenient mode: a field (teacher/subject/class) only narrows the candidate
+ *  set when it is actually mentioned in the text. So "Toán 6A" still matches
+ *  a unique assignment whose teacher isn't named in the text. */
+export function extractAssignmentMatch(
+  text: string,
+  assignments: AgentInputPayload['assignments']
+): string | null {
+  if (!assignments?.length) return null;
+  const lower = text.toLocaleLowerCase('vi');
+
+  const allTeacherLabels = [...new Set(assignments.map((a) => a.teacher.label).filter(Boolean))];
+  const allSubjectLabels = [...new Set(assignments.map((a) => a.subject.label).filter(Boolean))];
+  const allClassLabels = [...new Set(assignments.map((a) => a.class.label).filter(Boolean))];
+
+  const teachersInText = allTeacherLabels.filter((t) => includesLabel(lower, t));
+  const subjectsInText = allSubjectLabels.filter((s) => includesLabel(lower, s));
+  const classesInText = allClassLabels.filter((c) => includesLabel(lower, c));
+
+  const candidates = assignments.filter((assignment) => {
+    if (teachersInText.length > 0 && !teachersInText.includes(assignment.teacher.label)) return false;
+    if (subjectsInText.length > 0 && !subjectsInText.includes(assignment.subject.label)) return false;
+    if (classesInText.length > 0 && !classesInText.includes(assignment.class.label)) return false;
+    return true;
+  });
+  return candidates.length === 1 ? candidates[0].id : null;
+}
+
 export function splitFallbackConstraintText(text: string): string[] {
   if (/(nếu|neu)[\s\S]*(thì|thi)/iu.test(text)) {
     return [text.trim()].filter(Boolean);

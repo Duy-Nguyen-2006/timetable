@@ -832,7 +832,7 @@ test('VAL-T1-003: AND-of-day-only IF (no period) emits and of teacher_teaches_on
   assert.equal(thenList[0].kind, 'teacher_block_day');
 });
 
-test('VAL-T1-004: reverse-direction IF does not swap if/then and stays as if_then', () => {
+test('VAL-T1-004: reverse-direction IF with "không" wraps the IF atom in `not` (F-1)', () => {
   const input: AgentInputPayload = {
     ...ifThenInput(),
     constraints: [
@@ -842,16 +842,214 @@ test('VAL-T1-004: reverse-direction IF does not swap if/then and stays as if_the
   const specs = __translatorInternal.fallbackFromRuleParser(input);
 
   assert.equal(specs[0].kind, 'if_then');
-  const cond = specs[0].params.if as { op: string; teacher: string; day: string };
-  assert.equal(cond.op, 'teacher_teaches_on_day');
-  assert.equal(cond.teacher, 'Dung');
-  assert.equal(cond.day, 'tue');
+  // F-1: "không" trong IF phải wrap thành `not(...)` thay vì emit atom thuần dương.
+  const cond = specs[0].params.if as { op: string; arg: { op: string; teacher: string; day: string } };
+  assert.equal(cond.op, 'not');
+  assert.equal(cond.arg.op, 'teacher_teaches_on_day');
+  assert.equal(cond.arg.teacher, 'Dung');
+  assert.equal(cond.arg.day, 'tue');
   const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
   assert.ok(Array.isArray(thenList));
   assert.ok(thenList.length > 0, 'THEN must be non-empty');
   for (const t of thenList) {
     assert.notEqual(t.kind, 'custom_dsl', 'THEN must not contain synthetic custom_dsl');
   }
+});
+
+// =========================================================================
+// Tier 2 — F-1..F-9 IF/THEN coverage (regression block for the 9-gap spec)
+// =========================================================================
+
+test('VAL-T2-001 (F-1): IF with "không" wraps the atom in `not`', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn không dạy thứ 3 thì Dung phải dạy thứ 4' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; arg: { op: string; teacher: string; day: string } };
+  assert.equal(cond.op, 'not');
+  assert.equal(cond.arg.op, 'teacher_teaches_on_day');
+  assert.equal(cond.arg.teacher, 'Sơn');
+  assert.equal(cond.arg.day, 'tue');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'teacher_required_day');
+  assert.equal(thenList[0].params.teacher, 'Dung');
+  // ifThenInput chỉ khai báo mon+tue; "thứ 4" → extractDayId fallback về hardcoded 'wednesday'.
+  assert.equal(thenList[0].params.day, 'wednesday');
+});
+
+test('VAL-T2-002 (F-1+F-2+F-6): "không dạy" cho 2 GV IF, "phải dạy" cho 2 GV THEN', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'required', text: 'Nếu Sơn và Hương không dạy thứ 3 thì Dung và Sơn phải dạy thứ 4' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  // F-1: "không" wrap thành `not(and(teacher_teaches_on_day, ...))`
+  const cond = specs[0].params.if as {
+    op: string;
+    arg: { op: string; args: Array<{ teacher: string; day: string }> };
+  };
+  assert.equal(cond.op, 'not');
+  assert.equal(cond.arg.op, 'and');
+  assert.equal(cond.arg.args.length, 2);
+  assert.deepEqual(cond.arg.args.map((a) => a.teacher).sort(), ['Hương', 'Sơn']);
+  assert.ok(cond.arg.args.every((a) => a.day === 'tue'));
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList.length, 2);
+  assert.ok(thenList.every((t) => t.kind === 'teacher_required_day'));
+  const thenTeachers = thenList.map((t) => t.params.teacher).sort();
+  assert.deepEqual(thenTeachers, ['Dung', 'Sơn']);
+  assert.ok(thenList.every((t) => t.params.day === 'wednesday'));
+});
+
+test('VAL-T2-003 (F-2): 3 teachers trong IF → AND có 3 args', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn, Hương, Dung đều dạy thứ 2 thì Sơn không dạy thứ 3' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; args: Array<{ teacher: string }> };
+  assert.equal(cond.op, 'and');
+  assert.equal(cond.args.length, 3);
+  assert.deepEqual(cond.args.map((a) => a.teacher).sort(), ['Dung', 'Hương', 'Sơn']);
+});
+
+test('VAL-T2-004 (F-3): IF có "hoặc" → OR của 2 branches', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn dạy thứ 2 hoặc Hương dạy thứ 3 thì Dung không dạy thứ 4' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; args: Array<{ teacher: string; day: string }> };
+  assert.equal(cond.op, 'or');
+  assert.equal(cond.args.length, 2);
+  assert.deepEqual(cond.args.map((a) => a.teacher).sort(), ['Hương', 'Sơn']);
+  assert.deepEqual(cond.args.map((a) => a.day).sort(), ['mon', 'tue']);
+});
+
+test('VAL-T2-005 (F-4): IF lớp × môn × slot → class_teacher_at_slot', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu lớp 6A học Toán tiết 1 thứ 2 thì Sơn không dạy thứ 3' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; class: string; subject: string; day: string; period: number };
+  assert.equal(cond.op, 'class_teacher_at_slot');
+  assert.equal(cond.class, '6A');
+  assert.equal(cond.subject, 'Toán');
+  assert.equal(cond.day, 'mon');
+  assert.equal(cond.period, 1);
+});
+
+test('VAL-T2-006 (F-5): IF cặp GV "cùng dạy" cùng ngày → teacher_pair_teaches_same_day', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn và Hương cùng dạy thứ 2 thì Dung nghỉ' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; teachers: string[]; day: string };
+  assert.equal(cond.op, 'teacher_pair_teaches_same_day');
+  assert.deepEqual(cond.teachers.sort(), ['Hương', 'Sơn']);
+  assert.equal(cond.day, 'mon');
+  // THEN "Dung nghỉ" unparseable → thenSpecsRaw rỗng; if_then vẫn claim với notes UNPARSED_THEN
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList.length, 0);
+  assert.equal(specs[0].notes, 'fallback_parser:UNPARSED_THEN');
+});
+
+test('VAL-T2-007 (F-5): IF cặp GV "cùng dạy" cùng tiết → teacher_pair_teaches_same_slot', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn và Hương cùng dạy tiết 1 thứ 2 thì Dung nghỉ' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const cond = specs[0].params.if as { op: string; teachers: string[]; day: string; period: number };
+  assert.equal(cond.op, 'teacher_pair_teaches_same_slot');
+  assert.equal(cond.period, 1);
+  assert.equal(cond.day, 'mon');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList.length, 0);
+  assert.equal(specs[0].notes, 'fallback_parser:UNPARSED_THEN');
+});
+
+test('VAL-T2-008 (F-6): THEN "phải dạy" + day only → teacher_required_day', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn dạy thứ 2 thì Dung phải dạy thứ 4' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'teacher_required_day');
+  assert.equal(thenList[0].params.teacher, 'Dung');
+  assert.equal(thenList[0].params.day, 'wednesday');
+});
+
+test('VAL-T2-009 (F-6): THEN "phải dạy" + day × period → teacher_required_slot', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn dạy thứ 2 thì Dung phải dạy thứ 4 tiết 2' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'teacher_required_slot');
+  assert.equal(thenList[0].params.teacher, 'Dung');
+  assert.equal(thenList[0].params.day, 'wednesday');
+  assert.equal(thenList[0].params.period, 2);
+});
+
+test('VAL-T2-010 (F-7): THEN 2 GV "phải dạy cùng tiết" → teacher_pair_required_same_slot', () => {
+  // Cả Dung và Hương đều có trong ifThenInput().
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn dạy thứ 2 thì Dung và Hương phải dạy cùng tiết thứ 4' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  // subPeriod = null vì "cùng tiết thứ 4" không có "tiết N" → teacher_pair_required_same_day
+  assert.equal(thenList[0].kind, 'teacher_pair_required_same_day');
+  assert.deepEqual((thenList[0].params.teachers as string[]).sort(), ['Dung', 'Hương']);
+  assert.equal(thenList[0].params.day, 'wednesday');
+});
+
+test('VAL-T2-011 (F-8): THEN assignment-level "phải xếp" → assignment_pin_slot', () => {
+  // "Toán 6A" maps uniquely đến asg_son (Sơn dạy Toán lớp 6A).
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [{ type: 'required', text: 'Nếu Sơn dạy thứ 2 thì Toán 6A phải xếp thứ 3 tiết 1' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].kind, 'assignment_pin_slot');
+  assert.equal(thenList[0].params.assignmentId, 'asg_son');
+  assert.equal(thenList[0].params.day, 'tue');
+  assert.equal(thenList[0].params.period, 1);
+});
+
+test('VAL-T2-012 (F-9): preferred IF/THEN propagates weight vào params.weight', () => {
+  const input: AgentInputPayload = {
+    ...ifThenInput(),
+    constraints: [
+      { type: 'preferred', text: 'Nếu Sơn dạy thứ 2 thì Dung phải dạy thứ 4', weight: 5 },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  assert.equal(specs[0].kind, 'if_then');
+  assert.equal(specs[0].severity, 'soft');
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.equal(thenList[0].params.weight, 5);
 });
 
 // =========================================================================

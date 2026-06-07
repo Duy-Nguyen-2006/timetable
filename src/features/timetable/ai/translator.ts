@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { parseConstraint } from '@/lib/constraint-parser';
 
-import type { ConstraintSpec } from './constraint-spec';
+import type { ConstraintSpec, ConditionExpr } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
@@ -15,6 +15,7 @@ import {
   extractFirstNumber,
   extractConsecutiveBanCount,
   extractPeriodNumber,
+  extractAssignmentMatch,
   inferWeeklyAssignmentId,
   isAutoBaseConstraintText,
   isResourceCapacityText,
@@ -111,6 +112,10 @@ const constraintSpecSchema = z.object({
     'subject_group',
     'subject_group_daily_limit',
     'subject_session_max_periods',
+    'teacher_required_day',
+    'teacher_required_slot',
+    'teacher_pair_required_same_day',
+    'teacher_pair_required_same_slot',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -152,42 +157,106 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
 
     if (/nếu|neu/iu.test(constraint.text) && /thì|thi/iu.test(constraint.text)) {
       const [ifClauseRaw, thenClauseRaw = ''] = constraint.text.split(/thì|thi/iu);
-      const ifTeachers = teacherLabels.filter((label) => includesLabel(ifClauseRaw, label));
-      const ifDay = extractDayId(ifClauseRaw, input.days);
-      const ifPeriod = extractPeriodNumber(ifClauseRaw);
-      // Tier 1 fix: emit `teacher_teaches_at_slot` when the IF clause contains a period;
-      // otherwise fall back to `teacher_teaches_on_day`. (See VAL-T1-001/002/003.)
-      const atSlotOrOnDay = (teacher: string) =>
-        ifDay && ifPeriod !== null
-          ? ({ op: 'teacher_teaches_at_slot' as const, teacher, day: ifDay, period: ifPeriod })
-          : ifDay
-            ? ({ op: 'teacher_teaches_on_day' as const, teacher, day: ifDay })
-            : null;
-      const condition =
-        ifTeachers.length >= 2 && ifDay
-          ? {
-              op: 'and' as const,
-              args: ifTeachers.slice(0, 2).map((teacher) => atSlotOrOnDay(teacher)).filter((c) => c !== null),
-            }
-          : ifTeachers[0] && ifDay
-            ? atSlotOrOnDay(ifTeachers[0])
-            : null;
 
-      // Tier 1 fix (multi-clause THEN): split "GV1 không dạy X, GV2 không dạy Y"
-      // into sub-clauses and build one thenSpec per (subClause, teacher) pair.
-      // Previously the code took `thenTeachers[0]` and ignored the rest, dropping
-      // every additional teacher the user mentioned.
+      // === IF clause parsing (F-1 polarity, F-2 N-teacher, F-3 OR, F-4 class/subject, F-5 teacher-pair) ===
+      const ifSubClauseTexts = ifClauseRaw
+        .split(/\s+hoặc\s+|\s+hoac\s+/iu)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const ifOrBranches: ConditionExpr[] = [];
+
+      for (const subText of ifSubClauseTexts) {
+        const subTeachers = matchTeacherLabels(subText, teacherLabels);
+        const subClasses = classLabels.filter((c) => includesLabel(subText, c));
+        const subSubjects = subjectLabels.filter((s) => includesLabel(subText, s));
+        const subDay = extractDayId(subText, input.days);
+        const subPeriod = extractPeriodNumber(subText);
+        const isNegative = /không|khong/iu.test(subText);
+        const wrapNot = (atom: ConditionExpr): ConditionExpr =>
+          isNegative ? { op: 'not', arg: atom } : atom;
+
+        // F-5: teacher pair cùng dạy (same-day hoặc same-slot).
+        if (subTeachers.length >= 2 && /cùng\s*dạy|cung\s*day/iu.test(subText) && subDay) {
+          const pair: [string, string] = [subTeachers[0], subTeachers[1]];
+          if (subPeriod !== null) {
+            ifOrBranches.push(
+              wrapNot({ op: 'teacher_pair_teaches_same_slot', teachers: pair, day: subDay, period: subPeriod })
+            );
+          } else {
+            ifOrBranches.push(
+              wrapNot({ op: 'teacher_pair_teaches_same_day', teachers: pair, day: subDay })
+            );
+          }
+          continue;
+        }
+
+        // F-4: class × subject × slot (lớp X học môn Y tiết Z ngày W).
+        if (subClasses[0] && subSubjects[0] && subDay && subPeriod !== null) {
+          ifOrBranches.push(
+            wrapNot({
+              op: 'class_teacher_at_slot',
+              class: subClasses[0],
+              subject: subSubjects[0],
+              day: subDay,
+              period: subPeriod,
+            })
+          );
+          continue;
+        }
+
+        // F-2 + F-1: 1+ teacher → AND of atoms, wrap NOT nếu có "không".
+        if (subTeachers.length > 0 && subDay) {
+          const teacherAtoms: ConditionExpr[] = subTeachers.map((teacher) =>
+            subPeriod !== null
+              ? { op: 'teacher_teaches_at_slot', teacher, day: subDay, period: subPeriod }
+              : { op: 'teacher_teaches_on_day', teacher, day: subDay }
+          );
+          const teacherCondition: ConditionExpr =
+            teacherAtoms.length > 1 ? { op: 'and', args: teacherAtoms } : teacherAtoms[0];
+          ifOrBranches.push(wrapNot(teacherCondition));
+        }
+      }
+
+      const condition: ConditionExpr | null =
+        ifOrBranches.length === 0
+          ? null
+          : ifOrBranches.length === 1
+            ? ifOrBranches[0]
+            : { op: 'or', args: ifOrBranches };
+
+      // === THEN clause parsing (F-6 positive, F-7 2+ teacher required, F-8 assignment, F-9 soft weight) ===
       const thenSubClauses = splitThenClause(thenClauseRaw);
-      const thenSpecs: Array<{ kind: string; params: Record<string, unknown> }> = [];
+      const thenSpecsRaw: Array<{ kind: string; params: Record<string, unknown> }> = [];
 
       for (const subClause of thenSubClauses) {
         const subTeachers = matchTeacherLabels(subClause, teacherLabels);
-        if (subTeachers.length === 0) continue;
         const subDay = extractDayId(subClause, input.days);
         const subPeriod = extractPeriodNumber(subClause);
 
+        // F-7: 2+ GV "phải dạy cùng tiết/ngày" → positive pair.
+        if (
+          subTeachers.length >= 2 &&
+          /cùng\s*(tiết|tiet)|cung\s*(tiet|tiet)|cùng\s*ngày|cung\s*ngay/iu.test(subClause) &&
+          /(phải|phai)/iu.test(subClause)
+        ) {
+          const pair: [string, string] = [subTeachers[0], subTeachers[1]];
+          if (subPeriod !== null && subDay) {
+            thenSpecsRaw.push({
+              kind: 'teacher_pair_required_same_slot',
+              params: { teachers: pair, day: subDay, period: subPeriod },
+            });
+          } else if (subDay) {
+            thenSpecsRaw.push({
+              kind: 'teacher_pair_required_same_day',
+              params: { teachers: pair, day: subDay },
+            });
+          }
+          continue;
+        }
+
+        // Existing: 2+ GV "không cùng tiết" (giữ test VAL-T1-* cũ).
         if (/(không|khong).*(cùng|trùng).*(tiết|tiet)/iu.test(subClause) && subTeachers.length >= 2) {
-          thenSpecs.push({
+          thenSpecsRaw.push({
             kind: 'pair_not_same_slot',
             params: {
               teachers: subTeachers.slice(0, 2),
@@ -197,17 +266,53 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           continue;
         }
 
+        // F-8: assignment-level "phải xếp" — yêu cầu subject HOẶC class xuất hiện trong sub-clause
+        // để tránh match nhầm chỉ dựa trên teacher (vd: "Dung phải dạy thứ 4 tiết 2" → teacher-only,
+        // thuộc về F-6 chứ không phải assignment pin).
+        const subjectInText = subjectLabels.some((s) => includesLabel(subClause, s));
+        const classInText = classLabels.some((c) => includesLabel(subClause, c));
+        if ((subjectInText || classInText) && subDay && subPeriod !== null) {
+          const assignmentId = extractAssignmentMatch(subClause, input.assignments);
+          if (assignmentId) {
+            thenSpecsRaw.push({
+              kind: 'assignment_pin_slot',
+              params: { assignmentId, day: subDay, period: subPeriod },
+            });
+            continue;
+          }
+        }
+
         const isNegative = /(không|khong)/iu.test(subClause);
         const isPositive = !isNegative && /(dạy|day)/iu.test(subClause);
-        if ((isNegative || isPositive) && subDay) {
+
+        // F-6: positive "phải dạy" — cần ít nhất 1 teacher để áp dụng.
+        if (isPositive && subDay && subTeachers.length > 0) {
           for (const teacher of subTeachers) {
             if (subPeriod !== null) {
-              thenSpecs.push({
+              thenSpecsRaw.push({
+                kind: 'teacher_required_slot',
+                params: { teacher, day: subDay, period: subPeriod },
+              });
+            } else {
+              thenSpecsRaw.push({
+                kind: 'teacher_required_day',
+                params: { teacher, day: subDay },
+              });
+            }
+          }
+          continue;
+        }
+
+        // Existing: negative "không dạy" — cần ít nhất 1 teacher.
+        if (isNegative && subDay && subTeachers.length > 0) {
+          for (const teacher of subTeachers) {
+            if (subPeriod !== null) {
+              thenSpecsRaw.push({
                 kind: 'teacher_block_slot',
                 params: { teacher, day: subDay, period: subPeriod },
               });
             } else {
-              thenSpecs.push({
+              thenSpecsRaw.push({
                 kind: 'teacher_block_day',
                 params: { teacher, day: subDay },
               });
@@ -216,7 +321,19 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         }
       }
 
-      if (condition && thenSpecs.length > 0) {
+      // F-9: propagate weight cho soft IF/THEN — gắn vào params.weight để humanizer / future solver dùng.
+      if (constraint.type === 'preferred' && Number.isFinite(constraint.weight) && (constraint.weight as number) > 0) {
+        const w = constraint.weight as number;
+        for (const item of thenSpecsRaw) {
+          if (!('weight' in item.params)) {
+            item.params = { ...item.params, weight: w };
+          }
+        }
+      }
+
+      // Claim if_then khi đã build được condition — kể cả khi THEN rỗng (vd: "Dung nghỉ" unparseable).
+      // Tránh rơi vào `pair_same_slot` hay block khác ở fallback, vốn sẽ phát ra kind sai.
+      if (condition) {
         return {
           id,
           original: constraint.text,
@@ -224,8 +341,9 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           kind: 'if_then',
           params: {
             if: condition,
-            then: thenSpecs,
+            then: thenSpecsRaw,
           },
+          ...(thenSpecsRaw.length === 0 ? { notes: 'fallback_parser:UNPARSED_THEN' } : {}),
         } satisfies ConstraintSpec;
       }
     }
