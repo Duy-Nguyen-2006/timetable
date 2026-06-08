@@ -45,10 +45,16 @@ function dayDisplay(agentInput: AgentInputPayload, value: unknown): string {
 function paramDisplay(agentInput: AgentInputPayload, key: string, value: unknown): string {
   const labelByKey: Record<string, string> = {
     teacher: 'Tên giáo viên',
+    subject: 'Môn học',
+    class: 'Lớp',
     day: 'Ngày',
     days: 'Ngày',
     period: 'Tiết',
+    periods: 'Tiết',
     maxPerDay: 'Số tiết tối đa',
+    max: 'Số tiết liên tiếp tối đa',
+    maxConsecutive: 'Số tiết liên tiếp tối đa',
+    length: 'Số tiết trong cụm',
   };
   const label = labelByKey[key] ?? key;
   const displayValue = Array.isArray(value)
@@ -151,7 +157,7 @@ export function ConstraintInputPanel({
               : 'border-white/[0.08] bg-white/[0.03] text-white/50 hover:border-white/15'
           }`}
         >
-          Built-in
+          Mẫu có sẵn
         </button>
         <button
           type="button"
@@ -162,7 +168,7 @@ export function ConstraintInputPanel({
               : 'border-white/[0.08] bg-white/[0.03] text-white/50 hover:border-white/15'
           }`}
         >
-          Custom
+          Ràng buộc đặc biệt
         </button>
       </div>
 
@@ -172,10 +178,10 @@ export function ConstraintInputPanel({
             <span className={iconShellClass}>
               <LayoutTemplate size={16} strokeWidth={1.5} />
             </span>
-            <span className="text-sm font-medium text-white">Wizard ràng buộc built-in</span>
+            <span className="text-sm font-medium text-white">Trình tạo ràng buộc theo mẫu</span>
           </div>
           <p className="text-xs leading-5 text-white/45">
-            Chọn đối tượng, loại ràng buộc và điền trường cụ thể. Hệ thống tạo bản diễn giải deterministic để bạn duyệt ở cột phải.
+            Chọn đối tượng, loại ràng buộc và điền thông tin cụ thể. Hệ thống tạo câu diễn giải để bạn duyệt ở cột phải.
           </p>
           <button
             type="button"
@@ -192,14 +198,14 @@ export function ConstraintInputPanel({
 
           <div className="mt-4 border-t border-white/[0.08] pt-4">
             <label className="block">
-              <span className="mb-1 block text-xs text-white/45">Gợi ý built-in từ câu nhập</span>
+              <span className="mb-1 block text-xs text-white/45">Tìm mẫu phù hợp từ câu nhập</span>
               <input
                 value={suggestionText}
                 onChange={(event) => {
                   setSuggestionText(event.target.value);
                   setSuggestion(null);
                 }}
-                placeholder="Ví dụ: Thầy Sơn không dạy thứ 2"
+                placeholder="Ví dụ: Môn Văn không được 3 tiết liên tiếp"
                 className="h-9 w-full rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-white/20"
               />
             </label>
@@ -238,14 +244,14 @@ export function ConstraintInputPanel({
                   );
                 })() : (
                   <>
-                    <p className="font-medium text-amber-200">Nên dùng Custom</p>
+                    <p className="font-medium text-amber-200">Nên dùng ràng buộc đặc biệt</p>
                     <p className="mt-1 text-white/45">{suggestion.reason}</p>
                     <button
                       type="button"
                       onClick={switchSuggestionToCustom}
                       className="mt-3 w-full rounded-md border border-white/[0.08] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.04]"
                     >
-                      Chuyển sang Custom
+                      Chuyển sang ràng buộc đặc biệt
                     </button>
                   </>
                 )}
@@ -259,7 +265,7 @@ export function ConstraintInputPanel({
             <span className={iconShellClass}>
               <ClipboardList size={16} strokeWidth={1.5} />
             </span>
-            <span className="text-sm font-medium text-white">Custom / nhập bằng câu tự nhiên</span>
+            <span className="text-sm font-medium text-white">Ràng buộc đặc biệt / nhập bằng câu tự nhiên</span>
           </div>
           <textarea
             value={draft.text}
@@ -269,7 +275,7 @@ export function ConstraintInputPanel({
               event.preventDefault();
               onNormalizeCustom();
             }}
-            placeholder={'Ví dụ:\nNếu cô Thúy dạy thứ 4 tiết 1 thì cô Hạnh không dạy thứ 5 tiết 2\nSơn không dạy thứ 2\n(mỗi dòng là một ràng buộc)'}
+            placeholder={'Ví dụ:\nNếu cô Thúy dạy thứ 4 tiết 1 thì cô Hạnh không dạy thứ 5 tiết 2\nRàng buộc cần diễn đạt rõ giáo viên, lớp, môn, ngày hoặc tiết liên quan\n(mỗi dòng là một ràng buộc)'}
             rows={5}
             className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
           />
@@ -316,7 +322,7 @@ export function ConstraintInputPanel({
         className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
       >
         <Plus size={14} strokeWidth={1.5} />
-        {customNormalizeLoading ? 'Đang chuẩn hóa...' : 'Chuẩn hóa Custom'}
+        {customNormalizeLoading ? 'Đang chuẩn hóa...' : 'Chuẩn hóa ràng buộc đặc biệt'}
       </button>
 
       <ConstraintWizardDialog

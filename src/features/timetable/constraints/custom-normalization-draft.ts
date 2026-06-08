@@ -63,8 +63,8 @@ export function buildCustomDraftFromNormalization(
       code: result.status === 'unsupported' ? 'unsupported_kind' : 'low_confidence',
       message:
         result.status === 'unsupported'
-          ? 'Ràng buộc custom này chưa đủ chính xác để chuẩn hóa.'
-          : 'Ràng buộc custom cần làm rõ trước khi xác nhận.',
+          ? 'Ràng buộc đặc biệt này chưa đủ chính xác để chuẩn hóa.'
+          : 'Ràng buộc đặc biệt cần làm rõ trước khi xác nhận.',
     });
   }
 

@@ -188,7 +188,7 @@ export function ConstraintWizardDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#141414] text-white sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="text-white">Tạo ràng buộc built-in</DialogTitle>
+          <DialogTitle className="text-white">Tạo ràng buộc theo mẫu có sẵn</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -268,7 +268,7 @@ export function ConstraintWizardDialog({
             onClick={() => onOpenChange(false)}
             className="rounded-md border border-red-400/35 bg-red-500/[0.08] px-4 py-2 text-sm text-red-200 hover:bg-red-500/[0.14]"
           >
-            Cancel
+            Hủy
           </button>
           <button type="button" onClick={handleCreate} className={primaryButtonClass}>
             <Check size={14} strokeWidth={2} />

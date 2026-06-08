@@ -24,7 +24,11 @@ import ExcelJS from 'exceljs'
 
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
-import { constraintItemsToRaw, validateConfirmedSolveRequest } from './ai/solver-constraint-gate'
+import {
+  confirmedFromDraftsAfterUserAccept,
+  constraintItemsToRaw,
+  validateConfirmedSolveRequest,
+} from './ai/solver-constraint-gate'
 import { ConstraintInputPanel } from './constraints/ConstraintInputPanel'
 import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
 import {
@@ -41,6 +45,7 @@ import {
   buildCustomDraftFromNormalization,
   severityFromConstraintType,
 } from './constraints/custom-normalization-draft'
+import { normalizeConstraintsToBuiltInDrafts } from './constraints/constraint-normalization'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SettingsModal } from './SettingsModal'
 import type { CustomConstraintNormalizationResult } from './ai/custom-normalization-service'
@@ -114,6 +119,13 @@ import {
 
 type SolvedCellEntry = { className: string; subject: string; teacher: string }
 type SolvedCell = { slotId: string; entries: SolvedCellEntry[] }
+
+function userFacingAgentError(message: string): string {
+  if (/Agent timeout/i.test(message)) {
+    return 'Hệ thống mất quá nhiều thời gian để xếp lịch. Hãy kiểm tra lại các ràng buộc chưa được chuẩn hóa thành mẫu có sẵn, hoặc đổi hồ sơ giải sang “Sâu” trong phần cấu hình.';
+  }
+  return message.replace(/\bAI Agent\b/gu, 'bộ xếp lịch');
+}
 
 export default function App({ onBackToLanding, quickDatasetText }: TimetableAppProps) {
   const [page, setPage] = useState('select')
@@ -273,6 +285,31 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       constraintWorkspaceLoaded.current = true
       invalidateReview()
 
+      const quickAgentInput = {
+        days: days.filter((day) => quickData.selectedDays.includes(day.id)),
+        sessions: sessions.filter((session) => quickData.selectedSessions.includes(session.id)),
+        periodCounts: quickData.periods,
+        deletedPeriods: {},
+        assignments: normalizeAssignments(quickData.assignments),
+        constraints: nextConstraints.map((constraint) =>
+          constraint.type === 'required'
+            ? { type: 'required' as const, text: constraint.text }
+            : { type: 'preferred' as const, text: constraint.text, weight: constraint.weight ?? 5 }
+        ),
+      }
+      const rawConstraints = constraintItemsToRaw(
+        nextConstraints.map((constraint) => ({
+          id: constraint.id,
+          type: constraint.type,
+          text: constraint.text,
+          weight: constraint.weight,
+        }))
+      )
+      const quickDrafts = normalizeConstraintsToBuiltInDrafts(rawConstraints, quickAgentInput)
+      const autoConfirmed = confirmedFromDraftsAfterUserAccept(
+        quickDrafts.filter((draft) => draft.confidence === 'high' && draft.proposedSpecs.length > 0)
+      )
+
       setSelectedDays(quickData.selectedDays)
       setSelectedSessions(quickData.selectedSessions)
       setPeriods(quickData.periods)
@@ -282,6 +319,10 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       setClassList(quickData.classes)
       setAssignmentList(quickData.assignments)
       setConstraintList(nextConstraints)
+      hydrateFromWorkspace({
+        constraintDrafts: quickDrafts,
+        confirmedConstraints: autoConfirmed,
+      })
       setAssignmentValidationMessage(null)
       setAiError(null)
       setAiResult(null)
@@ -293,7 +334,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       setQuickImportError(message)
       setPage('select')
     }
-  }, [quickDatasetText])
+  }, [hydrateFromWorkspace, invalidateReview, quickDatasetText])
 
   const sortedTeacherList = useMemo(() => sortAlphabetically(teacherList), [teacherList])
   const sortedSubjectList = useMemo(() => sortAlphabetically(subjectList), [subjectList])
@@ -811,7 +852,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     if (!lines.length) return
     if (!aiProvider) {
       setShowSettingsModal(true)
-      setCustomNormalizeError('Vui lòng cấu hình AI provider trước khi chuẩn hóa Custom.')
+      setCustomNormalizeError('Vui lòng cấu hình AI provider trước khi chuẩn hóa ràng buộc đặc biệt.')
       return
     }
 
@@ -854,13 +895,13 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           | { error?: string }
           | null
         if (!body) {
-          throw new Error('Chuẩn hóa Custom thất bại.')
+          throw new Error('Chuẩn hóa ràng buộc đặc biệt thất bại.')
         }
         if (!('status' in body)) {
-          throw new Error(body.error || 'Chuẩn hóa Custom thất bại.')
+          throw new Error(body.error || 'Chuẩn hóa ràng buộc đặc biệt thất bại.')
         }
         if (!response.ok) {
-          throw new Error('Chuẩn hóa Custom thất bại.')
+          throw new Error('Chuẩn hóa ràng buộc đặc biệt thất bại.')
         }
         newItems.push(item)
         newDrafts.push(buildCustomDraftFromNormalization(raw, body))
@@ -871,7 +912,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       setConstraintDraft((current) => ({ ...current, text: '' }))
       markConstraintsAdded(newItems.map((item) => item.id))
     } catch (error) {
-      setCustomNormalizeError(error instanceof Error ? error.message : 'Chuẩn hóa Custom thất bại.')
+      setCustomNormalizeError(error instanceof Error ? error.message : 'Chuẩn hóa ràng buộc đặc biệt thất bại.')
     } finally {
       setCustomNormalizeLoading(false)
     }
@@ -1021,10 +1062,10 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           setAgentStatus("Hoàn thành!");
           setAgentStep("idle");
         } else if (agentResult?.error) {
-          setAiError(agentResult.error);
+          setAiError(userFacingAgentError(agentResult.error));
         }
       } catch (err) {
-        setAiError(err instanceof Error ? err.message : "Lỗi khi chạy AI Agent");
+        setAiError(userFacingAgentError(err instanceof Error ? err.message : 'Lỗi khi chạy bộ xếp lịch'));
       } finally {
         setAiLoading(false);
         if (agentTimerRef.current) {
@@ -2167,7 +2208,7 @@ const handleDownloadExcel = useCallback(async () => {
                           <div className="mb-3 flex items-center justify-between">
                             <div className="flex items-center gap-2 text-sm font-medium text-white/70">
                               <Loader2 size={14} className="animate-spin text-blue-400" strokeWidth={2} />
-                              <span>Coding Agent đang hoạt động</span>
+                              <span>Bộ xếp lịch đang hoạt động</span>
                             </div>
                             <span className="text-xs tabular-nums text-white/30">
                               {Math.floor(agentElapsed / 60)}:{String(agentElapsed % 60).padStart(2, '0')}
@@ -2223,24 +2264,24 @@ const handleDownloadExcel = useCallback(async () => {
                         <div className="mb-4 space-y-4">
                           <section className={`${panelClass} p-4`}>
                             <div className="mb-3 flex items-center justify-between gap-3">
-                              <h3 className="text-sm font-semibold text-white">Kết quả pipeline</h3>
+                              <h3 className="text-sm font-semibold text-white">Kết quả kiểm tra lịch</h3>
                               <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
                                 {SOLVER_STATUS_LABELS[aiResult.solverStatus ?? ''] ?? aiResult.status}
                               </span>
                             </div>
                             <p className="mb-3 text-xs text-white/55">{aiResult.message}</p>
                             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                              <MetricCard label="Base constraints" value={aiResult.deterministicReport.baseConstraintPass ? 'Pass' : 'Fail'} />
-                              <MetricCard label="Hard constraints" value={aiResult.deterministicReport.hardConstraintPass ? 'Pass' : 'Fail'} />
-                              <MetricCard label="Soft constraints" value={aiResult.deterministicReport.softConstraintPass ? 'Pass' : 'Fail'} />
-                              <MetricCard label="Violations" value={aiResult.deterministicReport.violations.length} />
-                              <MetricCard label="Solver" value={SOLVER_STATUS_LABELS[aiResult.solverStatus ?? ''] ?? 'Đã giải'} />
+                              <MetricCard label="Luật nền" value={aiResult.deterministicReport.baseConstraintPass ? 'Đạt' : 'Lỗi'} />
+                              <MetricCard label="Bắt buộc" value={aiResult.deterministicReport.hardConstraintPass ? 'Đạt' : 'Lỗi'} />
+                              <MetricCard label="Nên có" value={aiResult.deterministicReport.softConstraintPass ? 'Đạt' : 'Lỗi'} />
+                              <MetricCard label="Vi phạm" value={aiResult.deterministicReport.violations.length} />
+                              <MetricCard label="Bộ giải" value={SOLVER_STATUS_LABELS[aiResult.solverStatus ?? ''] ?? 'Đã giải'} />
                             </div>
                           </section>
 
                           {aiResult.deterministicReport.hardViolations.length > 0 ? (
                             <section className={`${panelClass} p-4`}>
-                              <h3 className="mb-3 text-sm font-semibold text-white">Hard violations</h3>
+                              <h3 className="mb-3 text-sm font-semibold text-white">Ràng buộc bắt buộc chưa đạt</h3>
                               <div className="space-y-2">
                                 {aiResult.deterministicReport.hardViolations.map((violation, index) => (
                                   <div key={`${violation.constraintId}-${index}`} className="rounded-md border border-red-400/20 bg-red-400/[0.04] p-3">
@@ -2309,13 +2350,13 @@ const handleDownloadExcel = useCallback(async () => {
                                 <div className="space-y-2">
                                   {aiResult.validationErrors?.map((e, idx) => (
                                     <div key={`val-${e.constraintId}-${idx}`} className="rounded border border-red-400/15 bg-red-400/[0.03] p-2.5">
-                                      <p className="text-xs font-medium text-red-300/70">Validation Error — {e.constraintId}</p>
+                                      <p className="text-xs font-medium text-red-300/70">Lỗi kiểm tra — {e.constraintId}</p>
                                       <p className="mt-0.5 text-xs text-white/40">{e.error}</p>
                                     </div>
                                   ))}
                                   {aiResult.executionErrors?.map((e, idx) => (
                                     <div key={`exec-${e.constraintId}-${idx}`} className="rounded border border-amber-400/15 bg-amber-400/[0.03] p-2.5">
-                                      <p className="text-xs font-medium text-amber-300/70">Execution Error — {e.constraintId}</p>
+                                      <p className="text-xs font-medium text-amber-300/70">Lỗi chạy solver — {e.constraintId}</p>
                                       <p className="mt-0.5 text-xs text-white/40 font-mono">{e.error}</p>
                                     </div>
                                   ))}

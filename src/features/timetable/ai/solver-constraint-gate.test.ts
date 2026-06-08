@@ -60,7 +60,7 @@ test('validateConfirmedSolveRequest allows confirmed teacher_block_day', () => {
   if (gate.ok) assert.equal(gate.preTranslatedSpecs.length, 1);
 });
 
-test('validateConfirmedSolveRequest allows confirmed hard custom_dsl for coder path', () => {
+test('validateConfirmedSolveRequest blocks confirmed hard custom_dsl without executable form', () => {
   const specs: ConstraintSpec[] = [
     {
       id: 'custom_r1',
@@ -85,6 +85,35 @@ test('validateConfirmedSolveRequest allows confirmed hard custom_dsl for coder p
     },
   ];
   const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Nếu cô Thúy dạy thứ 4 thì cô Hạnh nghỉ' }]);
+  const gate = validateConfirmedSolveRequest(raw, [], { input: baseInput, confirmedConstraints: confirmed });
+  assert.equal(gate.ok, false);
+  if (!gate.ok) assert.match(gate.messages?.join('\n') ?? '', /chưa chuyển được thành luật máy hiểu/u);
+});
+
+test('validateConfirmedSolveRequest allows confirmed hard custom_dsl with IR expr', () => {
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'custom_r1',
+      original: 'Ràng buộc đặc biệt đã có IR',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: {
+        expr: { const: true },
+      },
+    },
+  ];
+  const confirmed: ConfirmedConstraint[] = [
+    {
+      id: 'conf1',
+      rawConstraintId: 'r1',
+      specs,
+      confirmedBy: 'user',
+      confirmedAt: new Date().toISOString(),
+      summary: 'ok',
+      displayText: 'Ràng buộc đặc biệt đã có IR.',
+    },
+  ];
+  const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Ràng buộc đặc biệt đã có IR' }]);
   const gate = validateConfirmedSolveRequest(raw, [], { input: baseInput, confirmedConstraints: confirmed });
   assert.equal(gate.ok, true);
   if (gate.ok) assert.equal(gate.preTranslatedSpecs[0].kind, 'custom_dsl');

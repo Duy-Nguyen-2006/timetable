@@ -97,6 +97,7 @@ export type ConfirmedConstraint = {
 export type PreflightBlockReason =
   | 'hard_raw_unconfirmed'
   | 'hard_draft_unresolved'
+  | 'hard_custom_unexecutable'
   | 'hard_spec_unchecked'
   | 'no_confirmed_specs'
   | 'constraint_unconfirmed'

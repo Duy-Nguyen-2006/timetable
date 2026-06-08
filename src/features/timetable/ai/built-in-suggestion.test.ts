@@ -90,3 +90,28 @@ test('suggestBuiltInConstraint maps teacher daily max periods', () => {
   assert.equal(suggestion.kind, 'teacher_max_per_day');
   assert.deepEqual(suggestion.paramsDraft, { teacher: 'Sơn', maxPerDay: 4 });
 });
+
+test('suggestBuiltInConstraint maps subject banned exact consecutive run to max consecutive', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Môn Văn không được 3 tiết liên tiếp',
+    teachers: ['Sơn'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'subject_max_consecutive');
+  assert.equal(suggestion.scope, 'subject');
+  assert.deepEqual(suggestion.paramsDraft, { subject: 'Văn', max: 2, maxConsecutive: 2 });
+});
+
+test('suggestBuiltInConstraint maps class period block', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Lớp 6A không học tiết 5',
+    teachers: ['Sơn'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'class_block_period');
+  assert.deepEqual(suggestion.paramsDraft, { class: '6A', period: 5 });
+});

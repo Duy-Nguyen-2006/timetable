@@ -14,11 +14,11 @@ export const SOLVER_STATUS_LABELS: Record<string, string> = {
 export const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
 export const STEP_LABELS: Record<AgentProgressStep, string> = {
   thinking: 'Suy nghĩ',
-  coding: 'Viết code',
+  coding: 'Chuẩn bị luật',
   running: 'Chạy thử',
   checking: 'Kiểm tra',
   fixing: 'Sửa lỗi',
-  idle: 'Idle',
+  idle: 'Sẵn sàng',
 }
 
 export function toProgressStep(phase: AgentLifecyclePhase): AgentProgressStep {
@@ -47,14 +47,14 @@ export function buildReportRows(
 
   const rows: string[][] = [
     [title, ''],
-    ['Base constraint pass', report.baseConstraintPass ? 'Yes' : 'No'],
-    ['Hard constraint pass', report.hardConstraintPass ? 'Yes' : 'No'],
-    ['Soft constraint pass', report.softConstraintPass ? 'Yes' : 'No'],
-    ['Unchecked constraints', report.uncheckedConstraintIds?.join(' | ') || 'None'],
+    ['Luật nền', report.baseConstraintPass ? 'Đạt' : 'Không đạt'],
+    ['Ràng buộc bắt buộc', report.hardConstraintPass ? 'Đạt' : 'Không đạt'],
+    ['Ràng buộc nên có', report.softConstraintPass ? 'Đạt' : 'Không đạt'],
+    ['Chưa kiểm tra được', report.uncheckedConstraintIds?.join(' | ') || 'Không có'],
   ]
 
   rows.push([])
-  rows.push(['constraintId', 'kind', 'message', 'offending entries'])
+  rows.push(['Mã ràng buộc', 'Loại', 'Thông báo', 'Số ô liên quan'])
   report.violations.forEach((check) => {
     rows.push([
       check.constraintId,

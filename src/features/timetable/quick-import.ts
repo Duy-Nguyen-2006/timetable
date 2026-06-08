@@ -32,10 +32,10 @@ export type QuickImportData = {
 }
 
 export const QUICK_IMPORT_SAMPLE_TEXT = `DATASET 1
-Days: Mon-Fri
-Time: Morning
-Max periods: 4
-Teachers:
+Ngày học: Mon-Fri
+Buổi học: Sáng
+Số tiết tối đa: 4
+Giáo viên:
 Sơn
 Dung
 Hương
@@ -44,7 +44,7 @@ Hiếu
 Lan
 Thắng
 Phương
-Subjects:
+Môn học:
 Toán
 Văn
 Tiếng Anh
@@ -53,10 +53,10 @@ KHTN
 LS&ĐL
 CN
 GDCD
-Classes:
+Lớp:
 6A
 6B
-Assignments:
+Phân công:
 Sơn-Toán-6A-4
 Sơn-Toán-6B-4
 Dung-Văn-6A-4
@@ -73,10 +73,10 @@ Thắng-CN-6A-1
 Thắng-CN-6B-1
 Phương-GDCD-6A-1
 Phương-GDCD-6B-1
-Hard constraints:
+Ràng buộc bắt buộc:
 Sơn không dạy thứ 2
 Hương không dạy tiết 1
-Soft constraints:
+Ràng buộc nên có:
 Toán nên xếp tiết 1-2
 Văn nên liên tiếp 2 tiết`
 
@@ -189,42 +189,42 @@ export function parseQuickImportText(rawText: string): QuickImportData {
     const lower = line.toLowerCase()
 
     if (lower.startsWith('dataset')) return
-    if (/^days\s*:/.test(lower)) {
+    if (/^(days|ngày học|ngay hoc)\s*:/.test(lower)) {
       dayRaw = line.slice(line.indexOf(':') + 1).trim()
       section = null
       return
     }
-    if (/^time\s*:/.test(lower)) {
+    if (/^(time|buổi học|buoi hoc)\s*:/.test(lower)) {
       timeRaw = line.slice(line.indexOf(':') + 1).trim()
       section = null
       return
     }
-    if (/^max periods?\s*:/.test(lower)) {
+    if (/^(max periods?|số tiết tối đa|so tiet toi da)\s*:/.test(lower)) {
       maxPeriodsRaw = line.slice(line.indexOf(':') + 1).trim()
       section = null
       return
     }
-    if (/^teachers\s*:/.test(lower)) {
+    if (/^(teachers|giáo viên|giao vien)\s*:/.test(lower)) {
       section = 'teachers'
       return
     }
-    if (/^subjects\s*:/.test(lower)) {
+    if (/^(subjects|môn học|mon hoc)\s*:/.test(lower)) {
       section = 'subjects'
       return
     }
-    if (/^classes\s*:/.test(lower)) {
+    if (/^(classes|lớp|lop)\s*:/.test(lower)) {
       section = 'classes'
       return
     }
-    if (/^assignments\s*:/.test(lower)) {
+    if (/^(assignments|phân công|phan cong)\s*:/.test(lower)) {
       section = 'assignments'
       return
     }
-    if (/^hard constraints\s*:/.test(lower)) {
+    if (/^(hard constraints|ràng buộc bắt buộc|rang buoc bat buoc)\s*:/.test(lower)) {
       section = 'hard'
       return
     }
-    if (/^soft constraints\s*:/.test(lower)) {
+    if (/^(soft constraints|ràng buộc nên có|rang buoc nen co)\s*:/.test(lower)) {
       section = 'soft'
       return
     }

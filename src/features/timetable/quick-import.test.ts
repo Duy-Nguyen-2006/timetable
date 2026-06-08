@@ -17,6 +17,30 @@ test('parseQuickImportText parses full dataset and keeps expected values', () =>
   assert.equal(parsed.softConstraints[1], 'Văn nên liên tiếp 2 tiết')
 })
 
+test('parseQuickImportText accepts Vietnamese section headers', () => {
+  const parsed = parseQuickImportText(`DATASET 12
+Ngày học: Mon-Fri
+Buổi học: Sáng
+Số tiết tối đa: 4
+Giáo viên:
+Dung
+Môn học:
+Văn
+Lớp:
+6A
+Phân công:
+Dung-Văn-6A-4
+Ràng buộc bắt buộc:
+Môn Văn không được 3 tiết liên tiếp
+Ràng buộc nên có:
+Văn nên liên tiếp 2 tiết`)
+
+  assert.deepEqual(parsed.selectedSessions, ['morning'])
+  assert.equal(parsed.periods.morning, 4)
+  assert.equal(parsed.hardConstraints[0], 'Môn Văn không được 3 tiết liên tiếp')
+  assert.equal(parsed.softConstraints[0], 'Văn nên liên tiếp 2 tiết')
+})
+
 test('parseQuickImportText accepts morning-afternoon and splits seven periods as 4 plus 3', () => {
   const parsed = parseQuickImportText(`DATASET 6
 Days: Mon-Fri

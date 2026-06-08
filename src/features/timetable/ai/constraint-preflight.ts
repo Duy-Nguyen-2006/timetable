@@ -32,6 +32,10 @@ function isConstraintConfirmed(
   return !NEEDS_CLARIFICATION.has(draft.status);
 }
 
+function isExecutableCustomDsl(spec: { kind: string; params: Record<string, unknown>; pythonPredicate?: string }): boolean {
+  return spec.kind !== 'custom_dsl' || Boolean(spec.params.expr) || Boolean(spec.pythonPredicate?.trim());
+}
+
 export function assertSolvableConstraintState(
   rawConstraints: RawConstraintInput[],
   drafts: ParsedConstraintDraft[],
@@ -105,6 +109,12 @@ export function assertSolvableConstraintState(
 
   for (const c of confirmed) {
     for (const spec of c.specs) {
+      if (spec.severity === 'hard' && !isExecutableCustomDsl(spec)) {
+        blockReasons.push('hard_custom_unexecutable');
+        messages.push(
+          `Ràng buộc bắt buộc dạng đặc biệt chưa chuyển được thành luật máy hiểu: “${spec.original.slice(0, 80)}${spec.original.length > 80 ? '…' : ''}”. Hãy chọn mẫu có sẵn hoặc sửa lại nội dung.`
+        );
+      }
       if (spec.severity === 'hard' && spec.kind !== 'custom_dsl' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
         blockReasons.push('hard_spec_unchecked');
         messages.push(`Ràng buộc bắt buộc chưa mã hoá được vào solver: ${spec.kind} (${spec.id}).`);
