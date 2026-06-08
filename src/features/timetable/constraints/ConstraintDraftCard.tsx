@@ -126,7 +126,7 @@ export function ConstraintDraftCard({
       {draft ? (
         <div
           className={`mt-2 rounded border p-2.5 text-sm ${
-            hasReparsed || isReparsing
+            hasAiAnalyzed || isReparsing
               ? 'border-sky-500/40 bg-sky-500/[0.08]'
               : 'border-white/[0.06] bg-[#0a0a0a]'
           }`}
