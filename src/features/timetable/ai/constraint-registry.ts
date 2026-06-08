@@ -87,7 +87,7 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'teacher_required_slot', label: 'Teacher required slot', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'day', 'period'] },
   { kind: 'teacher_pair_required_same_day', label: 'Teacher pair required same day', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'day'] },
   { kind: 'teacher_pair_required_same_slot', label: 'Teacher pair required same slot', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'day', 'period'] },
-  { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: ['pythonPredicate'] },
+  { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: [] },
 ];
 
 export const CONSTRAINT_KINDS = CONSTRAINT_REGISTRY.map((m) => m.kind) as ConstraintKind[];

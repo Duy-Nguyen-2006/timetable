@@ -143,7 +143,10 @@ function validateSpecShape(spec: ConstraintSpec): ConstraintParseIssue[] {
       });
     }
   }
-  if (spec.severity === 'hard' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
+  // hard_unchecked: kinds that solver can't encode are flagged as unsupported.
+  // EXCEPTION: custom_dsl with `expr` (IR form) IS solver-encodable.
+  const isCustomDslWithExpr = spec.kind === 'custom_dsl' && !!spec.params.expr;
+  if (spec.severity === 'hard' && !SOLVER_ENCODABLE_KINDS.has(spec.kind) && !isCustomDslWithExpr) {
     issues.push({
       code: 'hard_unchecked',
       message: `Ràng buộc bắt buộc “${spec.kind}” chưa mã hoá được vào solver.`,
@@ -202,7 +205,10 @@ export function validateConstraintSpecs(
   }
 
   const hasHardUnchecked = issues.some((i) => i.code === 'hard_unchecked');
-  const hasCustomDslHard = specs.some((s) => s.kind === 'custom_dsl' && s.severity === 'hard');
+  // custom_dsl with `expr` (IR form) IS solver-encodable — don't treat as unsupported
+  const hasCustomDslHard = specs.some(
+    (s) => s.kind === 'custom_dsl' && s.severity === 'hard' && !s.params.expr
+  );
   const hasEntityProblem = issues.some(
     (i) => i.code === 'unknown_entity' || i.code === 'multiple_entity_matches'
   );
@@ -225,8 +231,15 @@ export function validateConstraintSpecs(
     return { status: 'needs_review', issues, confidence: 'low' };
   }
   if (options?.source === 'translator') {
-    issues.push({ code: 'llm_fallback_used', message: 'Đã dùng mô hình dịch ràng buộc.' });
-    return { status: 'needs_review', issues, confidence: recomputedConfidence };
+    // In LLM-first architecture, translator is the primary parser.
+    // Only flag as needs_review if specs contain custom_dsl (unclear semantics).
+    // Valid, well-formed specs from translator are trusted → status 'parsed'.
+    const hasCustomDsl = specs.some((s) => s.kind === 'custom_dsl');
+    if (hasCustomDsl) {
+      issues.push({ code: 'llm_fallback_used', message: 'Đã dùng mô hình dịch ràng buộc.' });
+      return { status: 'needs_review', issues, confidence: recomputedConfidence };
+    }
+    return { status: 'parsed', issues, confidence: recomputedConfidence ?? 'medium' };
   }
   if (options?.source === 'ai_reparse') {
     return { status: 'parsed', issues, confidence: recomputedConfidence ?? 'high' };
@@ -234,7 +247,8 @@ export function validateConstraintSpecs(
 
   const needsClarification =
     hasCustomDslHard ||
-    specs.some((s) => s.kind === 'custom_dsl');
+    // custom_dsl WITHOUT `expr` (IR form) needs clarification — pure natural language fallback
+    specs.some((s) => s.kind === 'custom_dsl' && !s.params.expr);
 
   if (needsClarification) {
     issues.push({
