@@ -37,8 +37,13 @@ import {
   readConstraintWorkspace,
   writeConstraintWorkspace,
 } from './constraints/constraint-workspace-storage'
+import {
+  buildCustomDraftFromNormalization,
+  severityFromConstraintType,
+} from './constraints/custom-normalization-draft'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SettingsModal } from './SettingsModal'
+import type { CustomConstraintNormalizationResult } from './ai/custom-normalization-service'
 import type {
   AIProviderConfig,
   AgentLifecycleEvent,
@@ -50,6 +55,7 @@ import type {
   BulkAssignmentError,
   ConstraintItem,
   ParsedConstraintDraft,
+  RawConstraintInput,
   SolverRequestPayload,
   TimetableAppProps,
   TimetableSolveResult,
@@ -164,6 +170,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showTechnicalErrors, setShowTechnicalErrors] = useState(false)
   const [quickImportError, setQuickImportError] = useState<string | null>(null)
+  const [customNormalizeLoading, setCustomNormalizeLoading] = useState(false)
+  const [customNormalizeError, setCustomNormalizeError] = useState<string | null>(null)
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
@@ -800,21 +808,75 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       return true
     }
   
-    const importConstraint = () => {
+  const normalizeCustomConstraintDraft = async () => {
     const lines = parseLines(constraintDraft.text)
     if (!lines.length) return
+    if (!aiProvider) {
+      setShowSettingsModal(true)
+      setCustomNormalizeError('Vui lòng cấu hình AI provider trước khi chuẩn hóa Custom.')
+      return
+    }
 
-    const now = Date.now()
-    const newItems = lines.map((text, i) => ({
-      id: `${now}-${i}-${text}`,
-      type: constraintDraft.type,
-      text,
-      weight: constraintDraft.type === 'preferred' ? constraintDraft.weight : undefined,
-    }))
+    setCustomNormalizeLoading(true)
+    setCustomNormalizeError(null)
+    try {
+      const now = Date.now()
+      const createdAt = new Date().toISOString()
+      const newItems: ConstraintItem[] = []
+      const newDrafts: ParsedConstraintDraft[] = []
 
-    setConstraintList((current) => [...current, ...newItems])
-    setConstraintDraft((current) => ({ ...current, text: '' }))
-    markConstraintsAdded(newItems.map((item) => item.id))
+      for (const [index, text] of lines.entries()) {
+        const item: ConstraintItem = {
+          id: `${now}-${index}-${text}`,
+          type: constraintDraft.type,
+          text,
+          weight: constraintDraft.type === 'preferred' ? constraintDraft.weight : undefined,
+        }
+        const raw: RawConstraintInput = {
+          id: item.id,
+          text: item.text,
+          type: item.type,
+          weight: item.weight,
+          createdAt,
+        }
+        const response = await fetch('/api/ai/normalize-custom-constraint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            request: {
+              severity: severityFromConstraintType(item.type),
+              originalText: item.text,
+            },
+            providerConfig: aiProvider,
+            agentInput: constraintAgentInput,
+          }),
+        })
+        const body = (await response.json().catch(() => null)) as
+          | CustomConstraintNormalizationResult
+          | { error?: string }
+          | null
+        if (!body) {
+          throw new Error('Chuẩn hóa Custom thất bại.')
+        }
+        if (!('status' in body)) {
+          throw new Error(body.error || 'Chuẩn hóa Custom thất bại.')
+        }
+        if (!response.ok) {
+          throw new Error('Chuẩn hóa Custom thất bại.')
+        }
+        newItems.push(item)
+        newDrafts.push(buildCustomDraftFromNormalization(raw, body))
+      }
+
+      setConstraintList((current) => [...current, ...newItems])
+      newDrafts.forEach((draft) => updateDraft(draft))
+      setConstraintDraft((current) => ({ ...current, text: '' }))
+      markConstraintsAdded(newItems.map((item) => item.id))
+    } catch (error) {
+      setCustomNormalizeError(error instanceof Error ? error.message : 'Chuẩn hóa Custom thất bại.')
+    } finally {
+      setCustomNormalizeLoading(false)
+    }
   }
 
   const createBuiltInConstraint = (constraint: ConstraintItem, draft: ParsedConstraintDraft) => {
@@ -1912,10 +1974,12 @@ const handleDownloadExcel = useCallback(async () => {
                     <ConstraintInputPanel
                       draft={constraintDraft}
                       onDraftChange={(patch) => setConstraintDraft((current) => ({ ...current, ...patch }))}
-                      onImport={importConstraint}
+                      onNormalizeCustom={() => void normalizeCustomConstraintDraft()}
                       onCreateBuiltIn={createBuiltInConstraint}
                       agentInput={constraintAgentInput}
                       totalCount={constraintList.length}
+                      customNormalizeLoading={customNormalizeLoading}
+                      customNormalizeError={customNormalizeError}
                     />
                     <ConstraintReviewPanel
                       constraints={sortedConstraintList}

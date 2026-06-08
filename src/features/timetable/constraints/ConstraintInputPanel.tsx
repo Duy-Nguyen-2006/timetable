@@ -25,10 +25,12 @@ export type ConstraintDraftForm = {
 type ConstraintInputPanelProps = {
   draft: ConstraintDraftForm;
   onDraftChange: (patch: Partial<ConstraintDraftForm>) => void;
-  onImport: () => void;
+  onNormalizeCustom: () => void;
   onCreateBuiltIn: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
   agentInput: AgentInputPayload;
   totalCount: number;
+  customNormalizeLoading?: boolean;
+  customNormalizeError?: string | null;
 };
 
 function uniqueLabels(labels: string[]): string[] {
@@ -57,7 +59,16 @@ function paramDisplay(agentInput: AgentInputPayload, key: string, value: unknown
   return `${label}: ${displayValue}`;
 }
 
-export function ConstraintInputPanel({ draft, onDraftChange, onImport, onCreateBuiltIn, agentInput, totalCount }: ConstraintInputPanelProps) {
+export function ConstraintInputPanel({
+  draft,
+  onDraftChange,
+  onNormalizeCustom,
+  onCreateBuiltIn,
+  agentInput,
+  totalCount,
+  customNormalizeLoading,
+  customNormalizeError,
+}: ConstraintInputPanelProps) {
   const [mode, setMode] = useState<'built_in' | 'custom'>('built_in');
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardInstance, setWizardInstance] = useState(0);
@@ -256,12 +267,17 @@ export function ConstraintInputPanel({ draft, onDraftChange, onImport, onCreateB
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.shiftKey) return;
               event.preventDefault();
-              onImport();
+              onNormalizeCustom();
             }}
             placeholder={'Ví dụ:\nNếu cô Thúy dạy thứ 4 tiết 1 thì cô Hạnh không dạy thứ 5 tiết 2\nSơn không dạy thứ 2\n(mỗi dòng là một ràng buộc)'}
             rows={5}
             className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
           />
+          {customNormalizeError ? (
+            <p className="mt-2 rounded border border-red-500/30 bg-red-500/[0.08] px-3 py-2 text-xs text-red-200">
+              {customNormalizeError}
+            </p>
+          ) : null}
         </label>
       )}
 
@@ -295,12 +311,12 @@ export function ConstraintInputPanel({ draft, onDraftChange, onImport, onCreateB
 
       <button
         type="button"
-        onClick={onImport}
-        disabled={mode !== 'custom' || !draft.text.trim()}
+        onClick={onNormalizeCustom}
+        disabled={mode !== 'custom' || !draft.text.trim() || customNormalizeLoading}
         className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
       >
         <Plus size={14} strokeWidth={1.5} />
-        Import Custom
+        {customNormalizeLoading ? 'Đang chuẩn hóa...' : 'Chuẩn hóa Custom'}
       </button>
 
       <ConstraintWizardDialog
