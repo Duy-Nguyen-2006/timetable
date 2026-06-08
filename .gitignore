@@ -39,6 +39,7 @@ __pycache__/
 .coverage
 coverage/
 htmlcov/
+.scannerwork/
 
 # Editors
 .vscode/

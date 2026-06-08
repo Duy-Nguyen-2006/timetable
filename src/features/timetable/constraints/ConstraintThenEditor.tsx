@@ -109,9 +109,13 @@ export function ConstraintThenEditor({
           params: { teacher: e.teacher, day: e.day, period: e.period },
         };
       });
+    const params = Object.fromEntries([
+      ...Object.entries(spec.params),
+      ['then', then], // NOSONAR: if_then specs require a JSON params.then field; this is not a thenable API.
+    ]) as ConstraintSpec['params'];
     const updatedSpec: ConstraintSpec = {
       ...spec,
-      params: { ...spec.params, ['then']: then },
+      params,
     };
     onSave(updatedSpec);
     onOpenChange(false);
