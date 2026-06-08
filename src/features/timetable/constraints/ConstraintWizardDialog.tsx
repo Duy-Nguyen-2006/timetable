@@ -28,6 +28,10 @@ import {
   type ConstraintFormTemplateId,
   type ConstraintFormValues,
 } from './constraint-form-schema';
+import {
+  buildWizardValuesFromPrefill,
+  type ConstraintWizardPrefill,
+} from './constraint-wizard-prefill';
 
 type ConstraintWizardDialogProps = {
   open: boolean;
@@ -35,6 +39,7 @@ type ConstraintWizardDialogProps = {
   constraintType: 'required' | 'preferred';
   weight: number;
   agentInput: AgentInputPayload;
+  prefill?: ConstraintWizardPrefill | null;
   onCreate: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
 };
 
@@ -58,19 +63,46 @@ function definitionExample(templateId: ConstraintFormTemplateId): string {
   return BUILT_IN_CONSTRAINT_DEFINITIONS.find((definition) => definition.kind === templateId)?.exampleVi ?? '';
 }
 
+function initialWizardState(
+  prefill: ConstraintWizardPrefill | null | undefined,
+  constraintType: 'required' | 'preferred'
+): {
+  group: typeof CONSTRAINT_GROUPS[number];
+  templateId: ConstraintFormTemplateId;
+  values: ConstraintFormValues;
+} {
+  if (prefill) {
+    const built = buildWizardValuesFromPrefill(prefill, constraintType);
+    if (built && built.group !== 'global') {
+      return {
+        group: built.group,
+        templateId: prefill.templateId,
+        values: built.values,
+      };
+    }
+  }
+  return {
+    group: 'teacher',
+    templateId: 'teacher_block_day',
+    values: defaultFormValues('teacher_block_day', constraintType),
+  };
+}
+
 export function ConstraintWizardDialog({
   open,
   onOpenChange,
   constraintType,
   weight,
   agentInput,
+  prefill,
   onCreate,
 }: ConstraintWizardDialogProps) {
+  const initialState = initialWizardState(prefill, constraintType);
   const ctx = useMemo(() => buildContextFromAgentInput(agentInput), [agentInput]);
-  const [group, setGroup] = useState<typeof CONSTRAINT_GROUPS[number]>('teacher');
-  const [templateId, setTemplateId] = useState<ConstraintFormTemplateId>('teacher_block_day');
+  const [group, setGroup] = useState<typeof CONSTRAINT_GROUPS[number]>(initialState.group);
+  const [templateId, setTemplateId] = useState<ConstraintFormTemplateId>(initialState.templateId);
   const [search, setSearch] = useState('');
-  const [values, setValues] = useState<ConstraintFormValues>(() => defaultFormValues('teacher_block_day', constraintType));
+  const [values, setValues] = useState<ConstraintFormValues>(initialState.values);
 
   const templates = useMemo(() => {
     const searchKey = normalizeSearch(search);
