@@ -5,6 +5,20 @@ import type {
   Violation,
 } from './constraint-spec';
 
+/**
+ * O(1) append into a grouped map. Replaces the O(n) spread
+ * `[...(map.get(k) ?? []), value]` pattern that allocated a fresh
+ * array on every insert (turning group-by loops into O(n²)).
+ */
+export function appendToGroup<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const arr = map.get(key);
+  if (arr) {
+    arr.push(value);
+  } else {
+    map.set(key, [value]);
+  }
+}
+
 export function toPeriod(value: number | string): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const n = Number(String(value));
@@ -125,8 +139,8 @@ export function checkBaseConstraints(
     const teacherKey = `${entry.teacher}::${slotKey(entry)}`;
     const classKey = `${entry.class}::${slotKey(entry)}`;
 
-    teacherSlotMap.set(teacherKey, [...(teacherSlotMap.get(teacherKey) ?? []), entry]);
-    classSlotMap.set(classKey, [...(classSlotMap.get(classKey) ?? []), entry]);
+    appendToGroup(teacherSlotMap, teacherKey, entry);
+    appendToGroup(classSlotMap, classKey, entry);
   }
 
   for (const entries of teacherSlotMap.values()) {

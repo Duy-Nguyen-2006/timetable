@@ -8,7 +8,7 @@ import type {
 } from './constraint-spec';
 import { countHeavySubjectsInPeriods, sessionPeriodBuckets } from './class-heavy-session';
 import { CHECKED_KINDS } from './constraint-registry';
-import { checkBaseConstraints, evaluateCondition, toPeriod } from './validator-helpers';
+import { appendToGroup, checkBaseConstraints, evaluateCondition, toPeriod } from './validator-helpers';
 
 type CheckFn = (
   spec: ConstraintSpec,
@@ -75,7 +75,7 @@ const checkTeacherMaxPerDay: CheckFn = (spec, schedule) => {
 
   for (const entry of schedule) {
     if (entry.teacher !== teacher) continue;
-    byDay.set(entry.day, [...(byDay.get(entry.day) ?? []), entry]);
+    appendToGroup(byDay, entry.day, entry);
   }
 
   for (const [day, entries] of byDay.entries()) {
@@ -99,7 +99,7 @@ const checkTeacherMaxConsecutive: CheckFn = (spec, schedule) => {
 
   for (const entry of schedule) {
     if (entry.teacher !== teacher) continue;
-    byDay.set(entry.day, [...(byDay.get(entry.day) ?? []), entry]);
+    appendToGroup(byDay, entry.day, entry);
   }
 
   for (const [day, entries] of byDay.entries()) {
@@ -174,7 +174,7 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
 
   const byClass = new Map<string, ScheduleEntry[]>();
   for (const entry of target) {
-    byClass.set(entry.class, [...(byClass.get(entry.class) ?? []), entry]);
+    appendToGroup(byClass, entry.class, entry);
   }
 
   for (const [klass, entries] of byClass.entries()) {
@@ -188,7 +188,7 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
     let runsOfCorrectLength = 0;
     const byDay = new Map<string, ScheduleEntry[]>();
     for (const entry of entries) {
-      byDay.set(entry.day, [...(byDay.get(entry.day) ?? []), entry]);
+      appendToGroup(byDay, entry.day, entry);
     }
 
     for (const dayEntries of byDay.values()) {
@@ -238,7 +238,7 @@ const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
     if (entry.class !== klass) continue;
     if (subjectFilter && entry.subject !== subjectFilter) continue;
     const key = `${entry.day}::${entry.subject}`;
-    byDaySubject.set(key, [...(byDaySubject.get(key) ?? []), entry]);
+    appendToGroup(byDaySubject, key, entry);
   }
 
   for (const [key, entries] of byDaySubject.entries()) {
@@ -272,7 +272,7 @@ const checkClassSubjectsNotSameDay: CheckFn = (spec, schedule) => {
     const key = `${entry.class}::${entry.day}`;
     if (!byClassDay.has(key)) byClassDay.set(key, new Map());
     const subjectMap = byClassDay.get(key)!;
-    subjectMap.set(entry.subject, [...(subjectMap.get(entry.subject) ?? []), entry]);
+    appendToGroup(subjectMap, entry.subject, entry);
   }
 
   for (const [key, subjectMap] of byClassDay.entries()) {
@@ -334,7 +334,7 @@ const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
     if (entry.subject !== subject) continue;
     if (classes && !classes.includes(entry.class)) continue;
     const key = `${entry.class}::${entry.day}`;
-    byClassDay.set(key, [...(byClassDay.get(key) ?? []), entry]);
+    appendToGroup(byClassDay, key, entry);
   }
 
   for (const [key, entries] of byClassDay.entries()) {
@@ -412,7 +412,7 @@ const checkPairNotSameSlot: CheckFn = (spec, schedule) => {
   const bySlot = new Map<string, ScheduleEntry[]>();
   for (const entry of relevant) {
     const key = `${entry.day}::${entry.period}`;
-    bySlot.set(key, [...(bySlot.get(key) ?? []), entry]);
+    appendToGroup(bySlot, key, entry);
   }
 
   const violations: Violation[] = [];
@@ -486,7 +486,7 @@ const checkSessionLimit: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const entry of schedule) {
     if (entry.teacher !== teacher) continue;
-    byDay.set(entry.day, [...(byDay.get(entry.day) ?? []), entry]);
+    appendToGroup(byDay, entry.day, entry);
   }
 
   for (const [day, entries] of byDay.entries()) {
@@ -523,7 +523,7 @@ const checkSubjectSessionMaxPeriods: CheckFn = (spec, schedule) => {
     if (!byClassDaySession.has(classDay)) byClassDaySession.set(classDay, new Map());
     const subjectMap = byClassDaySession.get(classDay)!;
     const key = entry.subject;
-    subjectMap.set(key, [...(subjectMap.get(key) ?? []), entry]);
+    appendToGroup(subjectMap, key, entry);
   }
 
   for (const [classDay, subjectMap] of byClassDaySession) {
@@ -560,7 +560,7 @@ const checkSubjectGroupDailyLimit: CheckFn = (spec, schedule) => {
     const dayKey = entry.day;
     if (!byDaySubject.has(dayKey)) byDaySubject.set(dayKey, new Set());
     byDaySubject.get(dayKey)!.add(entry.subject);
-    byDayEntries.set(dayKey, [...(byDayEntries.get(dayKey) ?? []), entry]);
+    appendToGroup(byDayEntries, dayKey, entry);
   }
 
   for (const [day, subjects] of byDaySubject.entries()) {
@@ -608,7 +608,7 @@ const checkClassMaxPerDay: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const e of schedule) {
     if (e.class !== klass) continue;
-    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+    appendToGroup(byDay, e.day, e);
   }
   for (const [day, entries] of byDay) {
     if (entries.length > maxPerDay) {
@@ -625,7 +625,7 @@ const checkClassMinPerDay: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const e of schedule) {
     if (e.class !== klass) continue;
-    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+    appendToGroup(byDay, e.day, e);
   }
   for (const [day, entries] of byDay) {
     if (entries.length < minPerDay) {
@@ -641,7 +641,7 @@ const checkClassNoGaps: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const e of schedule) {
     if (e.class !== klass) continue;
-    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+    appendToGroup(byDay, e.day, e);
   }
   for (const [day, entries] of byDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
@@ -662,7 +662,7 @@ const checkTeacherMinPerDay: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const e of schedule) {
     if (e.teacher !== teacher) continue;
-    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+    appendToGroup(byDay, e.day, e);
   }
   for (const [day, entries] of byDay) {
     if (entries.length < minPerDay) {
@@ -678,7 +678,7 @@ const checkTeacherNoGaps: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const e of schedule) {
     if (e.teacher !== teacher) continue;
-    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+    appendToGroup(byDay, e.day, e);
   }
   for (const [day, entries] of byDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
@@ -738,7 +738,7 @@ const checkSubjectMinGapDays: CheckFn = (spec, schedule) => {
   for (const e of schedule) {
     if (e.subject !== subject) continue;
     if (classes && !classes.includes(e.class)) continue;
-    byClass.set(e.class, [...(byClass.get(e.class) ?? []), e]);
+    appendToGroup(byClass, e.class, e);
   }
 
   for (const [klass, entries] of byClass) {
@@ -769,7 +769,7 @@ const checkSubjectDailyMaxPeriods: CheckFn = (spec, schedule) => {
     if (e.subject !== subject) continue;
     if (classes && !classes.includes(e.class)) continue;
     const key = `${e.class}::${e.day}`;
-    byClassDay.set(key, [...(byClassDay.get(key) ?? []), e]);
+    appendToGroup(byClassDay, key, e);
   }
   for (const [key, entries] of byClassDay) {
     if (entries.length > maxPerDay) {
@@ -847,7 +847,7 @@ const checkTeacherMaxGaps: CheckFn = (spec, schedule) => {
   if (!teacher || !Number.isFinite(maxGaps)) return [];
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();
-  for (const e of schedule) if (e.teacher === teacher) byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  for (const e of schedule) if (e.teacher === teacher) appendToGroup(byDay, e.day, e);
   for (const [day, entries] of byDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
     if (periods.length === 0) continue;
@@ -874,7 +874,7 @@ const checkTeacherMinConsecutive: CheckFn = (spec, schedule) => {
   if (!teacher || !Number.isFinite(minConsecutive) || minConsecutive < 1) return [];
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();
-  for (const e of schedule) if (e.teacher === teacher) byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  for (const e of schedule) if (e.teacher === teacher) appendToGroup(byDay, e.day, e);
   for (const [day, entries] of byDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
     let streak = 1;
@@ -992,7 +992,7 @@ const checkSubjectNotConsecutive: CheckFn = (spec, schedule) => {
     if (e.subject !== subject) continue;
     if (classes && !classes.includes(e.class)) continue;
     const key = `${e.class}::${e.day}`;
-    byClassDay.set(key, [...(byClassDay.get(key) ?? []), e]);
+    appendToGroup(byClassDay, key, e);
   }
   for (const [key, entries] of byClassDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
@@ -1102,7 +1102,7 @@ const checkSubjectNotAfterSubject: CheckFn = (spec, schedule) => {
     if (e.subject !== subjectA && e.subject !== subjectB) continue;
     if (classes && !classes.includes(e.class)) continue;
     const key = `${e.class}::${e.day}`;
-    byClassDay.set(key, [...(byClassDay.get(key) ?? []), e]);
+    appendToGroup(byClassDay, key, e);
   }
   for (const [key, entries] of byClassDay) {
     const periodsB = new Map<number, boolean>();
@@ -1161,7 +1161,7 @@ const checkClassMaxConsecutive: CheckFn = (spec, schedule) => {
   if (!klass || !Number.isFinite(maxConsecutive)) return [];
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();
-  for (const e of schedule) if (e.class === klass) byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  for (const e of schedule) if (e.class === klass) appendToGroup(byDay, e.day, e);
   for (const [day, entries] of byDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
     let streak = 1;
@@ -1245,7 +1245,7 @@ const checkAssignmentConsecutive: CheckFn = (spec, schedule) => {
   const entries = schedule.filter((e) => String(e.assignmentId ?? '') === assignmentId);
   if (entries.length === 0) return [];
   const byDay = new Map<string, ScheduleEntry[]>();
-  for (const e of entries) byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  for (const e of entries) appendToGroup(byDay, e.day, e);
   for (const [day, dayEntries] of byDay) {
     const periods = dayEntries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null).sort((a, b) => a - b);
     // Check they form consecutive blocks
@@ -1271,7 +1271,7 @@ const checkAssignmentMaxPerDay: CheckFn = (spec, schedule) => {
   const max = Number(spec.params.max ?? NaN);
   if (!assignmentId || !Number.isFinite(max)) return [];
   const byDay = new Map<string, ScheduleEntry[]>();
-  for (const e of schedule) if (String(e.assignmentId ?? '') === assignmentId) byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+  for (const e of schedule) if (String(e.assignmentId ?? '') === assignmentId) appendToGroup(byDay, e.day, e);
   for (const [day, entries] of byDay) {
     if (entries.length > max) {
       return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} có ${entries.length} tiết ngày ${day} (tối đa ${max}).`, offendingEntries: entries }];
@@ -1397,7 +1397,7 @@ const checkTeacherPairNotSameSlot: CheckFn = (spec, schedule) => {
   const bySlot = new Map<string, ScheduleEntry[]>();
   for (const entry of relevant) {
     const key = `${entry.day}::${entry.period}`;
-    bySlot.set(key, [...(bySlot.get(key) ?? []), entry]);
+    appendToGroup(bySlot, key, entry);
   }
   const violations: Violation[] = [];
   for (const entries of bySlot.values()) {
@@ -1535,7 +1535,7 @@ const checkSubjectNotLastPeriod: CheckFn = (spec, schedule) => {
     if (e.subject !== subject) continue;
     if (classes && !classes.includes(e.class)) continue;
     const key = `${e.class}::${e.day}`;
-    byClassDay.set(key, [...(byClassDay.get(key) ?? []), e]);
+    appendToGroup(byClassDay, key, e);
   }
   for (const [key, entries] of byClassDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null);
@@ -1632,7 +1632,7 @@ const checkClassFirstPeriodRequired: CheckFn = (spec, schedule) => {
   const byDay = new Map<string, ScheduleEntry[]>();
   for (const e of schedule) {
     if (e.class !== klass) continue;
-    byDay.set(e.day, [...(byDay.get(e.day) ?? []), e]);
+    appendToGroup(byDay, e.day, e);
   }
   for (const [day, entries] of byDay) {
     const periods = entries.map((e) => toPeriod(e.period)).filter((p): p is number => p !== null);
