@@ -32,7 +32,7 @@ test('POST solve returns 400 when body incomplete', async () => {
   assert.match(json.error ?? '', /confirmedConstraints/i);
 });
 
-test('POST solve returns 400 for hard custom_dsl in confirmed specs', async () => {
+test('POST solve returns 400 for unknown hard kind in confirmed specs', async () => {
   const res = await POST(
     new Request('http://localhost/api/ai/solve', {
       method: 'POST',
@@ -47,10 +47,10 @@ test('POST solve returns 400 for hard custom_dsl in confirmed specs', async () =
             specs: [
               {
                 id: 's1',
-                original: 'foo',
+                original: 'Ràng buộc chưa hỗ trợ',
                 severity: 'hard',
-                kind: 'custom_dsl',
-                params: { pythonPredicate: 'return True' },
+                kind: 'unsupported_kind',
+                params: {},
               },
             ],
             confirmedBy: 'user',

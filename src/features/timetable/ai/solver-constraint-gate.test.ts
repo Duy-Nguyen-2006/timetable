@@ -60,6 +60,63 @@ test('validateConfirmedSolveRequest allows confirmed teacher_block_day', () => {
   if (gate.ok) assert.equal(gate.preTranslatedSpecs.length, 1);
 });
 
+test('validateConfirmedSolveRequest allows confirmed hard custom_dsl for coder path', () => {
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'custom_r1',
+      original: 'Nếu cô Thúy dạy thứ 4 thì cô Hạnh nghỉ',
+      severity: 'hard',
+      kind: 'custom_dsl',
+      params: {
+        naturalLanguage: 'Nếu cô Thúy dạy thứ 4 thì cô Hạnh nghỉ',
+        normalizedText: 'Nếu cô Thúy dạy Thứ 4 thì cô Hạnh không dạy.',
+      },
+    },
+  ];
+  const confirmed: ConfirmedConstraint[] = [
+    {
+      id: 'conf1',
+      rawConstraintId: 'r1',
+      specs,
+      confirmedBy: 'user',
+      confirmedAt: new Date().toISOString(),
+      summary: 'ok',
+      displayText: 'Nếu cô Thúy dạy Thứ 4 thì cô Hạnh không dạy.',
+    },
+  ];
+  const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Nếu cô Thúy dạy thứ 4 thì cô Hạnh nghỉ' }]);
+  const gate = validateConfirmedSolveRequest(raw, [], { input: baseInput, confirmedConstraints: confirmed });
+  assert.equal(gate.ok, true);
+  if (gate.ok) assert.equal(gate.preTranslatedSpecs[0].kind, 'custom_dsl');
+});
+
+test('validateConfirmedSolveRequest still blocks unknown hard kinds', () => {
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'c1',
+      original: 'Ràng buộc chưa hỗ trợ',
+      severity: 'hard',
+      kind: 'unsupported_kind' as ConstraintSpec['kind'],
+      params: {},
+    },
+  ];
+  const confirmed: ConfirmedConstraint[] = [
+    {
+      id: 'conf1',
+      rawConstraintId: 'r1',
+      specs,
+      confirmedBy: 'user',
+      confirmedAt: new Date().toISOString(),
+      summary: 'blocked',
+      displayText: 'Ràng buộc chưa hỗ trợ.',
+    },
+  ];
+  const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Ràng buộc chưa hỗ trợ' }]);
+  const gate = validateConfirmedSolveRequest(raw, [], { input: baseInput, confirmedConstraints: confirmed });
+  assert.equal(gate.ok, false);
+  if (!gate.ok) assert.match(gate.messages?.join('\n') ?? '', /unsupported_kind/u);
+});
+
 test('buildAgentInputWithConfirmedSpecs flattens specs', () => {
   const confirmed: ConfirmedConstraint[] = [
     {

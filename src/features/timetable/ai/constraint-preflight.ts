@@ -105,7 +105,7 @@ export function assertSolvableConstraintState(
 
   for (const c of confirmed) {
     for (const spec of c.specs) {
-      if (spec.severity === 'hard' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
+      if (spec.severity === 'hard' && spec.kind !== 'custom_dsl' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
         blockReasons.push('hard_spec_unchecked');
         messages.push(`Ràng buộc bắt buộc chưa mã hoá được vào solver: ${spec.kind} (${spec.id}).`);
       }

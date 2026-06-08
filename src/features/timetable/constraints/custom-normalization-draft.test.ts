@@ -11,7 +11,7 @@ const raw: RawConstraintInput = {
   createdAt: '2026-01-01T00:00:00.000Z',
 };
 
-test('buildCustomDraftFromNormalization stores normalized custom text without specs', () => {
+test('buildCustomDraftFromNormalization stores normalized custom text as custom_dsl spec', () => {
   const draft = buildCustomDraftFromNormalization(raw, {
     status: 'normalized',
     normalizedText: 'Nếu cô Thúy dạy Thứ 4 thì cô Hạnh không dạy.',
@@ -29,10 +29,12 @@ test('buildCustomDraftFromNormalization stores normalized custom text without sp
   });
 
   assert.equal(draft.rawConstraintId, 'r1');
-  assert.equal(draft.status, 'needs_review');
+  assert.equal(draft.status, 'parsed');
   assert.equal(draft.confidence, 'high');
   assert.equal(draft.displayText, 'Nếu cô Thúy dạy Thứ 4 thì cô Hạnh không dạy.');
-  assert.deepEqual(draft.proposedSpecs, []);
+  assert.equal(draft.proposedSpecs.length, 1);
+  assert.equal(draft.proposedSpecs[0].kind, 'custom_dsl');
+  assert.equal(draft.proposedSpecs[0].params.normalizedText, 'Nếu cô Thúy dạy Thứ 4 thì cô Hạnh không dạy.');
   assert.equal(draft.semanticRepresentation?.type, 'unsupported_precise_text');
 });
 
