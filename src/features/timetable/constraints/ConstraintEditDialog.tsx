@@ -196,7 +196,7 @@ export function ConstraintEditDialog({
   );
 }
 
-function TemplateFields({
+export function TemplateFields({
   values,
   ctx,
   patch,

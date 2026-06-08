@@ -49,6 +49,7 @@ import type {
   AssignmentItem,
   BulkAssignmentError,
   ConstraintItem,
+  ParsedConstraintDraft,
   SolverRequestPayload,
   TimetableAppProps,
   TimetableSolveResult,
@@ -814,6 +815,12 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     setConstraintList((current) => [...current, ...newItems])
     setConstraintDraft((current) => ({ ...current, text: '' }))
     markConstraintsAdded(newItems.map((item) => item.id))
+  }
+
+  const createBuiltInConstraint = (constraint: ConstraintItem, draft: ParsedConstraintDraft) => {
+    setConstraintList((current) => [...current, constraint])
+    updateDraft(draft)
+    markConstraintsAdded([constraint.id])
   }
 
   const deleteConstraint = (id: string) => {
@@ -1906,6 +1913,8 @@ const handleDownloadExcel = useCallback(async () => {
                       draft={constraintDraft}
                       onDraftChange={(patch) => setConstraintDraft((current) => ({ ...current, ...patch }))}
                       onImport={importConstraint}
+                      onCreateBuiltIn={createBuiltInConstraint}
+                      agentInput={constraintAgentInput}
                       totalCount={constraintList.length}
                     />
                     <ConstraintReviewPanel

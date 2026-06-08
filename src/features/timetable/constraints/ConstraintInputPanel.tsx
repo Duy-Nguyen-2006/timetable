@@ -1,8 +1,13 @@
 'use client';
 
-import { Circle, ClipboardList, Plus } from 'lucide-react';
+import { useState } from 'react';
+import { Circle, ClipboardList, LayoutTemplate, Plus } from 'lucide-react';
 
 import { constraintTypeList, constraintTypes, disabledPrimaryButtonClass, iconShellClass, panelClass, primaryButtonClass } from '../constants';
+import type { ParsedConstraintDraft } from '../ai/constraint-review-types';
+import type { AgentInputPayload } from '../ai/types';
+import type { ConstraintItem } from '../types';
+import { ConstraintWizardDialog } from './ConstraintWizardDialog';
 
 export type ConstraintDraftForm = {
   type: keyof typeof constraintTypes;
@@ -14,10 +19,15 @@ type ConstraintInputPanelProps = {
   draft: ConstraintDraftForm;
   onDraftChange: (patch: Partial<ConstraintDraftForm>) => void;
   onImport: () => void;
+  onCreateBuiltIn: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
+  agentInput: AgentInputPayload;
   totalCount: number;
 };
 
-export function ConstraintInputPanel({ draft, onDraftChange, onImport, totalCount }: ConstraintInputPanelProps) {
+export function ConstraintInputPanel({ draft, onDraftChange, onImport, onCreateBuiltIn, agentInput, totalCount }: ConstraintInputPanelProps) {
+  const [mode, setMode] = useState<'built_in' | 'custom'>('built_in');
+  const [wizardOpen, setWizardOpen] = useState(false);
+
   return (
     <section className={`${panelClass} p-4`}>
       <div className="mb-4 flex items-center gap-2.5">
@@ -54,26 +64,73 @@ export function ConstraintInputPanel({ draft, onDraftChange, onImport, totalCoun
         })}
       </div>
 
-      <label className={`${panelClass} mt-4 block p-4`}>
-        <div className="mb-3 flex items-center gap-2.5">
-          <span className={iconShellClass}>
-            <ClipboardList size={16} strokeWidth={1.5} />
-          </span>
-          <span className="text-sm font-medium text-white">Nội dung ràng buộc</span>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setMode('built_in')}
+          className={`rounded-md border px-3 py-2 text-sm transition ${
+            mode === 'built_in'
+              ? 'border-[#4DB848]/45 bg-[#4DB848]/10 text-[#A6E3A1]'
+              : 'border-white/[0.08] bg-white/[0.03] text-white/50 hover:border-white/15'
+          }`}
+        >
+          Built-in
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('custom')}
+          className={`rounded-md border px-3 py-2 text-sm transition ${
+            mode === 'custom'
+              ? 'border-[#4DB848]/45 bg-[#4DB848]/10 text-[#A6E3A1]'
+              : 'border-white/[0.08] bg-white/[0.03] text-white/50 hover:border-white/15'
+          }`}
+        >
+          Custom
+        </button>
+      </div>
+
+      {mode === 'built_in' ? (
+        <div className={`${panelClass} mt-4 p-4`}>
+          <div className="mb-3 flex items-center gap-2.5">
+            <span className={iconShellClass}>
+              <LayoutTemplate size={16} strokeWidth={1.5} />
+            </span>
+            <span className="text-sm font-medium text-white">Wizard ràng buộc built-in</span>
+          </div>
+          <p className="text-xs leading-5 text-white/45">
+            Chọn đối tượng, loại ràng buộc và điền trường cụ thể. Hệ thống tạo bản diễn giải deterministic để bạn duyệt ở cột phải.
+          </p>
+          <button
+            type="button"
+            onClick={() => setWizardOpen(true)}
+            className={`${primaryButtonClass} mt-4 w-full`}
+          >
+            <Plus size={14} strokeWidth={1.5} />
+            Mở wizard
+          </button>
         </div>
-        <textarea
-          value={draft.text}
-          onChange={(event) => onDraftChange({ text: event.target.value })}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter' || event.shiftKey) return;
-            event.preventDefault();
-            onImport();
-          }}
-          placeholder={'Ví dụ:\nSơn không dạy thứ 2\nHương không dạy tiết 1\n(mỗi dòng là một ràng buộc)'}
-          rows={5}
-          className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
-        />
-      </label>
+      ) : (
+        <label className={`${panelClass} mt-4 block p-4`}>
+          <div className="mb-3 flex items-center gap-2.5">
+            <span className={iconShellClass}>
+              <ClipboardList size={16} strokeWidth={1.5} />
+            </span>
+            <span className="text-sm font-medium text-white">Custom / nhập bằng câu tự nhiên</span>
+          </div>
+          <textarea
+            value={draft.text}
+            onChange={(event) => onDraftChange({ text: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey) return;
+              event.preventDefault();
+              onImport();
+            }}
+            placeholder={'Ví dụ:\nNếu cô Thúy dạy thứ 4 tiết 1 thì cô Hạnh không dạy thứ 5 tiết 2\nSơn không dạy thứ 2\n(mỗi dòng là một ràng buộc)'}
+            rows={5}
+            className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
+          />
+        </label>
+      )}
 
       {draft.type === 'preferred' && (
         <div className="mt-3 flex items-center gap-2">
@@ -106,12 +163,21 @@ export function ConstraintInputPanel({ draft, onDraftChange, onImport, totalCoun
       <button
         type="button"
         onClick={onImport}
-        disabled={!draft.text.trim()}
+        disabled={mode !== 'custom' || !draft.text.trim()}
         className={`${primaryButtonClass} ${disabledPrimaryButtonClass} mt-4 w-full`}
       >
         <Plus size={14} strokeWidth={1.5} />
-        Import
+        Import Custom
       </button>
+
+      <ConstraintWizardDialog
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        constraintType={draft.type}
+        weight={draft.weight}
+        agentInput={agentInput}
+        onCreate={onCreateBuiltIn}
+      />
     </section>
   );
 }
