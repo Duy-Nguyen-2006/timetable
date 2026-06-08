@@ -93,6 +93,12 @@ export function inferRuleParseConfidence(text: string, specs: ConstraintSpec[]):
     if (kind === 'teacher_block_day' || kind === 'class_block_day' || kind === 'subject_not_last_period') {
       return { specs, confidence: 'high', issues };
     }
+    if (kind === 'if_then') {
+      const thenList = specs[0].params.then;
+      if (Array.isArray(thenList) && thenList.length > 0) {
+        return { specs, confidence: 'high', issues };
+      }
+    }
   }
 
   if (specs.every((s) => s.kind === 'subject_max_consecutive')) {

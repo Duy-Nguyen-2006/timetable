@@ -905,7 +905,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           throw new Error('Chuẩn hóa ràng buộc đặc biệt thất bại.')
         }
         newItems.push(item)
-        newDrafts.push(buildCustomDraftFromNormalization(raw, body))
+        newDrafts.push(buildCustomDraftFromNormalization(raw, body, constraintAgentInput))
       }
 
       setConstraintList((current) => [...current, ...newItems])

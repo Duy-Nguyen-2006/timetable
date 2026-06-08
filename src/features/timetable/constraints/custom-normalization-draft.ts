@@ -1,9 +1,11 @@
+import { canonicalDisplayFromRuleParser } from '../ai/constraint-canonical-text';
 import type {
   CustomConstraintNormalizationResult,
   CustomConstraintSeverity,
 } from '../ai/custom-normalization-service';
 import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ParsedConstraintDraft, RawConstraintInput } from '../ai/constraint-review-types';
+import type { AgentInputPayload } from '../ai/types';
 
 function confidenceLabel(value: number): ParsedConstraintDraft['confidence'] {
   if (value >= 0.8) return 'high';
@@ -30,10 +32,16 @@ function clarificationQuestions(result: CustomConstraintNormalizationResult) {
 
 export function buildCustomDraftFromNormalization(
   raw: RawConstraintInput,
-  result: CustomConstraintNormalizationResult
+  result: CustomConstraintNormalizationResult,
+  agentInput?: AgentInputPayload
 ): ParsedConstraintDraft {
   const needsClarification = result.needsClarification || result.clarificationQuestions.length > 0;
-  const canBuildSpec = result.status === 'normalized' && !needsClarification && Boolean(result.normalizedText.trim());
+  const canonicalDisplay =
+    agentInput && result.status === 'normalized'
+      ? canonicalDisplayFromRuleParser(agentInput, raw.text)
+      : null;
+  const displayText = canonicalDisplay ?? result.normalizedText;
+  const canBuildSpec = result.status === 'normalized' && !needsClarification && Boolean(displayText.trim());
   const proposedSpecs: ConstraintSpec[] = canBuildSpec
     ? [
         {
@@ -43,7 +51,7 @@ export function buildCustomDraftFromNormalization(
           kind: 'custom_dsl',
           params: {
             naturalLanguage: raw.text,
-            normalizedText: result.normalizedText,
+            normalizedText: displayText,
             detectedEntities: result.detectedEntities,
             source: 'custom_normalization',
           },
@@ -75,14 +83,14 @@ export function buildCustomDraftFromNormalization(
     proposedSpecs,
     status: statusFromNormalization(result, canBuildSpec),
     confidence: confidenceLabel(result.confidence),
-    explanation: result.normalizedText,
+    explanation: displayText,
     issues,
     clarificationQuestions: needsClarification ? clarificationQuestions(result) : undefined,
     source: 'manual',
-    displayText: result.normalizedText,
+    displayText,
     semanticRepresentation: {
       type: 'unsupported_precise_text',
-      text: result.normalizedText || raw.text,
+      text: displayText || raw.text,
       reason: result.status,
     },
   };

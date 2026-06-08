@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { preferCanonicalNormalizedText } from './constraint-canonical-text';
 import { invokeChat, type ChatPayload } from './chat-client';
 import { parseModelJson } from './parse-model-json';
 import { normalizeConstraintText } from './translator-text';
@@ -115,8 +116,21 @@ function clampConfidence(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+function buildAgentInputFromNormalization(input: CustomConstraintNormalizationInput): AgentInputPayload {
+  return {
+    days: input.days,
+    sessions: [],
+    periodCounts: {},
+    deletedPeriods: {},
+    assignments: input.assignments,
+    constraints: [],
+  };
+}
+
 function deterministicNormalize(input: CustomConstraintNormalizationInput): CustomConstraintNormalizationResult {
-  const normalizedText = sentenceCase(input.originalText);
+  const agentInput = buildAgentInputFromNormalization(input);
+  const baseText = sentenceCase(input.originalText);
+  const normalizedText = preferCanonicalNormalizedText(agentInput, input.originalText, baseText);
   const detectedEntities = detectKnownEntities(input);
   const normalized = normalizeConstraintText(input.originalText);
   const hasConcreteEntity =
@@ -250,9 +264,13 @@ function sanitizeModelResult(
   const needsClarification = parsed.needsClarification || clarificationQuestions.length > 0;
   const status = parsed.status ?? (needsClarification ? 'needs_clarification' : 'normalized');
 
+  const agentInput = buildAgentInputFromNormalization(input);
+  const modelText = sentenceCase(parsed.normalizedText) || fallback.normalizedText;
+  const normalizedText = preferCanonicalNormalizedText(agentInput, input.originalText, modelText);
+
   return {
     status,
-    normalizedText: sentenceCase(parsed.normalizedText) || fallback.normalizedText,
+    normalizedText,
     detectedEntities,
     confidence: clampConfidence(parsed.confidence),
     needsClarification,

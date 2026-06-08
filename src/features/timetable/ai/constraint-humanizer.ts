@@ -32,7 +32,7 @@ function renderConditionExpr(cond: {
     return `Giáo viên ${teacher} dạy ${day}, tiết ${period}`;
   }
   if (cond.op === 'teacher_teaches_on_day' && teacher && day) {
-    return `Giáo viên ${teacher} dạy vào ${day}`;
+    return `Giáo viên ${teacher} dạy ${day}`;
   }
   if (cond.op === 'teacher_pair_teaches_same_slot' && teachers.length >= 2 && day && period !== null) {
     return `${teachers[0]} và ${teachers[1]} cùng dạy ${day}, tiết ${period}`;

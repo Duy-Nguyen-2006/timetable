@@ -3,6 +3,42 @@ import assert from 'node:assert/strict';
 
 import { buildCustomDraftFromNormalization, severityFromConstraintType } from './custom-normalization-draft';
 import type { RawConstraintInput } from '../ai/constraint-review-types';
+import type { AgentInputPayload } from '../ai/types';
+
+const agentInput: AgentInputPayload = {
+  days: [
+    { id: 'monday', label: 'Thứ 2' },
+    { id: 'tuesday', label: 'Thứ 3' },
+    { id: 'wednesday', label: 'Thứ 4' },
+  ],
+  sessions: [],
+  periodCounts: {},
+  deletedPeriods: {},
+  assignments: [
+    {
+      id: 'a1',
+      teacher: { id: 't1', label: 'Hiếu' },
+      subject: { id: 's1', label: 'Toán' },
+      class: { id: 'c1', label: '6A' },
+      weeklyPeriods: 4,
+    },
+    {
+      id: 'a2',
+      teacher: { id: 't2', label: 'Hương' },
+      subject: { id: 's2', label: 'Văn' },
+      class: { id: 'c1', label: '6A' },
+      weeklyPeriods: 4,
+    },
+    {
+      id: 'a3',
+      teacher: { id: 't3', label: 'Thủy' },
+      subject: { id: 's3', label: 'GDTC' },
+      class: { id: 'c1', label: '6A' },
+      weeklyPeriods: 2,
+    },
+  ],
+  constraints: [],
+};
 
 const raw: RawConstraintInput = {
   id: 'r1',
@@ -64,4 +100,35 @@ test('buildCustomDraftFromNormalization carries clarification questions', () => 
 test('severityFromConstraintType maps preferred to soft', () => {
   assert.equal(severityFromConstraintType('required'), 'hard');
   assert.equal(severityFromConstraintType('preferred'), 'soft');
+});
+
+test('buildCustomDraftFromNormalization uses canonical if_then display when agentInput provided', () => {
+  const raw: RawConstraintInput = {
+    id: 'r2',
+    text: 'Nếu Hiếu và Hương dạy thứ 2 thì Thủy không dạy thứ 3',
+    type: 'required',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const draft = buildCustomDraftFromNormalization(
+    raw,
+    {
+      status: 'normalized',
+      normalizedText: 'Nếu Hiếu và Hương dạy thứ 2 thì Thủy không dạy thứ 3.',
+      detectedEntities: {
+        teachers: ['Hiếu', 'Hương', 'Thủy'],
+        subjects: [],
+        classes: [],
+        assignments: [],
+        days: ['monday', 'tuesday'],
+        periods: [],
+      },
+      confidence: 0.9,
+      needsClarification: false,
+      clarificationQuestions: [],
+    },
+    agentInput
+  );
+
+  assert.match(draft.displayText ?? '', /Giáo viên Hiếu dạy Thứ 2/);
+  assert.match(draft.displayText ?? '', /Giáo viên Thủy không dạy Thứ 3/);
 });

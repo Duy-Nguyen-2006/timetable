@@ -47,7 +47,8 @@ test('deterministic custom normalizer detects known entities without built-in sp
   const result = __customNormalizationInternal.deterministicNormalize(input);
 
   assert.equal(result.status, 'normalized');
-  assert.equal(result.normalizedText, 'Nếu cô Thúy dạy thứ 4 tiết 1 thì cô Hạnh không dạy thứ 5 tiết 2.');
+  assert.match(result.normalizedText, /Giáo viên Thúy dạy Thứ 4, tiết 1/);
+  assert.match(result.normalizedText, /Giáo viên Hạnh không dạy Thứ 5, tiết 2/);
   assert.deepEqual(result.detectedEntities.teachers, ['Thúy', 'Hạnh']);
   assert.deepEqual(result.detectedEntities.days, ['wednesday', 'thursday']);
   assert.deepEqual(result.detectedEntities.periods, [1, 2]);
