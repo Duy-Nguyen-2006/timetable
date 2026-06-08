@@ -67,6 +67,8 @@ npx @sonar/scan \
   GNU nano 9.0                                                                                 Backup.md                                                                                 Modified
 - Rule : Luôn có câu "Sax báo cáo" ở cuối mỗi câu trả lời
 - Luôn push lên git sau mỗi chỉnh sửa
+- Đây là desktop app, chạy trên máy users, vậy nên vấn đề bảo mật có thể tạm thời bỏ qua, nếu người dùng yêu cầu suggest chỉnh sửa / nâng cấp, chỉ cần quan tâm tới những thứ như hiệu năng, maintainability, cleanability,..., tạm thời bỏ qua security
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
