@@ -225,10 +225,14 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
         const tp = t.params ?? {};
         if (t.kind === 'teacher_block_day') return `Giáo viên ${paramStr(tp.teacher)} không dạy ${dayInText(tp.day)}`;
         if (t.kind === 'teacher_block_slot') return `Giáo viên ${paramStr(tp.teacher)} không dạy ${dayInText(tp.day)}, tiết ${paramStr(tp.period)}`;
+        if (t.kind === 'teacher_required_day') return `Giáo viên ${paramStr(tp.teacher)} phải dạy ${dayInText(tp.day)}`;
+        if (t.kind === 'teacher_required_slot') return `Giáo viên ${paramStr(tp.teacher)} phải dạy ${dayInText(tp.day)}, tiết ${paramStr(tp.period)}`;
+        if (t.kind === 'teacher_pair_required_same_day') return `${paramStr(tp.teachers)} phải cùng dạy ${dayInText(tp.day)}`;
+        if (t.kind === 'teacher_pair_required_same_slot') return `${paramStr(tp.teachers)} phải cùng dạy ${dayInText(tp.day)}, tiết ${paramStr(tp.period)}`;
         if (t.kind === 'pair_not_same_slot') return `${paramStr(tp.teachers)} không trùng tiết`;
         if (t.kind === 'teacher_no_gaps') return `Giáo viên ${paramStr(tp.teacher)} không có tiết trống`;
         return `(${t.kind ?? 'không xác định'})`;
-      }).join('; ');
+      }).join('; ') || 'chưa phân tích được vế thì';
       return `Nếu ${condText} thì ${thenDesc}${soft(spec)}.`;
     }
     case 'custom_dsl': {

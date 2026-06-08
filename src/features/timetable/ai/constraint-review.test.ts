@@ -300,6 +300,31 @@ test('VAL-T1-007: humanizeConstraintSpec renders period for if_then teacher_teac
   assert.doesNotMatch(line, /\(điều kiện chưa xác định\)/);
 });
 
+test('humanizeConstraintSpec renders normalized user sample instead of raw echo', () => {
+  const original = 'Nếu Hương và Sơn dạy thứ 3 tiết 2 thì Thủy không dạy thứ 4 tiết 1';
+  const line = humanizeConstraintSpec({
+    id: 'c9',
+    original,
+    severity: 'hard',
+    kind: 'if_then',
+    params: {
+      if: {
+        op: 'and',
+        args: [
+          { op: 'teacher_teaches_at_slot', teacher: 'Hương', day: 'tue', period: 2 },
+          { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'tue', period: 2 },
+        ],
+      },
+      then: [{ kind: 'teacher_block_slot', params: { teacher: 'Thủy', day: 'wednesday', period: 1 } }],
+    },
+  });
+
+  assert.notEqual(line, `${original}.`);
+  assert.match(line, /Giáo viên Hương dạy Thứ 3, tiết 2/);
+  assert.match(line, /Giáo viên Sơn dạy Thứ 3, tiết 2/);
+  assert.match(line, /Giáo viên Thủy không dạy Thứ 4, tiết 1/);
+});
+
 test('VAL-T1-007b: humanizeConstraintSpec renders period for if_then with AND-of-2-slot', () => {
   const line = humanizeConstraintSpec({
     id: 'c8',

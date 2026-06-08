@@ -795,6 +795,44 @@ test('VAL-T1-001: IF-AND-THEN with 2-slot IF preserves period in params.if', () 
   assert.equal(thenList[0].params.period, 1);
 });
 
+test('if_then parser normalizes user sample into complete structured atoms', () => {
+  const base = ifThenInput();
+  const input: AgentInputPayload = {
+    ...base,
+    assignments: [
+      ...base.assignments,
+      {
+        id: 'asg_thuy',
+        teacher: { id: 't4', label: 'Thủy' },
+        subject: { id: 's4', label: 'GDTC' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [
+      { type: 'required', text: 'Nếu Hương và Sơn dạy thứ 3 tiết 2 thì Thủy không dạy thứ 4 tiết 1' },
+    ],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'if_then');
+  assert.notEqual(specs[0].kind, 'custom_dsl');
+  const cond = specs[0].params.if as { op: string; args: Array<{ op: string; teacher: string; day: string; period: number }> };
+  assert.equal(cond.op, 'and');
+  assert.deepEqual(cond.args.map((arg) => arg.teacher).sort(compareText), ['Hương', 'Sơn']);
+  assert.ok(cond.args.every((arg) => arg.op === 'teacher_teaches_at_slot'));
+  assert.ok(cond.args.every((arg) => arg.day === 'tue'));
+  assert.ok(cond.args.every((arg) => arg.period === 2));
+  const thenList = specs[0].params.then as Array<{ kind: string; params: Record<string, unknown> }>;
+  assert.deepEqual(thenList, [
+    {
+      kind: 'teacher_block_slot',
+      params: { teacher: 'Thủy', day: 'wednesday', period: 1 },
+    },
+  ]);
+});
+
 test('VAL-T1-002: single-teacher IF with slot emits teacher_teaches_at_slot (no AND)', () => {
   const input: AgentInputPayload = {
     ...ifThenInput(),

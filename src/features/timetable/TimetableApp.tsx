@@ -24,6 +24,7 @@ import ExcelJS from 'exceljs'
 
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
+import { humanizeDraft } from './ai/constraint-humanizer'
 import {
   confirmedFromDraftsAfterUserAccept,
   constraintItemsToRaw,
@@ -2511,16 +2512,9 @@ const handleDownloadExcel = useCallback(async () => {
                                 const constraintType = constraintTypes[constraint.type] ?? constraintTypes.required
                                 const confirmed = confirmedConstraints.find((c) => c.rawConstraintId === constraint.id)
                                 const draft = constraintDrafts.find((d) => d.rawConstraintId === constraint.id)
-                                const displayText = confirmed?.summary
-                                  ?? (draft?.proposedSpecs.length
-                                    ? draft.proposedSpecs.map((s) => {
-                                        const p = s.params as Record<string, unknown>
-                                        if (s.kind === 'class_max_heavy_subjects_per_session') {
-                                          return `Mỗi lớp, mỗi ngày, trong cùng một buổi: không dồn quá ${p.maxHeavyInSession ?? 2} môn nặng trong danh sách (${Array.isArray(p.subjects) ? p.subjects.join(', ') : ''})`
-                                        }
-                                        return s.original
-                                      }).join('\n')
-                                    : constraint.text)
+                                const displayText = confirmed?.displayText
+                                  ?? confirmed?.summary
+                                  ?? (draft ? (draft.displayText || humanizeDraft(draft)) : constraint.text)
 
                                 return (
                                     <div key={constraint.id} className={`rounded-md border p-3 ${constraintType.boxClass}`}>
