@@ -20,7 +20,11 @@ import {
   type ConstraintFormTemplateId,
 } from './constraint-form-schema';
 
-const MAX_REPARSE_ATTEMPTS = 3;
+import { preferCanonicalNormalizedText } from '../ai/constraint-canonical-text';
+import { humanizeConstraintSpec } from '../ai/constraint-humanizer';
+import { MAX_AI_ANALYSIS_ATTEMPTS } from './constraint-review-ui';
+
+const MAX_REPARSE_ATTEMPTS = MAX_AI_ANALYSIS_ATTEMPTS;
 
 export type ConstraintReviewHydration = {
   constraintDrafts?: ParsedConstraintDraft[];
@@ -118,9 +122,21 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
     );
   }, []);
 
+  function finalizeAiDisplayText(
+    agentInput: AgentInputPayload,
+    rawText: string,
+    modelText: string,
+    specs: ParsedConstraintDraft['proposedSpecs']
+  ): string {
+    const canonical = preferCanonicalNormalizedText(agentInput, rawText, modelText);
+    if (specs.length === 1 && specs[0].kind !== 'custom_dsl') {
+      return specs.map((s) => humanizeConstraintSpec(s)).join('\n');
+    }
+    return canonical;
+  }
+
   /**
-   * Reject the current interpretation and request AI to re-parse.
-   * Returns the new draft with updated displayText, or null if max attempts reached.
+   * AI-only re-parse after user rejects rule/built-in interpretation (no rule fallback).
    */
   const rejectAndReparse = useCallback(
     async (
@@ -214,9 +230,15 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
               explanation: result.displayText,
             }
           );
+          const displayText = finalizeAiDisplayText(
+            agentInput,
+            rawConstraint.text,
+            result.displayText,
+            built.proposedSpecs
+          );
           updatedDraft = {
             ...built,
-            displayText: result.displayText,
+            displayText,
             reparseCount: attempts + 1,
             previousAttempts,
             semanticRepresentation: result.candidate.semantic,
@@ -227,9 +249,15 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
             code: 'low_confidence' as const,
             message,
           }));
+          const displayText = finalizeAiDisplayText(
+            agentInput,
+            rawConstraint.text,
+            result.displayText,
+            currentDraft.proposedSpecs
+          );
           updatedDraft = {
             ...currentDraft,
-            displayText: result.displayText,
+            displayText,
             reparseCount: attempts + 1,
             previousAttempts,
             proposedSpecs: [],

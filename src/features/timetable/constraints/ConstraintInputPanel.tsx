@@ -275,7 +275,12 @@ export function ConstraintInputPanel({
               event.preventDefault();
               onNormalizeCustom();
             }}
-            placeholder={'Ví dụ:\nNếu cô Thúy dạy thứ 4 tiết 1 thì cô Hạnh không dạy thứ 5 tiết 2\nRàng buộc cần diễn đạt rõ giáo viên, lớp, môn, ngày hoặc tiết liên quan\n(mỗi dòng là một ràng buộc)'}
+            placeholder={
+              'Ví dụ (mỗi dòng một ràng buộc):\n' +
+              'Sơn không dạy thứ 2\n' +
+              'Môn Văn không được 3 tiết liên tiếp\n' +
+              'Nếu Hiếu và Hương dạy thứ 2 thì Thủy không dạy thứ 3'
+            }
             rows={5}
             className="w-full resize-none rounded-md border border-white/[0.08] bg-[#0a0a0a] px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-white/20"
           />

@@ -28,7 +28,8 @@ type ConstraintReviewPanelProps = {
   onDeleteConstraint: (id: string) => void;
   onSaveDraft: (updated: ParsedConstraintDraft) => void;
   onApplyTemplate: (constraint: ConstraintItem, templateId: ConstraintFormTemplateId) => void;
-  onRejectAndReparse?: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
+  onAiAnalyze?: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
+  highlightConstraintIds?: Set<string>;
 };
 
 export function ConstraintReviewPanel({
@@ -46,7 +47,8 @@ export function ConstraintReviewPanel({
   onDeleteConstraint,
   onSaveDraft,
   onApplyTemplate,
-  onRejectAndReparse,
+  onAiAnalyze,
+  highlightConstraintIds,
 }: ConstraintReviewPanelProps) {
   const [editConstraintId, setEditConstraintId] = useState<string | null>(null);
   const [templateForId, setTemplateForId] = useState<string | null>(null);
@@ -107,16 +109,14 @@ export function ConstraintReviewPanel({
               isNew={newConstraintIds.has(constraint.id) && !confirmedByRaw.has(constraint.id)}
               onConfirm={() => onConfirmDraft(constraint.id)}
               onIgnore={() => onIgnoreDraft(constraint.id)}
-              onEdit={() => setEditConstraintId(constraint.id)}
-              onPickTemplate={() => setTemplateForId(constraint.id)}
-              onEditThen={() => setThenEditForId(constraint.id)}
               onDelete={() => onDeleteConstraint(constraint.id)}
-              onRejectAndReparse={
-                onRejectAndReparse && draftByRaw.get(constraint.id)
-                  ? () => onRejectAndReparse(constraint, draftByRaw.get(constraint.id)!)
+              onAiAnalyze={
+                onAiAnalyze && draftByRaw.get(constraint.id)
+                  ? () => onAiAnalyze(constraint, draftByRaw.get(constraint.id)!)
                   : undefined
               }
               isReparsing={reparseLoading}
+              highlight={highlightConstraintIds?.has(constraint.id)}
             />
           ))
         ) : (

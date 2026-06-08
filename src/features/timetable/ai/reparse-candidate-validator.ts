@@ -31,11 +31,13 @@ function rejectInvalidReparseKinds(specs: ConstraintSpec[]): ConstraintParseIssu
   for (const spec of specs) {
     if (spec.kind === 'custom_dsl' && spec.severity === 'hard') {
       const predicate = spec.pythonPredicate ?? spec.params?.pythonPredicate;
-      if (typeof predicate !== 'string' || !predicate.trim()) {
+      const expr = spec.params?.expr;
+      const hasExpr = expr !== undefined && expr !== null && expr !== '';
+      if ((typeof predicate !== 'string' || !predicate.trim()) && !hasExpr) {
         issues.push({
           code: 'hard_unchecked',
           message:
-            'AI reparse trả về ràng buộc đặc biệt (custom_dsl) không mã hoá được — cần chuẩn hóa sang loại built-in.',
+            'AI reparse trả về ràng buộc đặc biệt (custom_dsl) không mã hoá được — cần built-in hoặc IR (expr).',
         });
       }
     }
@@ -80,7 +82,12 @@ export function validateReparseCandidateSpecs(
     return { ok: false, issues: mergedIssues, status: 'needs_review' };
   }
 
-  const hardBlocked = specs.some((s) => s.severity === 'hard' && !SOLVER_ENCODABLE_KINDS.has(s.kind));
+  const hardBlocked = specs.some(
+    (s) =>
+      s.severity === 'hard' &&
+      !SOLVER_ENCODABLE_KINDS.has(s.kind) &&
+      !(s.kind === 'custom_dsl' && !!s.params.expr)
+  );
   if (hardBlocked) {
     return {
       ok: false,

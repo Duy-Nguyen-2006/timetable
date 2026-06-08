@@ -110,8 +110,14 @@ function buildReparsePrompt(request: ReparseRejectedConstraintRequest): string {
   return `You are a Vietnamese school timetable constraint normalizer.
 
 ## Critical context
-The user clicked "Not correct" — rule/regex or first-pass parsing FAILED.
-Do NOT repeat the rejected interpretation. Normalize RAW text into built-in specs.
+The user clicked "AI phân tích" — rule/heuristic interpretation was WRONG or suspect.
+Do NOT repeat the rejected interpretation. Do NOT use rule/regex fallback logic.
+
+## Two-step goal
+1. Try to map to built-in specs (if_then, teacher_block_day, subject_max_consecutive, ...).
+2. If built-in is impossible, return custom_dsl with params.expr (JSON IR) AND params.normalizedText:
+   canonical Vietnamese using "Giáo viên {name}" labels, e.g.
+   "Nếu Giáo viên A và Giáo viên B dạy Thứ 2 thì Giáo viên C không dạy Thứ 3."
 
 ## Rejected (do NOT repeat)
 "${rejectedDraft.displayText}"
@@ -135,7 +141,7 @@ Encodable kinds include: ${encodableList}, ...
 
 ## Rules
 1. Prefer source "built_in" with non-empty specs[].
-2. Do NOT use custom_dsl unless truly impossible.
+2. Use custom_dsl only when built-in cannot express the rule; then include params.expr (solver IR) and normalizedText.
 3. "tránh"/"né"/"đi muộn" + teacher + periods → teacher_block_period (required) or teacher_preferred_periods (preferred); one spec per period.
 4. "Cô X"/"Thầy Y" → teacher label from Teachers list.
 5. displayText: clear Vietnamese for user approval.

@@ -47,6 +47,7 @@ import {
   severityFromConstraintType,
 } from './constraints/custom-normalization-draft'
 import { normalizeConstraintsToBuiltInDrafts } from './constraints/constraint-normalization'
+import { unconfirmedRequiredConstraintIds } from './constraints/constraint-review-ui'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SettingsModal } from './SettingsModal'
 import type { CustomConstraintNormalizationResult } from './ai/custom-normalization-service'
@@ -169,6 +170,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     hydrateFromWorkspace,
   } = useConstraintReview()
   const constraintWorkspaceLoaded = useRef(false)
+  const [highlightConstraintIds, setHighlightConstraintIds] = useState<Set<string>>(() => new Set())
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -418,9 +420,23 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
   const solveBlockHint = useMemo(() => {
     if (canProceedToSolve) return null
-    return constraintSolvePreflight.messages[0] ??
-      'Còn ràng buộc chưa được duyệt. Phân tích và bấm «Đúng rồi» trên từng dòng trước khi sang bước xếp lịch.'
+    return (
+      constraintSolvePreflight.messages[0] ??
+      'Còn ràng buộc bắt buộc chưa duyệt. Bấm «Đúng rồi» hoặc «AI phân tích» trên từng dòng vàng bên phải.'
+    )
   }, [canProceedToSolve, constraintSolvePreflight.messages])
+
+  const focusUnconfirmedConstraints = useCallback(() => {
+    const ids = unconfirmedRequiredConstraintIds(constraintList, confirmedConstraints, constraintDrafts)
+    setHighlightConstraintIds(new Set(ids))
+    setPage('constraints')
+    if (ids.length === 0) return
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-constraint-id="${ids[0]}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    window.setTimeout(() => setHighlightConstraintIds(new Set()), 8000)
+  }, [constraintList, confirmedConstraints, constraintDrafts])
 
   useEffect(() => {
     if (constraintWorkspaceLoaded.current) return
@@ -954,7 +970,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
     if (!canProceedToSolve) {
       setAiError(solveBlockHint ?? 'Chưa thể xếp lịch: ràng buộc bắt buộc chưa xác nhận.')
-      setPage('constraints')
+      focusUnconfirmedConstraints()
       return
     }
 
@@ -982,7 +998,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
     if (!solveGate.ok) {
       setAiError([solveGate.error, ...(solveGate.messages ?? [])].filter(Boolean).join('\n'))
-      setPage('constraints')
+      focusUnconfirmedConstraints()
       return
     }
 
@@ -1982,10 +1998,15 @@ const handleDownloadExcel = useCallback(async () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPage('summary')}
-                      disabled={!canProceedToSolve}
+                      onClick={() => {
+                        if (!canProceedToSolve) {
+                          focusUnconfirmedConstraints()
+                          return
+                        }
+                        setPage('summary')
+                      }}
                       title={solveBlockHint ?? undefined}
-                      className={`${navNextClass} ${navDisabledClass}`}
+                      className={`${navNextClass} ${!canProceedToSolve ? navDisabledClass : ''}`}
                     >
                       Tiếp tục
                       <ChevronRight size={14} strokeWidth={1.5} />
@@ -1998,10 +2019,10 @@ const handleDownloadExcel = useCallback(async () => {
                         Ràng buộc xếp lịch
                       </div>
                       <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                        Nhập constraints cho thời khóa biểu
+                        Nhập ràng buộc cho thời khóa biểu
                       </h1>
                       <p className="mt-4 max-w-3xl text-sm text-white/40">
-                        Import ràng buộc, bấm Phân tích, xác nhận từng dòng (Đúng rồi) rồi mới Tiếp tục xếp lịch.
+                        Thêm câu ràng buộc, đọc «Hiểu là», bấm «Đúng rồi» hoặc «AI phân tích» nếu chưa đúng, rồi Tiếp tục.
                       </p>
                     </div>
                     <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>
@@ -2037,10 +2058,9 @@ const handleDownloadExcel = useCallback(async () => {
                       onApplyTemplate={(c, templateId) =>
                         applyTemplate(c, templateId, constraintAgentInput, constraintDrafts.find((d) => d.rawConstraintId === c.id))
                       }
-                      onRejectAndReparse={
+                      onAiAnalyze={
                         aiProvider
                           ? (constraint, draft) => {
-                              if (!aiProvider) return
                               void rejectAndReparse(
                                 { id: constraint.id, text: constraint.text, type: constraint.type, weight: constraint.weight },
                                 draft,
@@ -2050,6 +2070,7 @@ const handleDownloadExcel = useCallback(async () => {
                             }
                           : undefined
                       }
+                      highlightConstraintIds={highlightConstraintIds}
                       reparseLoading={reparseLoading}
                     />
                   </div>
