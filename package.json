@@ -24,7 +24,7 @@
     "executor:check": "node scripts/post-build.mjs",
     "check:parity": "tsx scripts/check_constraint_parity.ts --strict",
     "lint": "eslint .",
-    "sonar:scan": "npm run lint && npm test && npx @sonar/scan",
+    "sonar:scan": "bash scripts/sonar-scan-local.sh",
     "build:executor": "node scripts/build_executor.mjs",
     "build:executor:mac": "node scripts/build_executor.mjs",
     "build:executor:win": "node scripts/build_executor.mjs",

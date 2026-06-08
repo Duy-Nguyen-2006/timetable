@@ -20,11 +20,11 @@ tool.
 
 ## SonarQube / CodeReviewer
 
-Use SonarQube as the local code-review scanner for `src`, `electron`, and `scripts` with project key `timetable`. Prefer the Docker server named `sonarqube-timetable`; avoid the ZIP `CodeReviewer` setup unless a full JDK 21 is installed.
+Use SonarQube Community Edition as the local-only code-review scanner for `src`, `electron`, and `scripts` with project key `timetable`. Always use the Docker server named `sonarqube-timetable`. Do not use SonarCloud for this repo. Avoid the ZIP `CodeReviewer` setup unless a full JDK 21 is installed.
 
 ### Quick Use
 
-1. Start SonarQube:
+1. Start local SonarQube:
 
 ```bash
 docker start sonarqube-timetable || docker run -d --name sonarqube-timetable \
@@ -36,14 +36,42 @@ docker start sonarqube-timetable || docker run -d --name sonarqube-timetable \
   sonarqube:community
 ```
 
-2. Open `http://localhost:9000`, generate a token in **My Account → Security**, then keep it only in the shell:
+2. Wait for local SonarQube to become ready:
+
+```bash
+curl http://localhost:9000/api/system/status
+```
+
+Continue only when the API returns `"status":"UP"`.
+
+3. Open `http://localhost:9000`.
+
+- First local login is usually `admin` / `admin`.
+- Change the password if SonarQube asks.
+- Create a local token in **My Account → Security**.
+- Do not look for a cloud token. The token must come from this local server.
+
+4. Export the local server URL and token in the current shell:
 
 ```bash
 export SONAR_HOST_URL=http://localhost:9000
-export SONAR_TOKEN=squ_xxxxxxxx
+export SONAR_TOKEN=your_local_token_here
 ```
 
-3. Run local checks, then scan from the repo root:
+For agent-driven local runs, you may store the same values in an ignored file at repo root:
+
+```bash
+.sonar.local.env
+```
+
+with:
+
+```bash
+SONAR_HOST_URL=http://localhost:9000
+SONAR_TOKEN=your_local_token_here
+```
+
+5. Run local checks, then scan from the repo root:
 
 ```bash
 npm run lint
@@ -56,7 +84,23 @@ npx @sonar/scan \
   -Dsonar.exclusions='**/.next/**,**/node_modules/**,**/release/**,**/.venv-build/**,**/python-dist/**,**/*.tsbuildinfo,**/python/**'
 ```
 
-4. Review results at `http://localhost:9000/dashboard?id=timetable`.
+Or simply run:
+
+```bash
+npm run sonar:scan
+```
+
+`npm run sonar:scan` must target the local server at `http://localhost:9000`.
+It may load `SONAR_HOST_URL` and `SONAR_TOKEN` from `.sonar.local.env` when that file exists.
+
+6. Review results at `http://localhost:9000/dashboard?id=timetable`.
+
+### Agent Default
+
+- Assume SonarQube is local-only.
+- If `SONAR_HOST_URL` is unset, use `http://localhost:9000`.
+- If `SONAR_TOKEN` is missing, start the local server and tell the user a local token must be created in the SonarQube UI before scanning can upload results.
+- Never switch to SonarCloud as a fallback.
 
 ### Rules
 
@@ -71,7 +115,7 @@ npx @sonar/scan \
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **timetable** (5380 symbols, 8689 relationships, 283 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **timetable** (5380 symbols, 8690 relationships, 283 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

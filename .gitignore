@@ -17,6 +17,7 @@ venv/
 .venv-build/
 .env
 .env.local
+.sonar.local.env
 *.env.*
 
 # Build directories
