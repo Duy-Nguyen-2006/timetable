@@ -95,7 +95,11 @@ export function ConstraintDraftCard({
       ) : null}
 
       {draft ? (
-        <div className="mt-2 rounded border border-white/[0.06] bg-[#0a0a0a] p-2.5 text-sm text-white/70">
+        <div className={`mt-2 rounded border p-2.5 text-sm ${
+          draft.status === 'rejected_reparsing' 
+            ? 'border-sky-500/40 bg-sky-500/[0.08]' 
+            : 'border-white/[0.06] bg-[#0a0a0a]'
+        }`}>
           <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Hệ thống hiểu là</p>
           <p className="mt-1 whitespace-pre-line leading-relaxed">
             {isReparsing ? (
@@ -104,7 +108,9 @@ export function ConstraintDraftCard({
                 <span className="text-white/50">Đang diễn giải lại...</span>
               </span>
             ) : (
-              draft.displayText || summary
+              <span className={draft.displayText ? 'text-white' : 'text-white/50'}>
+                {draft.displayText || summary}
+              </span>
             )}
           </p>
           {!isReparsing && draft.issues.length > 0 && (

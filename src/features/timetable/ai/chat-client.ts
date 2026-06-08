@@ -38,8 +38,11 @@ export async function invokeChat(
 
   if (!response.ok || !body?.ok) {
     const err = body?.error || `Chat API failed with status ${response.status}`;
-    // Distinguish internal config, provider body rejection, and auth for UI/repair loops
-    throw new Error(err);
+    // Distinguish internal config, provider body rejection, auth, and empty response for UI/repair loops
+    const errorToThrow = err.includes('EMPTY_RESPONSE') 
+      ? 'AI không trả về nội dung. Vui lòng thử lại hoặc kiểm tra cấu hình.' 
+      : err;
+    throw new Error(errorToThrow);
   }
 
   return {

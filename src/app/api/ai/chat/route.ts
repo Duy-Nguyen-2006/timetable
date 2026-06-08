@@ -383,7 +383,7 @@ export async function POST(request: Request) {
 
     if (!parsed.content.trim()) {
       return NextResponse.json(
-        { ok: false, error: 'EMPTY_CONTENT', finishReason: 'length', usage: parsed.usage },
+        { ok: false, error: 'EMPTY_RESPONSE', finishReason: 'length', usage: parsed.usage },
         { status: 502 }
       );
     }

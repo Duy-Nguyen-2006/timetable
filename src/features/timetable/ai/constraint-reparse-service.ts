@@ -227,7 +227,7 @@ export async function reparseRejectedConstraint(
           source: 'semantic',
           confidence: 'low',
           assumptions: [],
-          unresolvedQuestions: ['AI returned empty response'],
+          unresolvedQuestions: ['AI không trả về nội dung. Vui lòng thử lại.'],
         },
       };
     }
