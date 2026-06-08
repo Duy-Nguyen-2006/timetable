@@ -73,19 +73,28 @@ function buildDraft(
   };
 }
 
-function needsTranslator(rule: ReturnType<typeof inferRuleParseConfidence>, raw: RawConstraintInput): boolean {
-  if (rule.confidence === 'high' && rule.specs.length > 0 && !rule.specs.some((s) => s.kind === 'custom_dsl')) {
-    return false;
-  }
-  if (raw.type === 'preferred' && rule.specs.length > 0 && rule.confidence !== 'low') {
-    return false;
-  }
-  return rule.confidence === 'low' || rule.specs.length === 0 || rule.specs.some((s) => s.kind === 'custom_dsl');
+/**
+ * Determine if the rule parser result is trustworthy enough to skip LLM.
+ * Only returns true for simple, unambiguous constraints that the rule parser
+ * handles with HIGH confidence and no custom_dsl fallback.
+ */
+function ruleParserIsSufficient(rule: ReturnType<typeof inferRuleParseConfidence>): boolean {
+  return (
+    rule.confidence === 'high' &&
+    rule.specs.length > 0 &&
+    !rule.specs.some((s) => s.kind === 'custom_dsl')
+  );
 }
 
 /**
- * Parse user constraints into review drafts (rule first, translator for unresolved).
- * Does not run the solver.
+ * Parse user constraints into review drafts.
+ *
+ * Architecture: LLM-first with rule-parser as fast-path cache.
+ * 1. Rule parser runs first as a FAST PATH — if confidence is HIGH and no
+ *    custom_dsl, we use the result directly (saves latency + tokens).
+ * 2. All other constraints are sent to the LLM translator with their ORIGINAL
+ *    unsplit text — the LLM has the full context to understand semantics.
+ * 3. If LLM fails or returns empty, rule parser result serves as fallback.
  */
 /** Parse với raw id ổn định (khớp ConstraintItem.id trên UI). */
 export async function parseConstraintDraftsWithRaws(
@@ -98,14 +107,17 @@ export async function parseConstraintDraftsWithRaws(
   const drafts: ParsedConstraintDraft[] = [];
   const pendingForLlm: RawConstraintInput[] = [];
 
+  // Phase 1: Rule parser fast-path — only for HIGH confidence, unambiguous constraints
   for (const raw of raws) {
     const specs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
     const rule = inferRuleParseConfidence(raw.text, specs);
 
-    if (!needsTranslator(rule, raw)) {
-      drafts.push(buildDraft(input, raw, rule.specs, 'rule', rule.confidence, rule.issues));
+    if (ruleParserIsSufficient(rule)) {
+      // High confidence, simple pattern — use rule parser directly
+      drafts.push(buildDraft(input, raw, rule.specs, 'rule', 'high', rule.issues));
       continue;
     }
+    // Everything else goes to LLM
     pendingForLlm.push(raw);
   }
 
@@ -113,6 +125,7 @@ export async function parseConstraintDraftsWithRaws(
     return drafts;
   }
 
+  // Phase 2: LLM translator — receives original unsplit text
   const llmInput: AgentInputPayload = {
     ...input,
     constraints: pendingForLlm.map((r) => ({
@@ -130,17 +143,25 @@ export async function parseConstraintDraftsWithRaws(
     translatorSpecs = [];
   }
 
+  // Phase 3: Build drafts — prefer LLM results, fallback to rule parser
   for (const raw of pendingForLlm) {
     const fromLlm = translatorSpecs.filter(
       (s) => s.original === raw.text || s.original.trim() === raw.text.trim()
     );
-    const ruleSpecs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
-    const rule = inferRuleParseConfidence(raw.text, ruleSpecs);
-    const specs = fromLlm.length > 0 ? fromLlm : ruleSpecs;
-    const source: ParsedConstraintDraft['source'] = fromLlm.length > 0 ? 'translator' : 'rule';
-    const confidence: ParsedConstraintDraft['confidence'] =
-      fromLlm.length > 0 ? 'medium' : rule.confidence;
-    drafts.push(buildDraft(input, raw, specs, source, confidence, rule.issues));
+
+    if (fromLlm.length > 0 && !fromLlm.every((s) => s.kind === 'custom_dsl')) {
+      // LLM produced meaningful results — use them
+      drafts.push(buildDraft(input, raw, fromLlm, 'translator', 'medium', []));
+    } else {
+      // LLM failed or only produced custom_dsl — fall back to rule parser
+      const ruleSpecs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
+      const rule = inferRuleParseConfidence(raw.text, ruleSpecs);
+      const specs = fromLlm.length > 0 ? fromLlm : ruleSpecs;
+      const source: ParsedConstraintDraft['source'] = fromLlm.length > 0 ? 'translator' : 'rule';
+      const confidence: ParsedConstraintDraft['confidence'] =
+        fromLlm.length > 0 ? 'medium' : rule.confidence;
+      drafts.push(buildDraft(input, raw, specs, source, confidence, rule.issues));
+    }
   }
 
   return drafts;

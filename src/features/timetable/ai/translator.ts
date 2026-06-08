@@ -8,6 +8,7 @@ import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
 import { invokeChat, type ChatPayload } from './chat-client';
 import { buildTranslatorPeriods, buildTranslatorPeriodsByDay, periodsForSession } from './translator-periods';
+import { inferRuleParseConfidence } from './rule-parse-confidence';
 import {
   applyConstraintWeight,
   includesLabel,
@@ -1507,12 +1508,18 @@ export async function runTranslatorTurn(
     return { constraintSpecs: [], rawResponse: '', usageTokens: 0 };
   }
 
-  // Pre-parse với deterministic rule parser. Constraints parse được rõ ràng
-  // (kind !== 'custom_dsl') không cần gửi LLM — tiết kiệm latency và token.
+  // Pre-parse with deterministic rule parser. Only constraints that parse
+  // clearly (kind !== 'custom_dsl' AND high confidence) skip the LLM call.
   const deterministicSpecs = fallbackFromRuleParser(input);
   const parsedOriginals = new Set<string>();
   for (const spec of deterministicSpecs) {
-    if (spec.kind !== 'custom_dsl') parsedOriginals.add(spec.original);
+    if (spec.kind !== 'custom_dsl') {
+      // Additional confidence check: only skip LLM for unambiguous parses
+      const ruleResult = inferRuleParseConfidence(spec.original, [spec]);
+      if (ruleResult.confidence === 'high') {
+        parsedOriginals.add(spec.original);
+      }
+    }
   }
   const unparsedConstraints = input.constraints.filter((c) => !parsedOriginals.has(c.text));
 

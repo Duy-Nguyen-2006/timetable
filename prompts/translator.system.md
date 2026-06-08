@@ -528,9 +528,46 @@ type ConditionExpr =
 
 ```
 
+**Input:** `"Hiếu và Thúy không đồng thời dạy tiết cuối trong 1 ngày"` (mutual exclusion on last period — "không đồng thời" = "not simultaneously", use IR with $P_last = max period from context) →
+```json
+{
+  "id": "c14", "severity": "hard", "kind": "custom_dsl",
+  "original": "Hiếu và Thúy không đồng thời dạy tiết cuối trong 1 ngày",
+  "explain": "Với mọi ngày, KHÔNG xảy ra cả Hiếu và Thúy đều dạy tiết cuối",
+  "expr": {
+    "forall": { "var": "d", "in": "days",
+      "body": {
+        "not": {
+          "and": [
+            { "teaches": { "teacher": "Hiếu", "day": "$d", "period": "$P_last" } },
+            { "teaches": { "teacher": "Thúy", "day": "$d", "period": "$P_last" } }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+Lưu ý: `$P_last` = tiết cuối cùng (max period) theo `context.periods`. Nếu context có `periods: [1,2,3,4,5]` thì `$P_last = 5`.
+
+**Input:** `"Sơn và Hương không trùng tiết"` (simple pair exclusion — dùng legacy kind) →
+```json
+{ "id": "c15", "original": "Sơn và Hương không trùng tiết", "severity": "hard", "kind": "teacher_pair_not_same_slot", "params": { "teachers": ["Sơn", "Hương"] } }
+```
+
+## Xử lý "không đồng thời" / "không cùng lúc"
+Khi gặp mẫu câu `"A và B không đồng thời <hành động>"`:
+- Đây là mutual exclusion — ∀ ngày: ¬(A làm X ∧ B làm X).
+- Nếu hành động là "dạy tiết cuối" → dùng IR `forall d: not(and(teaches(A,d,P_last), teaches(B,d,P_last)))`.
+- Nếu hành động là "dạy cùng tiết" (không chỉ định tiết cụ thể) → dùng `teacher_pair_not_same_slot`.
+- **KHÔNG** split "không đồng thời" thành 2 mệnh đề — đây là MỘT ràng buộc đơn.
+
+## Xử lý "tiết cuối"
+"Tiết cuối" là tiết lớn nhất trong `context.periods` (hoặc per-day nếu `periodCounts` khác nhau). Dùng `$P_last` trong IR. Nếu cần dùng legacy kind, resolve `$P_last` thành số cụ thể từ context.
+
 ## Kiểm tra trước khi submit
 Trước khi gọi `submit_constraint_specs`, tự verify:
-- [ ] Số `ConstraintSpec` ≥ số mệnh đề độc lập trong input (tách `và`, `đồng thời`).
+- [ ] Số `ConstraintSpec` ≥ số mệnh đề độc lập trong input (tách `và`, nhưng **KHÔNG** tách "không đồng thời").
 - [ ] Mọi tên người/lớp/môn có trong `context`.
 - [ ] Mọi `day` là id (`mon`, `tue`, ...).
 - [ ] Không có field thừa ngoài schema.
