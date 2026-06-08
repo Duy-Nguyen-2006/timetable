@@ -90,7 +90,7 @@ export function ConstraintDraftCard({
       {isNew && !draft ? (
         <div className="mt-2 flex items-center gap-2 rounded border border-sky-500/25 bg-sky-500/[0.06] px-3 py-2 text-xs text-sky-300/90">
           <AlertCircle size={14} className="shrink-0" />
-          <span>Ràng buộc mới thêm vào — dùng wizard hoặc chuẩn hóa Custom để có bản duyệt.</span>
+          <span>Ràng buộc mới thêm vào — chọn mẫu có sẵn hoặc chuẩn hóa ràng buộc đặc biệt để có bản duyệt.</span>
         </div>
       ) : null}
 
@@ -128,7 +128,7 @@ export function ConstraintDraftCard({
           )}
         </div>
       ) : !isNew ? (
-        <p className="mt-2 text-xs text-white/35">Chưa có bản duyệt — chọn mẫu hoặc tạo lại bằng Custom.</p>
+        <p className="mt-2 text-xs text-white/35">Chưa có bản duyệt — chọn mẫu hoặc tạo lại bằng ràng buộc đặc biệt.</p>
       ) : null}
 
       {confirmed && !isNew ? (
@@ -199,7 +199,7 @@ export function ConstraintDraftCard({
                 className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/[0.08] px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-500/[0.15]"
               >
                 <Pencil size={12} />
-                Sửa THEN
+                Sửa vế “thì”
               </button>
             ) : null}
             <button type="button" onClick={onPickTemplate} className="rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-white/60 hover:bg-white/[0.04]">

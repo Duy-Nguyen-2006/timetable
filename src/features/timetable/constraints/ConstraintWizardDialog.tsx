@@ -121,7 +121,7 @@ export function ConstraintWizardDialog({
   const currentMeta = CONSTRAINT_TEMPLATES.find((template) => template.id === templateId);
   const baseOriginal = currentMeta
     ? definitionExample(currentMeta.id) || currentMeta.label
-    : 'Ràng buộc tạo bằng wizard';
+    : 'Ràng buộc tạo từ form có sẵn';
   const baseDraft = useMemo<ParsedConstraintDraft>(() => ({
     id: 'wizard-preview',
     rawConstraintId: 'wizard-preview',

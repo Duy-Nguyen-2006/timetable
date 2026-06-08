@@ -193,7 +193,7 @@ export function ConstraintInputPanel({
             className={`${primaryButtonClass} mt-4 w-full`}
           >
             <Plus size={14} strokeWidth={1.5} />
-            Mở wizard
+            Mở form tạo ràng buộc
           </button>
 
           <div className="mt-4 border-t border-white/[0.08] pt-4">

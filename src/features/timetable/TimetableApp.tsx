@@ -853,7 +853,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     if (!lines.length) return
     if (!aiProvider) {
       setShowSettingsModal(true)
-      setCustomNormalizeError('Vui lòng cấu hình AI provider trước khi chuẩn hóa ràng buộc đặc biệt.')
+      setCustomNormalizeError('Vui lòng cấu hình nhà cung cấp AI trước khi chuẩn hóa ràng buộc đặc biệt.')
       return
     }
 
