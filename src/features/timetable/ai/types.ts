@@ -1,3 +1,10 @@
+export type {
+  ConstraintSpec,
+  DeterministicValidationReport,
+  Plan,
+  ScheduleEntry,
+  Violation,
+} from './constraint-spec';
 import type {
   ConstraintSpec,
   DeterministicValidationReport,
