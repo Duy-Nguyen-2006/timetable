@@ -72,7 +72,7 @@ export type ParsedConstraintDraft = {
   explanation: string;
   issues: ConstraintParseIssue[];
   clarificationQuestions?: ConstraintClarificationQuestion[];
-  source: 'rule' | 'translator' | 'manual' | 'template';
+  source: 'rule' | 'translator' | 'manual' | 'template' | 'ai_reparse';
   confirmedAt?: string;
   /** Re-parse tracking */
   previousAttempts?: ReparseAttempt[];

@@ -155,7 +155,11 @@ function validateSpecShape(spec: ConstraintSpec): ConstraintParseIssue[] {
 export function validateConstraintSpecs(
   input: AgentInputPayload,
   specs: ConstraintSpec[],
-  options?: { rawText?: string; source?: 'rule' | 'translator' | 'manual' | 'template'; confidence?: 'high' | 'medium' | 'low' }
+  options?: {
+    rawText?: string;
+    source?: 'rule' | 'translator' | 'manual' | 'template' | 'ai_reparse';
+    confidence?: 'high' | 'medium' | 'low';
+  }
 ): {
   issues: ConstraintParseIssue[];
   status: ConstraintParseStatus;
@@ -223,6 +227,9 @@ export function validateConstraintSpecs(
   if (options?.source === 'translator') {
     issues.push({ code: 'llm_fallback_used', message: 'Đã dùng mô hình dịch ràng buộc.' });
     return { status: 'needs_review', issues, confidence: recomputedConfidence };
+  }
+  if (options?.source === 'ai_reparse') {
+    return { status: 'parsed', issues, confidence: recomputedConfidence ?? 'high' };
   }
 
   const needsClarification =

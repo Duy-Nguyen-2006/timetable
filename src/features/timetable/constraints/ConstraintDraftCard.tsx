@@ -95,12 +95,16 @@ export function ConstraintDraftCard({
       ) : null}
 
       {draft ? (
-        <div className={`mt-2 rounded border p-2.5 text-sm ${
-          draft.status === 'rejected_reparsing' 
-            ? 'border-sky-500/40 bg-sky-500/[0.08]' 
-            : 'border-white/[0.06] bg-[#0a0a0a]'
-        }`}>
-          <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Hệ thống hiểu là</p>
+        <div
+          className={`mt-2 rounded border p-2.5 text-sm ${
+            hasReparsed || isReparsing
+              ? 'border-sky-500/40 bg-sky-500/[0.08]'
+              : 'border-white/[0.06] bg-[#0a0a0a]'
+          }`}
+        >
+          <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">
+            {hasReparsed ? 'AI hiểu lại là' : 'Hệ thống hiểu là'}
+          </p>
           <p className="mt-1 whitespace-pre-line leading-relaxed">
             {isReparsing ? (
               <span className="flex items-center gap-2">

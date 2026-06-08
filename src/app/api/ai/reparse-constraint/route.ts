@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import type { AIProviderConfig } from '@/features/timetable/ai/types';
+import type { AgentInputPayload, AIProviderConfig } from '@/features/timetable/ai/types';
 import {
   reparseRejectedConstraint,
   type ReparseRejectedConstraintRequest,
@@ -9,15 +9,16 @@ import {
 type ReparseConstraintRequest = {
   request: ReparseRejectedConstraintRequest;
   providerConfig: AIProviderConfig;
+  agentInput: AgentInputPayload;
 };
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ReparseConstraintRequest;
 
-    if (!body?.request || !body?.providerConfig) {
+    if (!body?.request || !body?.providerConfig || !body?.agentInput) {
       return NextResponse.json(
-        { error: 'Thiếu request hoặc providerConfig.' },
+        { error: 'Thiếu request, providerConfig hoặc agentInput.' },
         { status: 400 }
       );
     }
@@ -29,7 +30,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await reparseRejectedConstraint(body.request, body.providerConfig);
+    const result = await reparseRejectedConstraint(
+      body.request,
+      body.providerConfig,
+      body.agentInput
+    );
 
     return NextResponse.json(result);
   } catch (error) {

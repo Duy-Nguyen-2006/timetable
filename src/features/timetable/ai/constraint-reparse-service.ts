@@ -1,20 +1,17 @@
 /**
- * Reparse Rejected Constraint Service
- *
- * When a user rejects a parsed interpretation, this service re-parses the constraint
- * using AI with the rejected interpretation as context. It tries two internal strategies:
- * 1. Try to fit the intent into built-in constraints
- * 2. If built-in is not suitable, produce a clear semantic/code-ready interpretation
+ * Semantic reparse when user rejects an interpretation.
+ * Rule/regex is assumed failed — AI normalizes intent to built-in specs; no regex fallback.
  */
 
 import { z } from 'zod';
 
 import type { AgentInputPayload, AIProviderConfig } from './types';
 import type { ConstraintSpec } from './constraint-spec';
+import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { ReparseResult, SemanticCandidate } from './semantic-constraint';
-import { humanizeConstraintSpec } from './constraint-humanizer';
 import { invokeChat, type ChatPayload } from './chat-client';
 import { parseModelJson } from './parse-model-json';
+import { validateReparseCandidateSpecs } from './reparse-candidate-validator';
 
 const reparseResponseSchema = z.object({
   status: z.enum(['candidate', 'unsupported', 'needs_retry']),
@@ -79,13 +76,24 @@ export type ReparseRejectedConstraintRequest = {
   };
 };
 
+const BUILTIN_KIND_HINTS = [
+  'teacher_block_day — params: teacher, day',
+  'teacher_block_period — params: teacher, period (one spec per period)',
+  'teacher_block_slot — params: teacher, day, period',
+  'teacher_preferred_periods — params: teacher, periods[] (soft)',
+  'teacher_max_per_day — params: teacher, maxPerDay',
+  'teacher_allowed_days — params: teacher, days[]',
+  'if_then — params: if, then[]',
+].join('\n');
+
 function buildReparsePrompt(request: ReparseRejectedConstraintRequest): string {
   const { rawConstraint, rejectedDraft, previousAttempts, context } = request;
 
-  const teacherList = context.teachers.join(', ') || '(chưa có giáo viên)';
-  const classList = context.classes.join(', ') || '(chưa có lớp)';
-  const subjectList = context.subjects.join(', ') || '(chưa có môn)';
-  const dayList = context.days.map((d) => d.label).join(', ') || '(chưa có ngày)';
+  const teacherList = [...new Set(context.teachers)].join(', ') || '(chưa có giáo viên)';
+  const classList = [...new Set(context.classes)].join(', ') || '(chưa có lớp)';
+  const subjectList = [...new Set(context.subjects)].join(', ') || '(chưa có môn)';
+  const dayList =
+    context.days.map((d) => `${d.label} (id: ${d.id})`).join(', ') || '(chưa có ngày)';
 
   const prevAttemptsText =
     previousAttempts.length > 0
@@ -97,107 +105,53 @@ function buildReparsePrompt(request: ReparseRejectedConstraintRequest): string {
           .join('\n')
       : '  (không có)';
 
-  return `You are a constraint parsing assistant for a Vietnamese school timetable system.
+  const encodableList = [...SOLVER_ENCODABLE_KINDS].slice(0, 40).join(', ');
 
-## Task
-The previous interpretation was rejected by the user. Do not repeat it.
-Your job is to produce a NEW precise Vietnamese interpretation.
+  return `You are a Vietnamese school timetable constraint normalizer.
 
-## Previous Rejected Interpretation
+## Critical context
+The user clicked "Not correct" — rule/regex or first-pass parsing FAILED.
+Do NOT repeat the rejected interpretation. Normalize RAW text into built-in specs.
+
+## Rejected (do NOT repeat)
 "${rejectedDraft.displayText}"
 
-## Previous Attempts (do NOT repeat these)
+## Previous attempts (do NOT repeat)
 ${prevAttemptsText}
 
-## Raw User Input
+## Raw user input
 "${rawConstraint.text}"
 
-## Context
+## Valid entities (never invent)
 - Teachers: ${teacherList}
 - Classes: ${classList}
 - Subjects: ${subjectList}
 - Days: ${dayList}
-- Constraint type: ${rawConstraint.type}${rawConstraint.weight ? `, weight: ${rawConstraint.weight}` : ''}
+- Type: ${rawConstraint.type}${rawConstraint.weight ? `, weight: ${rawConstraint.weight}` : ''}
 
-## Policy
-1. First try to express the user's intent using the supported built-in constraint kinds.
-2. If that is not possible, produce a semantic logic representation that is precise enough for code generation.
-3. NEVER invent missing teacher/class/subject names.
-4. NEVER hide assumptions - if you make assumptions, fold them into the display text.
-5. If the sentence is ambiguous, rewrite the interpretation with the assumption made explicit.
-6. If exact support is impossible, return status: "unsupported".
-7. The displayText must be a plain Vietnamese sentence that a non-technical user can understand.
+## Built-in kinds (prefer)
+${BUILTIN_KIND_HINTS}
+Encodable kinds include: ${encodableList}, ...
 
-## Response Format
-Return a JSON object with:
-{
-  "status": "candidate" | "unsupported" | "needs_retry",
-  "displayText": "Vietnamese sentence that the user can approve",
-  "candidate": {
-    "source": "built_in" | "semantic",
-    "confidence": "high" | "medium" | "low",
-    "specs": [{ "kind": "...", "params": {...} }],  // if built_in
-    "semantic": { "type": "if_then", "if": {...}, "then": [...] },  // if semantic
-    "assumptions": ["list of assumptions made"],
-    "unresolvedQuestions": ["questions that still need answering"]
-  }
-}
+## Rules
+1. Prefer source "built_in" with non-empty specs[].
+2. Do NOT use custom_dsl unless truly impossible.
+3. "tránh"/"né"/"đi muộn" + teacher + periods → teacher_block_period (required) or teacher_preferred_periods (preferred); one spec per period.
+4. "Cô X"/"Thầy Y" → teacher label from Teachers list.
+5. displayText: clear Vietnamese for user approval.
 
-## Examples
+## JSON response
+{ "status": "candidate"|"unsupported"|"needs_retry", "displayText": "...", "candidate": { "source": "built_in", "confidence": "high"|"medium"|"low", "specs": [...], "assumptions": [], "unresolvedQuestions": [] } }
 
-Raw: "Cô Lan không được dạy vào sáng thứ 2"
-Response:
-{
-  "status": "candidate",
-  "displayText": "Cô Lan không dạy vào sáng thứ 2.",
-  "candidate": {
-    "source": "built_in",
-    "confidence": "high",
-    "specs": [{ "kind": "teacher_block_day", "params": { "teacher": "Lan", "day": "monday" } }],
-    "assumptions": ["Cô Lan refers to teacher named Lan"],
-    "unresolvedQuestions": []
-  }
-}
-
-Raw: "Vào ngày thứ 2, tiết 1, nếu cô Hương không dạy, thì đến thứ 5, tiết 3, thầy Thủy phải dạy tiết đó và tiết 4"
-Response:
-{
-  "status": "candidate",
-  "displayText": "Nếu thứ 2 tiết 1 giáo viên Hương không có tiết dạy, thì thứ 5 tiết 3 và tiết 4 giáo viên Thủy phải có tiết dạy.",
-  "candidate": {
-    "source": "semantic",
-    "confidence": "high",
-    "semantic": {
-      "type": "if_then",
-      "if": { "op": "teacher_not_teaching_at_slot", "teacher": "Hương", "day": "monday", "period": 1 },
-      "then": [
-        { "op": "teacher_required_slot", "teacher": "Thủy", "day": "thursday", "period": 3 },
-        { "op": "teacher_required_slot", "teacher": "Thủy", "day": "thursday", "period": 4 }
-      ]
-    },
-    "assumptions": ["Hương and Thủy are teacher names", "thứ 2 = monday", "thứ 5 = thursday"],
-    "unresolvedQuestions": []
-  }
-}`;
-}
-
-function specToConstraintSpec(
-  raw: ReparseRejectedConstraintRequest['rawConstraint'],
-  specData: { kind: string; params: Record<string, unknown> }
-): ConstraintSpec {
-  return {
-    id: `reparse_${raw.id}`,
-    original: raw.text,
-    severity: raw.type === 'required' ? 'hard' : 'soft',
-    kind: specData.kind as ConstraintSpec['kind'],
-    params: specData.params,
-    weight: raw.weight,
-  };
+## Example
+Raw: "Cô Thúy ... tránh tiết 1 với 2"
+→ specs: teacher_block_period Thúy period 1; teacher_block_period Thúy period 2`;
 }
 
 export async function reparseRejectedConstraint(
   request: ReparseRejectedConstraintRequest,
-  config: AIProviderConfig
+  config: AIProviderConfig,
+  agentInput: AgentInputPayload
 ): Promise<ReparseResult> {
   const prompt = buildReparsePrompt(request);
 
@@ -205,21 +159,17 @@ export async function reparseRejectedConstraint(
     baseURL: config.baseURL || 'https://openrouter.ai/api/v1',
     apiKey: config.apiKey,
     model: config.model || 'anthropic/claude-3.5-sonnet',
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-    temperature: 0.3,
-    max_tokens: 2000,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.2,
+    max_tokens: 2500,
+    response_format: { type: 'json_object' },
   };
 
   try {
     const response = await invokeChat(payload);
     const content = response.content;
 
-    if (!content) {
+    if (!content?.trim()) {
       return {
         status: 'needs_retry',
         displayText: request.rejectedDraft.displayText,
@@ -235,21 +185,79 @@ export async function reparseRejectedConstraint(
     const parsedJson = parseModelJson(content);
     const validated = reparseResponseSchema.parse(parsedJson);
 
-    const candidate: SemanticCandidate = {
-      source: validated.candidate.source,
-      confidence: validated.candidate.confidence,
-      specs: validated.candidate.specs?.map((s) =>
-        specToConstraintSpec(request.rawConstraint, s)
-      ),
-      semantic: validated.candidate.semantic as ReparseResult['candidate']['semantic'],
-      assumptions: validated.candidate.assumptions,
-      unresolvedQuestions: validated.candidate.unresolvedQuestions,
-    };
+    if (validated.status === 'unsupported') {
+      return {
+        status: 'unsupported',
+        displayText: validated.displayText,
+        candidate: {
+          source: validated.candidate.source,
+          confidence: validated.candidate.confidence,
+          semantic: validated.candidate.semantic as SemanticCandidate['semantic'],
+          assumptions: validated.candidate.assumptions,
+          unresolvedQuestions: validated.candidate.unresolvedQuestions,
+        },
+      };
+    }
+
+    const specInputs = validated.candidate.specs;
+    if (validated.candidate.source === 'built_in' && specInputs?.length) {
+      const check = validateReparseCandidateSpecs(agentInput, request.rawConstraint, specInputs);
+      if (check.ok) {
+        return {
+          status: 'candidate',
+          displayText: validated.displayText,
+          candidate: {
+            source: 'built_in',
+            confidence: validated.candidate.confidence,
+            specs: check.specs,
+            assumptions: validated.candidate.assumptions,
+            unresolvedQuestions: validated.candidate.unresolvedQuestions,
+          },
+        };
+      }
+
+      return {
+        status: check.status === 'unsupported' ? 'unsupported' : 'needs_retry',
+        displayText: validated.displayText,
+        candidate: {
+          source: 'built_in',
+          confidence: 'low',
+          assumptions: validated.candidate.assumptions,
+          unresolvedQuestions: [
+            ...validated.candidate.unresolvedQuestions,
+            ...check.issues.map((i) => i.message),
+          ],
+        },
+      };
+    }
+
+    if (request.rawConstraint.type === 'required') {
+      return {
+        status: 'needs_retry',
+        displayText: validated.displayText,
+        candidate: {
+          source: 'semantic',
+          confidence: 'low',
+          semantic: validated.candidate.semantic as SemanticCandidate['semantic'],
+          assumptions: validated.candidate.assumptions,
+          unresolvedQuestions: [
+            'Ràng buộc bắt buộc cần specs built-in — chưa chuẩn hóa được.',
+            ...validated.candidate.unresolvedQuestions,
+          ],
+        },
+      };
+    }
 
     return {
       status: validated.status,
       displayText: validated.displayText,
-      candidate,
+      candidate: {
+        source: validated.candidate.source,
+        confidence: validated.candidate.confidence,
+        semantic: validated.candidate.semantic as SemanticCandidate['semantic'],
+        assumptions: validated.candidate.assumptions,
+        unresolvedQuestions: validated.candidate.unresolvedQuestions,
+      },
     };
   } catch (error) {
     console.error('Reparse failed:', error);
@@ -261,7 +269,7 @@ export async function reparseRejectedConstraint(
         confidence: 'low',
         assumptions: [],
         unresolvedQuestions: [
-          error instanceof Error ? error.message : 'Unknown error during reparse',
+          error instanceof Error ? error.message : 'Lỗi khi diễn giải lại',
         ],
       },
     };

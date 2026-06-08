@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { parseConstraintDraftsWithRaws } from '../ai/constraint-parse-service';
+import { buildDraftFromSpecs } from '../ai/constraint-draft-validator';
 import { reparseRejectedConstraint } from '../ai/constraint-reparse-service';
 import { assertSolvableConstraintState } from '../ai/constraint-preflight';
 import type { ConfirmedConstraint, ParsedConstraintDraft, ReparseAttempt } from '../ai/constraint-review-types';
@@ -190,19 +191,55 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
             })),
             context,
           },
-          provider
+          provider,
+          agentInput
         );
 
-        const updatedDraft: ParsedConstraintDraft = {
-          ...currentDraft,
-          displayText: result.displayText,
-          reparseCount: attempts + 1,
-          previousAttempts,
-          proposedSpecs: result.candidate.specs ?? currentDraft.proposedSpecs,
-          semanticRepresentation: result.candidate.semantic,
-          confidence: result.candidate.confidence,
-          status: result.status === 'unsupported' ? 'unsupported' : 'parsed',
-        };
+        const specs = result.candidate.specs;
+        let updatedDraft: ParsedConstraintDraft;
+
+        if (result.status === 'candidate' && specs?.length) {
+          const built = buildDraftFromSpecs(
+            currentDraft.id,
+            {
+              id: rawConstraint.id,
+              text: rawConstraint.text,
+              type: rawConstraint.type,
+            },
+            specs,
+            agentInput,
+            {
+              source: 'ai_reparse',
+              confidence: result.candidate.confidence,
+              explanation: result.displayText,
+            }
+          );
+          updatedDraft = {
+            ...built,
+            displayText: result.displayText,
+            reparseCount: attempts + 1,
+            previousAttempts,
+            semanticRepresentation: result.candidate.semantic,
+            source: 'ai_reparse',
+          };
+        } else {
+          const reparseIssues = result.candidate.unresolvedQuestions.map((message) => ({
+            code: 'low_confidence' as const,
+            message,
+          }));
+          updatedDraft = {
+            ...currentDraft,
+            displayText: result.displayText,
+            reparseCount: attempts + 1,
+            previousAttempts,
+            proposedSpecs: [],
+            semanticRepresentation: result.candidate.semantic,
+            confidence: result.candidate.confidence,
+            source: 'ai_reparse',
+            status: result.status === 'unsupported' ? 'unsupported' : 'needs_review',
+            issues: reparseIssues,
+          };
+        }
 
         setConstraintDrafts((current) => {
           const has = current.some((d) => d.rawConstraintId === updatedDraft.rawConstraintId);
