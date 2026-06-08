@@ -43,6 +43,147 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="mb-1 block text-xs text-white/45">{children}</label>;
 }
 
+type SearchableOption = { value: string; label: string };
+
+function normalizePickerSearch(value: string): string {
+  return value
+    .toLocaleLowerCase('vi')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function SearchableSelect({
+  label,
+  value,
+  options,
+  placeholder = 'Tìm kiếm...',
+  emptyLabel = 'Không tìm thấy lựa chọn phù hợp.',
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: SearchableOption[];
+  placeholder?: string;
+  emptyLabel?: string;
+  onChange: (value: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const selected = options.find((option) => option.value === value);
+  const searchKey = normalizePickerSearch(query);
+  const filtered = searchKey
+    ? options.filter((option) => normalizePickerSearch(`${option.label} ${option.value}`).includes(searchKey))
+    : options;
+
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        className={inputClass}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={selected ? `Đã chọn: ${selected.label}` : placeholder}
+      />
+      <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-md border border-white/[0.08] bg-[#0a0a0a] p-1">
+        {selected ? (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="w-full rounded px-2 py-1.5 text-left text-xs text-white/45 hover:bg-white/[0.04]"
+          >
+            Bỏ chọn {selected.label}
+          </button>
+        ) : null}
+        {filtered.length ? filtered.map((option) => {
+          const isSelected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setQuery('');
+              }}
+              className={`w-full rounded px-2 py-1.5 text-left text-xs ${
+                isSelected
+                  ? 'bg-[#4DB848]/15 text-[#A6E3A1]'
+                  : 'text-white/65 hover:bg-white/[0.04]'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        }) : (
+          <p className="px-2 py-1.5 text-xs text-white/35">{emptyLabel}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SearchableMultiSelect({
+  label,
+  values,
+  options,
+  placeholder = 'Tìm kiếm...',
+  emptyLabel = 'Không tìm thấy lựa chọn phù hợp.',
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  options: SearchableOption[];
+  placeholder?: string;
+  emptyLabel?: string;
+  onChange: (values: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const selected = new Set(values);
+  const searchKey = normalizePickerSearch(query);
+  const filtered = searchKey
+    ? options.filter((option) => normalizePickerSearch(`${option.label} ${option.value}`).includes(searchKey))
+    : options;
+
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        className={inputClass}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={values.length ? `Đã chọn ${values.length}` : placeholder}
+      />
+      <div className="mt-1 max-h-40 space-y-1 overflow-y-auto rounded-md border border-white/[0.08] bg-[#0a0a0a] p-1">
+        {filtered.length ? filtered.map((option) => {
+          const isSelected = selected.has(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                const next = isSelected
+                  ? values.filter((item) => item !== option.value)
+                  : [...values, option.value];
+                onChange(next);
+              }}
+              className={`w-full rounded px-2 py-1.5 text-left text-xs ${
+                isSelected
+                  ? 'bg-[#4DB848]/15 text-[#A6E3A1]'
+                  : 'text-white/65 hover:bg-white/[0.04]'
+              }`}
+            >
+              {isSelected ? '✓ ' : ''}{option.label}
+            </button>
+          );
+        }) : (
+          <p className="px-2 py-1.5 text-xs text-white/35">{emptyLabel}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ConstraintEditDialog({
   open,
   onOpenChange,
@@ -208,17 +349,23 @@ export function TemplateFields({
   meta?: ConstraintTemplateMeta;
 }) {
   const tid = values.templateId;
+  const teacherOptions = ctx.teachers.map((teacher) => ({ value: teacher, label: teacher }));
+  const subjectOptions = ctx.subjects.map((subject) => ({ value: subject, label: subject }));
+  const classOptions = ctx.classes.map((className) => ({ value: className, label: className }));
+  const assignmentOptions = (ctx.assignments ?? []).map((assignment) => ({
+    value: assignment.id,
+    label: assignment.label,
+  }));
 
   const selectTeacher = (label?: string) => (
-    <div>
-      <FieldLabel>{label ?? 'Giáo viên'}</FieldLabel>
-      <select className={inputClass} value={values.teacher ?? ''} onChange={(e) => patch({ teacher: e.target.value })}>
-        <option value="">— chọn —</option>
-        {ctx.teachers.map((t) => (
-          <option key={t} value={t}>{t}</option>
-        ))}
-      </select>
-    </div>
+    <SearchableSelect
+      label={label ?? 'Giáo viên'}
+      value={values.teacher ?? ''}
+      options={teacherOptions}
+      placeholder="Tìm giáo viên"
+      emptyLabel="Không tìm thấy giáo viên phù hợp."
+      onChange={(teacher) => patch({ teacher })}
+    />
   );
 
   const selectDay = (label?: string) => (
@@ -246,63 +393,58 @@ export function TemplateFields({
   );
 
   const selectSubject = (label?: string) => (
-    <div>
-      <FieldLabel>{label ?? 'Môn'}</FieldLabel>
-      <select className={inputClass} value={values.subject ?? ''} onChange={(e) => patch({ subject: e.target.value })}>
-        <option value="">Mọi môn (mở rộng)</option>
-        {ctx.subjects.map((s) => (
-          <option key={s} value={s}>{s}</option>
-        ))}
-      </select>
-    </div>
+    <SearchableSelect
+      label={label ?? 'Môn'}
+      value={values.subject ?? ''}
+      options={subjectOptions}
+      placeholder="Tìm môn"
+      emptyLabel="Không tìm thấy môn phù hợp."
+      onChange={(subject) => patch({ subject: subject || undefined })}
+    />
   );
 
   const selectSubjectA = (
-    <div>
-      <FieldLabel>Môn A</FieldLabel>
-      <select className={inputClass} value={values.subjectA ?? ''} onChange={(e) => patch({ subjectA: e.target.value })}>
-        <option value="">— chọn —</option>
-        {ctx.subjects.map((s) => (
-          <option key={s} value={s}>{s}</option>
-        ))}
-      </select>
-    </div>
+    <SearchableSelect
+      label="Môn A"
+      value={values.subjectA ?? ''}
+      options={subjectOptions}
+      placeholder="Tìm môn A"
+      emptyLabel="Không tìm thấy môn phù hợp."
+      onChange={(subjectA) => patch({ subjectA })}
+    />
   );
 
   const selectSubjectB = (
-    <div>
-      <FieldLabel>Môn B</FieldLabel>
-      <select className={inputClass} value={values.subjectB ?? ''} onChange={(e) => patch({ subjectB: e.target.value })}>
-        <option value="">— chọn —</option>
-        {ctx.subjects.map((s) => (
-          <option key={s} value={s}>{s}</option>
-        ))}
-      </select>
-    </div>
+    <SearchableSelect
+      label="Môn B"
+      value={values.subjectB ?? ''}
+      options={subjectOptions}
+      placeholder="Tìm môn B"
+      emptyLabel="Không tìm thấy môn phù hợp."
+      onChange={(subjectB) => patch({ subjectB })}
+    />
   );
 
   const selectClass = (label?: string) => (
-    <div>
-      <FieldLabel>{label ?? 'Lớp'}</FieldLabel>
-      <select className={inputClass} value={values.className ?? ''} onChange={(e) => patch({ className: e.target.value })}>
-        <option value="">— chọn —</option>
-        {ctx.classes.map((c) => (
-          <option key={c} value={c}>{c}</option>
-        ))}
-      </select>
-    </div>
+    <SearchableSelect
+      label={label ?? 'Lớp'}
+      value={values.className ?? ''}
+      options={classOptions}
+      placeholder="Tìm lớp"
+      emptyLabel="Không tìm thấy lớp phù hợp."
+      onChange={(className) => patch({ className })}
+    />
   );
 
   const selectAssignment = (
-    <div>
-      <FieldLabel>Phân công</FieldLabel>
-      <select className={inputClass} value={values.assignmentId ?? ''} onChange={(e) => patch({ assignmentId: e.target.value })}>
-        <option value="">— chọn —</option>
-        {(ctx.assignments ?? []).map((a) => (
-          <option key={a.id} value={a.id}>{a.label}</option>
-        ))}
-      </select>
-    </div>
+    <SearchableSelect
+      label="Phân công"
+      value={values.assignmentId ?? ''}
+      options={assignmentOptions}
+      placeholder="Tìm giáo viên, môn hoặc lớp"
+      emptyLabel="Không tìm thấy phân công phù hợp."
+      onChange={(assignmentId) => patch({ assignmentId })}
+    />
   );
 
   const numInput = (label: string, field: keyof ConstraintFormValues, min = 1) => (
@@ -362,21 +504,14 @@ export function TemplateFields({
   );
 
   const subjectsMultiInput = (
-    <div>
-      <FieldLabel>Danh sách môn (cách nhau dấu phẩy)</FieldLabel>
-      <input
-        className={inputClass}
-        value={(values.subjects ?? []).join(', ')}
-        onChange={(e) =>
-          patch({
-            subjects: e.target.value
-              .split(/[,;]/u)
-              .map((s) => s.trim())
-              .filter(Boolean),
-          })
-        }
-      />
-    </div>
+    <SearchableMultiSelect
+      label="Danh sách môn"
+      values={values.subjects ?? []}
+      options={subjectOptions}
+      placeholder="Tìm môn để chọn nhiều"
+      emptyLabel="Không tìm thấy môn phù hợp."
+      onChange={(subjects) => patch({ subjects })}
+    />
   );
 
   const classesScopeSelect = (
@@ -423,32 +558,22 @@ export function TemplateFields({
     case 'teacher_pair_not_same_slot':
       return (
         <>
-          <div>
-            <FieldLabel>Giáo viên 1</FieldLabel>
-            <select
-              className={inputClass}
-              value={values.teachers?.[0] ?? ''}
-              onChange={(e) => patch({ teachers: [e.target.value, values.teachers?.[1] ?? ''] })}
-            >
-              <option value="">—</option>
-              {ctx.teachers.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <FieldLabel>Giáo viên 2</FieldLabel>
-            <select
-              className={inputClass}
-              value={values.teachers?.[1] ?? ''}
-              onChange={(e) => patch({ teachers: [values.teachers?.[0] ?? '', e.target.value] })}
-            >
-              <option value="">—</option>
-              {ctx.teachers.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
+          <SearchableSelect
+            label="Giáo viên 1"
+            value={values.teachers?.[0] ?? ''}
+            options={teacherOptions}
+            placeholder="Tìm giáo viên 1"
+            emptyLabel="Không tìm thấy giáo viên phù hợp."
+            onChange={(teacher) => patch({ teachers: [teacher, values.teachers?.[1] ?? ''] })}
+          />
+          <SearchableSelect
+            label="Giáo viên 2"
+            value={values.teachers?.[1] ?? ''}
+            options={teacherOptions}
+            placeholder="Tìm giáo viên 2"
+            emptyLabel="Không tìm thấy giáo viên phù hợp."
+            onChange={(teacher) => patch({ teachers: [values.teachers?.[0] ?? '', teacher] })}
+          />
         </>
       );
     case 'teacher_homeroom_first_period':
@@ -570,6 +695,7 @@ function IfThenFields({
 }) {
   const cond = values.ifThenCondition;
   const thenList = values.ifThenThen ?? [];
+  const teacherOptions = ctx.teachers.map((teacher) => ({ value: teacher, label: teacher }));
 
   const updateCond = (p: Partial<{ teacher: string; day: string; period: number; op: string }>) => {
     const current = cond ?? { op: 'teacher_teaches_on_day' as const, teacher: '', day: '' };
@@ -595,19 +721,14 @@ function IfThenFields({
   return (
     <div className="space-y-3">
       <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Điều kiện (Nếu)</p>
-      <div>
-        <FieldLabel>Giáo viên</FieldLabel>
-        <select
-          className={inputClass}
-          value={cond?.teacher ?? ''}
-          onChange={(e) => updateCond({ teacher: e.target.value })}
-        >
-          <option value="">— chọn —</option>
-          {ctx.teachers.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
-      </div>
+      <SearchableSelect
+        label="Giáo viên"
+        value={cond?.teacher ?? ''}
+        options={teacherOptions}
+        placeholder="Tìm giáo viên"
+        emptyLabel="Không tìm thấy giáo viên phù hợp."
+        onChange={(teacher) => updateCond({ teacher })}
+      />
       <div>
         <FieldLabel>Có dạy vào ngày</FieldLabel>
         <select
@@ -673,19 +794,14 @@ function IfThenFields({
             </div>
             {item.kind !== 'pair_not_same_slot' ? (
               <>
-                <div>
-                  <FieldLabel>Giáo viên</FieldLabel>
-                  <select
-                    className={inputClass}
-                    value={typeof tp.teacher === 'string' ? tp.teacher : ''}
-                    onChange={(e) => updateThen(idx, { teacher: e.target.value })}
-                  >
-                    <option value="">— chọn —</option>
-                    {ctx.teachers.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                </div>
+                <SearchableSelect
+                  label="Giáo viên"
+                  value={typeof tp.teacher === 'string' ? tp.teacher : ''}
+                  options={teacherOptions}
+                  placeholder="Tìm giáo viên"
+                  emptyLabel="Không tìm thấy giáo viên phù hợp."
+                  onChange={(teacher) => updateThen(idx, { teacher })}
+                />
                 {item.kind !== 'teacher_no_gaps' && (
                   <>
                     <div>
@@ -744,6 +860,14 @@ function GenericFields({
   values: ConstraintFormValues;
   patch: (p: Partial<ConstraintFormValues>) => void;
 }) {
+  const teacherOptions = ctx.teachers.map((teacher) => ({ value: teacher, label: teacher }));
+  const subjectOptions = ctx.subjects.map((subject) => ({ value: subject, label: subject }));
+  const classOptions = ctx.classes.map((className) => ({ value: className, label: className }));
+  const assignmentOptions = (ctx.assignments ?? []).map((assignment) => ({
+    value: assignment.id,
+    label: assignment.label,
+  }));
+
   return (
     <div className="space-y-2">
       <p className="text-[10px] text-white/30">Form nâng cao (tự động)</p>
@@ -751,79 +875,96 @@ function GenericFields({
         switch (field) {
           case 'teacher':
             return (
-              <div key={field}>
-                <FieldLabel>Giáo viên</FieldLabel>
-                <select className={inputClass} value={values.teacher ?? ''} onChange={(e) => patch({ teacher: e.target.value })}>
-                  <option value="">— chọn —</option>
-                  {ctx.teachers.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
+              <SearchableSelect
+                key={field}
+                label="Giáo viên"
+                value={values.teacher ?? ''}
+                options={teacherOptions}
+                placeholder="Tìm giáo viên"
+                emptyLabel="Không tìm thấy giáo viên phù hợp."
+                onChange={(teacher) => patch({ teacher })}
+              />
             );
           case 'teachers':
             return (
               <div key={field} className="space-y-1">
-                <FieldLabel>Hai giáo viên</FieldLabel>
-                <select className={inputClass} value={values.teachers?.[0] ?? ''} onChange={(e) => patch({ teachers: [e.target.value, values.teachers?.[1] ?? ''] })}>
-                  <option value="">GV 1 —</option>
-                  {ctx.teachers.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <select className={inputClass} value={values.teachers?.[1] ?? ''} onChange={(e) => patch({ teachers: [values.teachers?.[0] ?? '', e.target.value] })}>
-                  <option value="">GV 2 —</option>
-                  {ctx.teachers.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <SearchableSelect
+                  label="Giáo viên 1"
+                  value={values.teachers?.[0] ?? ''}
+                  options={teacherOptions}
+                  placeholder="Tìm giáo viên 1"
+                  emptyLabel="Không tìm thấy giáo viên phù hợp."
+                  onChange={(teacher) => patch({ teachers: [teacher, values.teachers?.[1] ?? ''] })}
+                />
+                <SearchableSelect
+                  label="Giáo viên 2"
+                  value={values.teachers?.[1] ?? ''}
+                  options={teacherOptions}
+                  placeholder="Tìm giáo viên 2"
+                  emptyLabel="Không tìm thấy giáo viên phù hợp."
+                  onChange={(teacher) => patch({ teachers: [values.teachers?.[0] ?? '', teacher] })}
+                />
               </div>
             );
           case 'subject':
             return (
-              <div key={field}>
-                <FieldLabel>Môn</FieldLabel>
-                <select className={inputClass} value={values.subject ?? ''} onChange={(e) => patch({ subject: e.target.value })}>
-                  <option value="">— chọn —</option>
-                  {ctx.subjects.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+              <SearchableSelect
+                key={field}
+                label="Môn"
+                value={values.subject ?? ''}
+                options={subjectOptions}
+                placeholder="Tìm môn"
+                emptyLabel="Không tìm thấy môn phù hợp."
+                onChange={(subject) => patch({ subject: subject || undefined })}
+              />
             );
           case 'subjectA':
             return (
-              <div key={field}>
-                <FieldLabel>Môn A</FieldLabel>
-                <select className={inputClass} value={values.subjectA ?? ''} onChange={(e) => patch({ subjectA: e.target.value })}>
-                  <option value="">— chọn —</option>
-                  {ctx.subjects.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+              <SearchableSelect
+                key={field}
+                label="Môn A"
+                value={values.subjectA ?? ''}
+                options={subjectOptions}
+                placeholder="Tìm môn A"
+                emptyLabel="Không tìm thấy môn phù hợp."
+                onChange={(subjectA) => patch({ subjectA })}
+              />
             );
           case 'subjectB':
             return (
-              <div key={field}>
-                <FieldLabel>Môn B</FieldLabel>
-                <select className={inputClass} value={values.subjectB ?? ''} onChange={(e) => patch({ subjectB: e.target.value })}>
-                  <option value="">— chọn —</option>
-                  {ctx.subjects.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+              <SearchableSelect
+                key={field}
+                label="Môn B"
+                value={values.subjectB ?? ''}
+                options={subjectOptions}
+                placeholder="Tìm môn B"
+                emptyLabel="Không tìm thấy môn phù hợp."
+                onChange={(subjectB) => patch({ subjectB })}
+              />
             );
           case 'subjects':
             return (
-              <div key={field}>
-                <FieldLabel>Danh sách môn</FieldLabel>
-                <input
-                  className={inputClass}
-                  value={(values.subjects ?? []).join(', ')}
-                  onChange={(e) => patch({ subjects: e.target.value.split(/[,;]/u).map((s) => s.trim()).filter(Boolean) })}
-                  placeholder="Toán, Văn, Anh"
-                />
-              </div>
+              <SearchableMultiSelect
+                key={field}
+                label="Danh sách môn"
+                values={values.subjects ?? []}
+                options={subjectOptions}
+                placeholder="Tìm môn để chọn nhiều"
+                emptyLabel="Không tìm thấy môn phù hợp."
+                onChange={(subjects) => patch({ subjects })}
+              />
             );
           case 'class':
             return (
-              <div key={field}>
-                <FieldLabel>Lớp</FieldLabel>
-                <select className={inputClass} value={values.className ?? ''} onChange={(e) => patch({ className: e.target.value })}>
-                  <option value="">— chọn —</option>
-                  {ctx.classes.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+              <SearchableSelect
+                key={field}
+                label="Lớp"
+                value={values.className ?? ''}
+                options={classOptions}
+                placeholder="Tìm lớp"
+                emptyLabel="Không tìm thấy lớp phù hợp."
+                onChange={(className) => patch({ className })}
+              />
             );
           case 'day':
             return (
@@ -880,25 +1021,27 @@ function GenericFields({
             );
           case 'assignmentId':
             return (
-              <div key={field}>
-                <FieldLabel>Phân công</FieldLabel>
-                <select className={inputClass} value={values.assignmentId ?? ''} onChange={(e) => patch({ assignmentId: e.target.value })}>
-                  <option value="">— chọn —</option>
-                  {(ctx.assignments ?? []).map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-                </select>
-              </div>
+              <SearchableSelect
+                key={field}
+                label="Phân công"
+                value={values.assignmentId ?? ''}
+                options={assignmentOptions}
+                placeholder="Tìm giáo viên, môn hoặc lớp"
+                emptyLabel="Không tìm thấy phân công phù hợp."
+                onChange={(assignmentId) => patch({ assignmentId })}
+              />
             );
           case 'assignmentIds':
             return (
-              <div key={field}>
-                <FieldLabel>Phân công (chọn nhiều)</FieldLabel>
-                <input
-                  className={inputClass}
-                  value={(values.assignmentIds ?? []).join(', ')}
-                  onChange={(e) => patch({ assignmentIds: e.target.value.split(/[,;]/u).map((s) => s.trim()).filter(Boolean) })}
-                  placeholder="ID phân công 1, ID phân công 2"
-                />
-              </div>
+              <SearchableMultiSelect
+                key={field}
+                label="Phân công (chọn nhiều)"
+                values={values.assignmentIds ?? []}
+                options={assignmentOptions}
+                placeholder="Tìm phân công để chọn nhiều"
+                emptyLabel="Không tìm thấy phân công phù hợp."
+                onChange={(assignmentIds) => patch({ assignmentIds })}
+              />
             );
           default: {
             // Numeric or text fallback
