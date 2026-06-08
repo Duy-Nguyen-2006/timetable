@@ -43,7 +43,10 @@ export function getAvailableCpuCount(): number {
   if (typeof navigator !== 'undefined' && Number(navigator.hardwareConcurrency) > 0) {
     return Number(navigator.hardwareConcurrency);
   }
-  return os.cpus().length || 2;
+  // Browser bundles polyfilled by Next.js handle `node:os` as a noop
+  // (returns undefined), so the fallback below only runs in real Node
+  // (CLI/test scripts).
+  return (os?.cpus?.() ?? []).length || 2;
 }
 
 export function resolveSolverRuntime(config: LocalAgentConfig): SolverRuntimeConfig {
