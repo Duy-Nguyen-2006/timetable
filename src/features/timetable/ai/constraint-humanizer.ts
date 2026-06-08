@@ -231,8 +231,17 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
       }).join('; ');
       return `Nếu ${condText} thì ${thenDesc}${soft(spec)}.`;
     }
-    case 'custom_dsl':
+    case 'custom_dsl': {
+      // If LLM emitted IR form (expr present) or has explain text, the constraint
+      // IS understood and encoded — show a friendly description, not "needs review".
+      if (spec.params.expr || spec.params.explain) {
+        const explain = typeof spec.params.explain === 'string' && spec.params.explain.trim()
+          ? spec.params.explain
+          : spec.original;
+        return `${prefix}${explain}${soft(spec)}.`;
+      }
       return `Ràng buộc đặc biệt (cần kiểm tra lại): «${spec.original}»${soft(spec)}.`;
+    }
     default:
       return `${prefix}Ràng buộc «${spec.original}» — chưa có mô tả tiếng Việt chi tiết; dùng «Sửa cách hiểu» hoặc «Chọn mẫu»${soft(spec)}.`;
   }
