@@ -12,6 +12,20 @@ type ExecutePayload = {
   solverWorkers?: number;
 };
 
+function hasPartialSolverResult(
+  value: unknown,
+): value is { status: string; schedule: unknown[] } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'status' in value &&
+    typeof (value as Record<string, unknown>).status === 'string' &&
+    'schedule' in value &&
+    Array.isArray((value as Record<string, unknown>).schedule) &&
+    ((value as Record<string, unknown>).schedule as unknown[]).length > 0
+  );
+}
+
 function digestError(raw: string, maxLen = 800): string {
   const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
   const focused = lines.slice(-12).join('\n');
@@ -114,19 +128,12 @@ function runExecutor(code: string, input: unknown, timeoutMs: number, solverWork
           }
         } catch { /* ignore */ }
         cleanupJobDir();
-        if (
-          partialResult &&
-          typeof partialResult === 'object' &&
-          (partialResult as any).status &&
-          ['optimal', 'feasible'].includes(String((partialResult as any).status).toLowerCase()) &&
-          Array.isArray((partialResult as any).schedule) &&
-          (partialResult as any).schedule.length > 0
-        ) {
+        if (hasPartialSolverResult(partialResult)) {
           const artifactDir = path.join(os.tmpdir(), 'tack-ai-results');
           fs.mkdirSync(artifactDir, { recursive: true });
           const artifactPath = path.join(artifactDir, `result_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.json`);
           fs.writeFileSync(artifactPath, JSON.stringify(partialResult), 'utf8');
-          const partialStatus = String((partialResult as any).status).toLowerCase();
+          const partialStatus = partialResult.status.toLowerCase();
           resolve({
             phase: 'run',
             ok: true,

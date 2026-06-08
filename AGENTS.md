@@ -64,15 +64,14 @@ npx @sonar/scan \
 - Run GitNexus impact before editing source hot paths such as `translator` or `deterministic-validator`.
 - Never commit Sonar tokens, admin passwords, or `.scannerwork/`.
 - Stop the local server with `docker stop sonarqube-timetable` when done.
-  GNU nano 9.0                                                                                 Backup.md                                                                                 Modified
 - Rule : Luôn có câu "Sax báo cáo" ở cuối mỗi câu trả lời
 - Luôn push lên git sau mỗi chỉnh sửa
 - Đây là desktop app, chạy trên máy users, vậy nên vấn đề bảo mật có thể tạm thời bỏ qua, nếu người dùng yêu cầu suggest chỉnh sửa / nâng cấp, chỉ cần quan tâm tới những thứ như hiệu năng, maintainability, cleanability,..., tạm thời bỏ qua security
-
+- Always run after any code change : npx gitnexus analyze 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **timetable** (4773 symbols, 7478 relationships, 203 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **timetable** (4930 symbols, 7819 relationships, 220 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

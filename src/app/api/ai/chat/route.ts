@@ -300,10 +300,14 @@ export async function POST(request: Request) {
 
     // Diagnostics (safe, no apiKey)
     const baseHost = (() => { try { return new URL(baseURL).host; } catch { return 'unknown'; } })();
-    const usedResponseFormat = Boolean(chatRequest.requestBody.response_format || (chatRequest.requestBody as any).text?.format);
-    const maxTokensUsed = Number(
-      (chatRequest.requestBody as any).max_tokens ?? (chatRequest.requestBody as any).max_output_tokens ?? 4000
-    );
+    const reqBody = chatRequest.requestBody as {
+      response_format?: Record<string, unknown>;
+      max_tokens?: number;
+      max_output_tokens?: number;
+      text?: { format?: Record<string, unknown> };
+    };
+    const usedResponseFormat = Boolean(reqBody.response_format || reqBody.text?.format);
+    const maxTokensUsed = Number(reqBody.max_tokens ?? reqBody.max_output_tokens ?? 4000);
 
     let response = await fetchWithRetry(chatRequest.url, {
       method: 'POST',

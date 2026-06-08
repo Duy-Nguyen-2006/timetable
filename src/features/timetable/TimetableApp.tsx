@@ -105,6 +105,9 @@ import {
   renderBulkAssignmentErrorLine,
 } from './assignment-helpers'
 
+type SolvedCellEntry = { className: string; subject: string; teacher: string }
+type SolvedCell = { slotId: string; entries: SolvedCellEntry[] }
+
 export default function App({ onBackToLanding, quickDatasetText }: TimetableAppProps) {
   const [page, setPage] = useState('select')
   const [selectedDays, setSelectedDays] = useState(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
@@ -190,7 +193,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
   const pushSolverRuntimeMode = (mode: AIProviderConfig['solverRuntimeMode']) => {
     try {
-      ;(window as any).electron?.solverRuntime?.setMode?.(mode || 'bundled')
+      window.electron?.solverRuntime?.setMode?.(mode || 'bundled')
     } catch {
       /* renderer may not have the bridge in dev/web mode */
     }
@@ -205,8 +208,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
         if (config) {
           setAiProvider(config)
           pushSolverRuntimeMode(config.solverRuntimeMode)
-          const hasSecureBridge = Boolean((window as any).electron?.secureStore?.isAvailable)
-          const secureAvailable = hasSecureBridge ? await (window as any).electron.secureStore.isAvailable() : true
+          const hasSecureBridge = Boolean(window.electron?.secureStore?.isAvailable)
+          const secureAvailable = hasSecureBridge ? await window.electron!.secureStore.isAvailable() : true
           const localFallback = typeof window !== 'undefined' && Boolean(window.localStorage.getItem('tack_ai_provider_config'))
           if (!secureAvailable || localFallback) {
             setSecureStorageNotice('API key có thể đang được lưu không mã hóa vì máy/renderer chưa hỗ trợ secure storage. Hãy cân nhắc không lưu key trên máy này.')
@@ -225,7 +228,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }, [])
 
   useEffect(() => {
-    const unsubscribe = (window as any).electron?.solverRuntime?.onNotice?.(
+    const unsubscribe = window.electron?.solverRuntime?.onNotice?.(
       (payload: { level: string; message: string }) => {
         if (!payload?.message) return
         setSolverRuntimeNotice(payload.message)
@@ -456,14 +459,9 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }, [deletedPeriods, selectedSpreadsheetDays, timetableRows])
 
   const solvedCellMap = useMemo(() => {
-    const directCells = Array.isArray((aiResult as any)?.cells) ? (aiResult as any).cells : []
-    if (directCells.length > 0) {
-      return new Map(directCells.map((cell) => [cell.slotId, cell]))
-    }
-
-    const scheduleRows = Array.isArray((aiResult as any)?.schedule) ? (aiResult as any).schedule : []
+    const scheduleRows = aiResult?.schedule ?? []
     if (scheduleRows.length === 0) {
-      return new Map()
+      return new Map<string, SolvedCell>()
     }
 
     const dayAliasToId = new Map<string, string>()
@@ -487,10 +485,10 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
     const bySlot = new Map<string, { slotId: string; entries: Array<{ className: string; subject: string; teacher: string }> }>()
 
-    scheduleRows.forEach((row: any) => {
+    scheduleRows.forEach((row) => {
       const dayRaw = String(row?.day ?? '').trim().toLowerCase()
       const dayId = dayAliasToId.get(dayRaw)
-      const className = String(row?.class ?? row?.className ?? '').trim()
+      const className = String(row.class ?? '').trim()
       const subject = String(row?.subject ?? '').trim()
       const teacher = String(row?.teacher ?? '').trim()
       const periodRaw = Number(row?.period)
@@ -935,10 +933,12 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
                 setAgentStatus(event.message)
                 setAgentStep(event.type === 'phase' ? toProgressStep(event.phase) : 'thinking')
               }
+              const eventPhase = event.type === 'phase' ? event.phase : 'coding'
+              const eventTitle = 'message' in event ? (event as { message: string }).message : event.type
               pushTimelineEvent({
                 id: crypto.randomUUID(),
-                phase: (event as any).phase || 'coding',
-                title: (event as any).message || event.type,
+                phase: eventPhase,
+                title: eventTitle,
                 detail: JSON.stringify(event).slice(0, 200),
                 status: 'active',
                 timestamp: new Date().toISOString(),
@@ -949,7 +949,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
         )
 
         if (agentResult && agentResult.success && agentResult.finalResult) {
-          setAiResult(agentResult.finalResult as any);
+          setAiResult(agentResult.finalResult);
           writeCachedRun(inputDigest, agentResult.finalResult as TimetableSolveResult);
           setAgentStatus("Hoàn thành!");
           setAgentStep("idle");
@@ -994,7 +994,7 @@ const handleDownloadExcel = useCallback(async () => {
 
           resultTableClassColumns.forEach((className) => {
             const entry = className
-              ? (solvedCellMap.get(cellKey) as any)?.entries?.find((item) => item.className === className)
+              ? solvedCellMap.get(cellKey)?.entries?.find((item) => item.className === className)
               : null
             dataRow.push(entry?.subject ?? '')
             dataRow.push(entry?.teacher ?? '')
@@ -2317,7 +2317,7 @@ const handleDownloadExcel = useCallback(async () => {
                                               {row.period}
                                             </td>
                                             {resultTableClassColumns.map((className, classIndex) => {
-                                              const entry = className ? (solvedCellMap.get(cellKey) as any)?.entries?.find((item) => item.className === className) : null
+                                              const entry = className ? solvedCellMap.get(cellKey)?.entries?.find((item) => item.className === className) : null
 
                                               return (
                                                 <Fragment key={`${cellKey}-${classIndex}-${className || 'blank'}`}>

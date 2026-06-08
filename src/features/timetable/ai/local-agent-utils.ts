@@ -1,24 +1,13 @@
 import os from 'node:os';
 import type { TokenBudgetGuard } from './budget-guard';
 import type { ConstraintSpec } from './constraint-spec';
-import type { LocalAgentConfig, LocalAgentFinalResult } from './types';
+import type { AgentEvent, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { MAX_RUNTIME_REPAIR_ROUNDS } from './local-agent-limits';
 
 export type SolverRuntimeConfig = { timeoutMs: number; workers: number };
 
-export function emit(
-  config: LocalAgentConfig,
-  event:
-    | { type: 'status'; message: string; iteration: number; maxIterations?: number }
-    | { type: 'phase'; phase: 'thinking' | 'translator' | 'planner' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'; message: string; iteration: number }
-    | { type: 'stage_started'; stage: string; attempt?: number; message: string }
-    | { type: 'stage_completed'; stage: string; attempt?: number; message: string }
-    | { type: 'violations_found'; count: number; sample?: string[] }
-    | { type: 'execution_result'; attempt: number; result: any }
-    | { type: 'final_result'; result: LocalAgentFinalResult }
-    | { type: 'error'; message: string; fatal?: boolean }
-) {
-  config.onEvent?.(event as any);
+export function emit(config: LocalAgentConfig, event: AgentEvent) {
+  config.onEvent?.(event);
 }
 
 export function pickStageConfig(

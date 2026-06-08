@@ -180,7 +180,7 @@ function pythonCheckError(result: PythonCheckResult): string | undefined {
 
 function pythonCheckBridge(): PythonCheckBridge | null {
   if (typeof window === 'undefined') return null
-  return ((window as any).electron?.python ?? null) as PythonCheckBridge | null
+  return (window.electron?.python ?? null) as PythonCheckBridge | null
 }
 
 export async function syntaxCheckPython(code: string): Promise<{ ok: boolean; error?: string }> {

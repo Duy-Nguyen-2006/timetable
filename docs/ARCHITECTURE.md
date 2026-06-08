@@ -1,133 +1,106 @@
 # Architecture
 
-No application stack is selected yet.
+## Stack
 
-No application code exists yet. This document defines generic architecture
-questions and boundary rules that future implementation should adapt after a
-user-provided spec and stack decision exist.
+| Surface | Technology |
+|---------|-----------|
+| Desktop shell | Electron (main process in `electron/main.mjs`) |
+| Web framework | Next.js 16 (App Router) |
+| UI | React 19, Tailwind CSS 4, Radix UI primitives |
+| State | Zustand (client), React Query (server/cache) |
+| Validation | Zod 4 |
+| AI pipeline | Local agent loop (translator → planner → coder → repair) calling LLM providers via `/api/ai/chat` |
+| Solver | Python 3 + OR-Tools CP-SAT, executed via child process or Docker |
+| Packaging | electron-builder (AppImage/deb/dmg/nsis) |
 
-## Discovery Before Shape
-
-Before proposing implementation shape, identify:
-
-- Product surfaces: browser, mobile, desktop, CLI, API, worker, or service.
-- Runtime stack: language, framework, database, queues, providers, and hosting.
-- Core domains: the product concepts that deserve stable names and contracts.
-- Boundary inputs: user input, API requests, webhooks, jobs, files, credentials,
-  provider payloads, and environment configuration.
-- Validation ladder: the smallest checks that can prove the selected stack.
-
-Record stack choices in `docs/decisions/` when they meaningfully constrain
-future work.
-
-## Default Layering
+## Actual Structure
 
 ```text
-domain
-  <- application
-      <- infrastructure
-          <- interface
-              <- app surfaces
+src/
+  app/
+    api/ai/            # Next.js API routes (chat, parse-constraints, solve, python-execute)
+    globals.css
+    layout.tsx
+    page.tsx
+
+  features/timetable/
+    ai/                # Agent pipeline: translator, planner, coder, repair, deterministic-validator
+    constraints/       # Constraint UI components, form schema, review panel
+    components/        # Shared timetable UI (fields, setup pages, preview)
+    TimetableApp.tsx   # Main application shell
+    types.ts           # Domain types
+    constants.ts       # Business constants
+
+  components/ui/       # Generic UI primitives (shadcn-style)
+  hooks/               # Shared React hooks
+  lib/                 # Provider resolution, constraint parser, utilities
+  types/               # Global type declarations (Electron bridge)
+
+electron/
+  main.mjs             # Electron main process (IPC, solver runtime, secure store)
+  preload.cjs          # Context bridge (exposes window.electron)
+  solver-runtime.mjs   # Solver process management
+
+python/
+  code_executor.py     # Solver entry point (OR-Tools CP-SAT)
+  ir_eval.py           # Constraint IR evaluation engine
+  ir_schema.py         # Constraint IR schema + validation
+  validator_engine.py  # Schedule validation engine
+
+scripts/               # Build, test, and CI tooling
 ```
 
-## Candidate Structure
+## Layering
+
+The codebase uses feature-based layering rather than classical DDD layers:
 
 ```text
-app/
-  domain/
-    entities/
-    value-objects/
-    repositories/
-    services/
-
-  application/
-    commands/
-    queries/
-    handlers/
-
-  infrastructure/
-    database/
-    logging/
-    notifications/
-
-  interface/
-    controllers/
-    dto/
-    presenters/
-    routes/
-    middlewares/
-
-surfaces/
-  browser/
-  mobile/
-  desktop/
-  cli/
+src/lib/                 # Shared utilities, provider resolution, constraint parser
+src/features/timetable/
+  ai/                    # Core domain logic (agent pipeline, validation, translation)
+  constraints/           # Application layer (UI, form schema, workspace storage)
+  components/            # Presentation layer
+src/app/api/             # Interface layer (HTTP routes, input validation)
+electron/                # Infrastructure layer (IPC, process management)
+python/                  # External solver (separate process, communicates via JSON)
 ```
-
-This is a thinking template, not a scaffold. Create real folders only when a
-story enters implementation and the selected stack needs them.
 
 ## Dependency Rule
 
-Inner layers must not depend on outer layers.
-
-| Layer | May depend on | Must not depend on |
-| --- | --- | --- |
-| domain | nothing project-external except tiny pure utilities | framework, database, UI, provider, process/env |
-| application | domain | framework, UI, provider, database concrete clients |
-| infrastructure | domain, application | interface controllers or UI |
-| interface | all backend layers | UI state or platform shell assumptions |
-| app surfaces | API contracts and app-facing clients | domain internals directly |
+- `src/lib/` must not import from `src/features/` or `src/app/`.
+- `src/features/timetable/ai/` may import from `src/lib/` but not from `src/app/` or `electron/`.
+- `src/features/timetable/constraints/` may import from `ai/` and `lib/`.
+- `src/app/api/` may import from `features/` and `lib/` (route handlers delegate to domain).
+- `electron/` communicates with the web layer only via IPC (preload bridge).
+- `python/` is a standalone process; it receives JSON input and returns JSON output.
 
 ## Parse-First Boundary Rule
 
 Unknown data must be parsed at boundaries before it enters inner code.
 
-Boundaries include:
+Boundaries in this project:
 
-- HTTP request bodies, params, and query strings.
-- Session payloads and identity claims.
-- Environment variables.
-- Database rows returned from external clients.
-- Platform shell payloads.
-- Deep links, tokens, and signed URLs.
-- Provider webhooks, events, and async payloads.
+- Next.js API route handlers validate request bodies with manual checks before passing to domain.
+- The `constraint-parser.ts` module parses raw Vietnamese text into typed constraint objects.
+- The `translator.ts` module parses LLM JSON output into `ConstraintSpec[]` via Zod schemas.
+- The Python executor receives JSON input and validates it against `ir_schema.py`.
 
 Target flow:
 
 ```text
-unknown input
-  -> parser
-  -> typed DTO or command
-  -> application use case
-  -> domain object/value object
+raw user input
+  -> constraint-parser (Vietnamese text → structured constraints)
+  -> translator (LLM → ConstraintSpec[])
+  -> planner (LLM → Plan)
+  -> coder (LLM → Python code)
+  -> python-bridge (code → ExecutionResult)
+  -> deterministic-validator (schedule → validation report)
 ```
 
-Inner layers should work with meaningful product types such as `UserId`,
-`AccountId`, `WorkspaceId`, `Role`, `DateRange`, or domain-specific IDs,
-rather than repeatedly validating raw strings.
+## Observability
 
-## Command/Query Boundary
+This is a desktop app running on user machines. There is no server-side logging infrastructure.
 
-If the product has both reads and writes, keep command/query separation clear at
-the code level even when the storage layer is simple:
-
-- Commands mutate state and own audit side effects.
-- Queries read state and format for consumers.
-- Shared domain rules live in domain/application, not controllers.
-
-## Observability Contract
-
-The future server should emit one canonical JSON log line per request with:
-
-- timestamp
-- level
-- request_id
-- user_id when known
-- action
-- duration_ms
-- status_code
-- message
-
-Audit logs are product records. Application logs are operational records. Do not
-use one as a substitute for the other.
+Agent lifecycle events are emitted via the `onEvent` callback and displayed in the UI timeline.
+Execution diagnostics (solver status, violations, errors) are captured in `LocalAgentFinalResult`
+and shown in the diagnostics panel and Excel export.
