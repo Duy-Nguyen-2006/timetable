@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, Check, Loader2, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check } from 'lucide-react';
 
 import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
 import type { AgentInputPayload } from '../ai/types';
-import { disabledPrimaryButtonClass, ghostButtonClass, iconShellClass, panelClass } from '../constants';
+import { iconShellClass, panelClass } from '../constants';
 import type { ConstraintItem } from '../types';
 import { ConstraintDraftCard } from './ConstraintDraftCard';
 import { ConstraintEditDialog } from './ConstraintEditDialog';
@@ -19,12 +19,10 @@ type ConstraintReviewPanelProps = {
   confirmed: ConfirmedConstraint[];
   newConstraintIds: Set<string>;
   agentInput: AgentInputPayload;
-  parseLoading: boolean;
   reparseLoading?: boolean;
   parseError: string | null;
   canSolve: boolean;
   solveBlockHint: string | null;
-  onParse: () => void;
   onConfirmDraft: (rawConstraintId: string) => void;
   onIgnoreDraft: (rawConstraintId: string) => void;
   onDeleteConstraint: (id: string) => void;
@@ -38,13 +36,11 @@ export function ConstraintReviewPanel({
   drafts,
   confirmed,
   newConstraintIds,
-  parseLoading,
   reparseLoading,
   parseError,
   canSolve,
   solveBlockHint,
   agentInput,
-  onParse,
   onConfirmDraft,
   onIgnoreDraft,
   onDeleteConstraint,
@@ -77,24 +73,6 @@ export function ConstraintReviewPanel({
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onParse}
-          disabled={parseLoading || constraints.length === 0}
-          className={`${ghostButtonClass} ${disabledPrimaryButtonClass}`}
-        >
-          {parseLoading ? (
-            <>
-              <Loader2 size={14} className="animate-spin" />
-              Đang phân tích...
-            </>
-          ) : (
-            <>
-              <Sparkles size={14} strokeWidth={1.5} />
-              Phân tích ràng buộc
-            </>
-          )}
-        </button>
       </div>
 
       {parseError ? (

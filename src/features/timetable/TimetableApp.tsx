@@ -141,7 +141,6 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const {
     constraintDrafts,
     confirmedConstraints,
-    parseLoading,
     reparseLoading,
     parseError,
     invalidateReview,
@@ -153,7 +152,6 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     markConstraintsAdded,
     removeConstraintReview,
     newConstraintIds,
-    runParse,
     preflight: constraintPreflight,
     hydrateFromWorkspace,
   } = useConstraintReview()
@@ -1987,17 +1985,9 @@ const handleDownloadExcel = useCallback(async () => {
                       confirmed={confirmedConstraints}
                       newConstraintIds={newConstraintIds}
                       agentInput={constraintAgentInput}
-                      parseLoading={parseLoading}
                       parseError={parseError}
                       canSolve={canProceedToSolve}
                       solveBlockHint={solveBlockHint}
-                      onParse={() => {
-                        if (!aiProvider) {
-                          setShowSettingsModal(true)
-                          return
-                        }
-                        void runParse(constraintAgentInput, constraintList, aiProvider)
-                      }}
                       onConfirmDraft={(rawId) => confirmDraft(rawId, constraintDrafts)}
                       onIgnoreDraft={ignoreDraft}
                       onDeleteConstraint={deleteConstraint}

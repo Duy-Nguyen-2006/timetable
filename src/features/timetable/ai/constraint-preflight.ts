@@ -79,7 +79,7 @@ export function assertSolvableConstraintState(
   if (unparsedOnly.length > 0) {
     blockReasons.push('constraint_unparsed');
     messages.push(
-      `Còn ${unparsedOnly.length} ràng buộc chưa phân tích được. Bấm «Phân tích ràng buộc».`
+      `Còn ${unparsedOnly.length} ràng buộc chưa có bản duyệt. Chọn mẫu hoặc tạo lại bằng Custom.`
     );
   }
 

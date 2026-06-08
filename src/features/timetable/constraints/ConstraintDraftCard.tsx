@@ -90,7 +90,7 @@ export function ConstraintDraftCard({
       {isNew && !draft ? (
         <div className="mt-2 flex items-center gap-2 rounded border border-sky-500/25 bg-sky-500/[0.06] px-3 py-2 text-xs text-sky-300/90">
           <AlertCircle size={14} className="shrink-0" />
-          <span>Ràng buộc mới thêm vào — bấm &quot;Phân tích ràng buộc&quot; để duyệt.</span>
+          <span>Ràng buộc mới thêm vào — dùng wizard hoặc chuẩn hóa Custom để có bản duyệt.</span>
         </div>
       ) : null}
 
@@ -128,7 +128,7 @@ export function ConstraintDraftCard({
           )}
         </div>
       ) : !isNew ? (
-        <p className="mt-2 text-xs text-white/35">Chưa phân tích — bấm &quot;Phân tích ràng buộc&quot;.</p>
+        <p className="mt-2 text-xs text-white/35">Chưa có bản duyệt — chọn mẫu hoặc tạo lại bằng Custom.</p>
       ) : null}
 
       {confirmed && !isNew ? (
