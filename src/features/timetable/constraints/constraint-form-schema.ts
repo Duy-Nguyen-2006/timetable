@@ -81,10 +81,10 @@ export const CONSTRAINT_TEMPLATES: ConstraintTemplateMeta[] = [
   // Toàn trường
   { id: 'subject_flag_ceremony_slot', label: 'Chào cờ / sinh hoạt cố định', group: 'global', defaultSeverity: 'hard', fields: ['day', 'period'], description: 'Cố định slot chào cờ/sinh hoạt' },
   { id: 'global_teacher_utilization_balance', label: 'Cân bằng tải GV (mềm)', group: 'global', defaultSeverity: 'soft', fields: ['tolerance'], description: 'Cân bằng số tiết dạy giữa các giáo viên' },
-  { id: 'pair_not_same_slot', label: 'Hai GV không trùng tiết (global)', group: 'global', defaultSeverity: 'hard', fields: ['assignmentIds'], description: 'Hai phân công không dạy cùng tiết' },
-  { id: 'pair_same_slot', label: 'Hai phân công cùng tiết', group: 'global', defaultSeverity: 'hard', fields: ['assignmentIds'], description: 'Hai phân công phải dạy cùng tiết' },
-  { id: 'mutual_exclusion', label: 'Loại trừ lẫn nhau', group: 'global', defaultSeverity: 'hard', fields: ['assignmentIds'], description: 'Các phân công không được trùng slot' },
-  { id: 'session_limit', label: 'Giới hạn tiết tại slot', group: 'global', defaultSeverity: 'hard', fields: ['day', 'period', 'max'], description: 'Giới hạn số tiết tại một slot cụ thể' },
+  { id: 'pair_not_same_slot', label: 'Hai phân công không trùng tiết', group: 'assignment', defaultSeverity: 'hard', fields: ['assignmentIds'], description: 'Hai phân công không dạy cùng tiết' },
+  { id: 'pair_same_slot', label: 'Hai phân công cùng tiết', group: 'assignment', defaultSeverity: 'hard', fields: ['assignmentIds'], description: 'Hai phân công phải dạy cùng tiết' },
+  { id: 'mutual_exclusion', label: 'Loại trừ lẫn nhau', group: 'assignment', defaultSeverity: 'hard', fields: ['assignmentIds'], description: 'Các phân công không được trùng slot' },
+  { id: 'session_limit', label: 'Giới hạn tiết theo buổi', group: 'assignment', defaultSeverity: 'hard', fields: ['teacher', 'maxPeriods', 'session'], description: 'Giới hạn số tiết giáo viên dạy trong một buổi' },
   { id: 'if_then', label: 'Nếu... thì...', group: 'global', defaultSeverity: 'hard', fields: ['if_then_condition', 'if_then_then'], description: 'Ràng buộc điều kiện: nếu A thì B' },
   { id: 'custom_dsl', label: 'Ràng buộc đặc biệt', group: 'global', defaultSeverity: 'hard', fields: ['pythonPredicate'], description: 'Ràng buộc viết bằng Python' },
 ];
@@ -125,6 +125,8 @@ export type ConstraintFormValues = {
   minConsecutive?: number;
   minGap?: number;
   length?: number;
+  maxPeriods?: number;
+  session?: string;
   slots?: Array<{ day: string; period: number }>;
   sessionIds?: string[];
   pythonPredicate?: string;
@@ -142,6 +144,7 @@ export type FormEntityContext = {
   subjects: string[];
   classes: string[];
   days: Array<{ id: string; label: string }>;
+  sessions: Array<{ id: string; label: string }>;
   maxPeriod: number;
   assignments?: Array<{ id: string; label: string }>;
 };
@@ -292,6 +295,8 @@ export function defaultFormValues(
     maxGaps: 2,
     minConsecutive: 2,
     length: 2,
+    maxPeriods: 3,
+    session: 'morning',
   };
 }
 
@@ -325,6 +330,8 @@ export function specToFormValues(spec: ConstraintSpec): ConstraintFormValues | n
   if (typeof p.maxGaps === 'number') v.maxGaps = p.maxGaps;
   if (typeof p.minConsecutive === 'number') v.minConsecutive = p.minConsecutive;
   if (typeof p.length === 'number') v.length = p.length;
+  if (typeof p.maxPeriods === 'number') v.maxPeriods = p.maxPeriods;
+  if (typeof p.session === 'string') v.session = p.session;
   if (typeof p.min === 'number') v.min = p.min;
   if (typeof p.subjectA === 'string') v.subjectA = p.subjectA;
   if (typeof p.subjectB === 'string') v.subjectB = p.subjectB;
@@ -384,7 +391,7 @@ export function buildContextFromAgentInput(input: AgentInputPayload): FormEntity
     id: a.id,
     label: `${a.teacher.label} - ${a.subject.label} - ${a.class.label}`,
   }));
-  return { teachers, subjects, classes, days: input.days, maxPeriod, assignments };
+  return { teachers, subjects, classes, days: input.days, sessions: input.sessions, maxPeriod, assignments };
 }
 
 export function isFormTemplateKind(kind: ConstraintKind): boolean {

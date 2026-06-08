@@ -2,6 +2,14 @@ import type { AgentInputPayload, LocalAgentFinalResult } from './ai/types'
 import type { constraintTypes } from './constants'
 
 export type { RawConstraintInput, ParsedConstraintDraft, ConfirmedConstraint } from './ai/constraint-review-types'
+export type {
+  BuiltInConstraint,
+  BuiltInConstraintKind,
+  CustomConstraint,
+  TimetableConstraint,
+  TimetableConstraintScope,
+  TimetableConstraintSeverity,
+} from './ai/timetable-constraint-contract'
 
 export type TimetableSolveResult = LocalAgentFinalResult
 export type SolverRequestPayload = Pick<AgentInputPayload, 'constraints'>

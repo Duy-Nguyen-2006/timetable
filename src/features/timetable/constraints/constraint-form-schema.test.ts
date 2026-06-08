@@ -66,3 +66,19 @@ test('applyFormToDraft updates status', () => {
   assert.ok(updated.proposedSpecs.length > 0);
   assert.equal(updated.source, 'manual');
 });
+
+test('formValuesToSpecs session_limit uses assignment-scope params', () => {
+  const ctx = buildContextFromAgentInput(input);
+  const values = {
+    ...defaultFormValues('session_limit', 'required'),
+    teacher: 'Sơn',
+    session: 'morning',
+    maxPeriods: 3,
+  };
+  const specs = formValuesToSpecs('Sơn buổi sáng tối đa 3 tiết', values, ctx);
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'session_limit');
+  assert.equal(specs[0].params.teacher, 'Sơn');
+  assert.equal(specs[0].params.session, 'morning');
+  assert.equal(specs[0].params.maxPeriods, 3);
+});

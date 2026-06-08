@@ -233,6 +233,18 @@ function TemplateFields({
     </div>
   );
 
+  const selectSession = (
+    <div>
+      <FieldLabel>Buổi</FieldLabel>
+      <select className={inputClass} value={values.session ?? ''} onChange={(e) => patch({ session: e.target.value })}>
+        <option value="">— chọn —</option>
+        {ctx.sessions.map((session) => (
+          <option key={session.id} value={session.id}>{session.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+
   const selectSubject = (label?: string) => (
     <div>
       <FieldLabel>{label ?? 'Môn'}</FieldLabel>
@@ -524,7 +536,7 @@ function TemplateFields({
         />
       </div>;
     case 'session_limit':
-      return <>{selectDay()}{numInput('Tiết', 'period')}{numInput('Tối đa tiết', 'max')}</>;
+      return <>{selectTeacher()}{selectSession}{numInput('Số tiết tối đa', 'maxPeriods')}</>;
     case 'if_then':
       return <IfThenFields values={values} ctx={ctx} patch={patch} />;
     case 'custom_dsl':
@@ -890,7 +902,7 @@ function GenericFields({
             );
           default: {
             // Numeric or text fallback
-            const numericFields = ['max', 'min', 'maxPerDay', 'maxConsecutive', 'maxClasses', 'maxHeavy', 'maxHeavyInSession', 'maxDays', 'minDays', 'minPerDay', 'minGap', 'maxGaps', 'minConsecutive', 'length', 'tolerance', 'count'];
+            const numericFields = ['max', 'min', 'maxPerDay', 'maxConsecutive', 'maxClasses', 'maxHeavy', 'maxHeavyInSession', 'maxDays', 'minDays', 'minPerDay', 'minGap', 'maxGaps', 'minConsecutive', 'length', 'tolerance', 'count', 'maxPeriods'];
             if (numericFields.includes(field)) {
               return (
                 <div key={field}>

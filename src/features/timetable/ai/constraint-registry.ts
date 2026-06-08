@@ -1,11 +1,29 @@
 import type { ConstraintKind } from './constraint-spec';
 
+export type BuiltInConstraintScope = 'teacher' | 'subject' | 'class' | 'assignment' | 'global';
+export type ConstraintParamSchema = {
+  required: readonly string[];
+  optional?: readonly string[];
+};
+
 export interface ConstraintMeta {
   kind: ConstraintKind;
   label: string;
-  group: 'teacher' | 'subject' | 'class' | 'assignment' | 'global';
+  group: BuiltInConstraintScope;
   hasChecker: boolean;
   requiredParams: string[];
+}
+
+export interface BuiltInConstraintDefinition {
+  kind: Exclude<ConstraintKind, 'custom_dsl'>;
+  scope: BuiltInConstraintScope;
+  labelVi: string;
+  descriptionVi: string;
+  exampleVi: string;
+  severityAllowed: Array<'hard' | 'soft'>;
+  paramsSchema: ConstraintParamSchema;
+  hasSolverEncoder: boolean;
+  hasValidator: boolean;
 }
 
 export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
@@ -75,10 +93,10 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'assignment_same_day', label: 'Assignment same day', group: 'assignment', hasChecker: true, requiredParams: ['assignmentIds'] },
   { kind: 'assignment_not_same_day', label: 'Assignment not same day', group: 'assignment', hasChecker: true, requiredParams: ['assignmentIds'] },
   { kind: 'if_then', label: 'If-then implication', group: 'global', hasChecker: true, requiredParams: ['if', 'then'] },
-  { kind: 'pair_not_same_slot', label: 'Pair not same slot', group: 'global', hasChecker: true, requiredParams: ['assignmentIds'] },
-  { kind: 'pair_same_slot', label: 'Pair same slot', group: 'global', hasChecker: true, requiredParams: ['assignmentIds'] },
-  { kind: 'mutual_exclusion', label: 'Mutual exclusion', group: 'global', hasChecker: true, requiredParams: ['assignmentIds'] },
-  { kind: 'session_limit', label: 'Session limit', group: 'global', hasChecker: true, requiredParams: ['teacher', 'maxPeriods', 'session'] },
+  { kind: 'pair_not_same_slot', label: 'Pair not same slot', group: 'assignment', hasChecker: true, requiredParams: ['assignmentIds'] },
+  { kind: 'pair_same_slot', label: 'Pair same slot', group: 'assignment', hasChecker: true, requiredParams: ['assignmentIds'] },
+  { kind: 'mutual_exclusion', label: 'Mutual exclusion', group: 'assignment', hasChecker: true, requiredParams: ['assignmentIds'] },
+  { kind: 'session_limit', label: 'Session limit', group: 'assignment', hasChecker: true, requiredParams: ['teacher', 'maxPeriods', 'session'] },
   { kind: 'subject_group', label: 'Subject group', group: 'subject', hasChecker: false, requiredParams: ['subjects'] },
   { kind: 'subject_group_daily_limit', label: 'Subject group daily limit', group: 'subject', hasChecker: true, requiredParams: ['subjects', 'max'] },
   { kind: 'subject_session_max_periods', label: 'Subject session max periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'session', 'max'] },
@@ -91,6 +109,45 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
 ];
 
 export const CONSTRAINT_KINDS = CONSTRAINT_REGISTRY.map((m) => m.kind) as ConstraintKind[];
+
+const LABEL_VI_BY_KIND: Partial<Record<ConstraintKind, string>> = {
+  teacher_block_day: 'Giáo viên không dạy ngày',
+  teacher_block_period: 'Giáo viên không dạy tiết',
+  teacher_block_slot: 'Giáo viên không dạy slot',
+  teacher_max_per_day: 'Giáo viên dạy tối đa N tiết mỗi ngày',
+  teacher_allowed_days: 'Giáo viên chỉ dạy một số ngày',
+  pair_not_same_slot: 'Hai phân công không trùng tiết',
+  pair_same_slot: 'Hai phân công cùng tiết',
+  mutual_exclusion: 'Nhóm phân công không trùng slot',
+  session_limit: 'Giới hạn số tiết của giáo viên theo buổi',
+};
+
+const EXAMPLE_VI_BY_KIND: Partial<Record<ConstraintKind, string>> = {
+  teacher_block_day: 'Giáo viên Sơn không dạy Thứ 2.',
+  teacher_block_period: 'Giáo viên Sơn không dạy tiết 1.',
+  teacher_block_slot: 'Giáo viên Sơn không dạy Thứ 2 tiết 1.',
+  teacher_max_per_day: 'Giáo viên Sơn dạy tối đa 4 tiết mỗi ngày.',
+  teacher_allowed_days: 'Giáo viên Sơn chỉ dạy Thứ 3 và Thứ 5.',
+  pair_not_same_slot: 'Toán 6A và Văn 6A không được trùng tiết.',
+  pair_same_slot: 'Sinh hoạt 6A và Sinh hoạt 6B phải cùng tiết.',
+  mutual_exclusion: 'Trong nhóm phân công này, không được có 2 phân công trùng slot.',
+  session_limit: 'Giáo viên Sơn buổi sáng tối đa 3 tiết.',
+};
+
+function defaultLabelVi(meta: ConstraintMeta): string {
+  const scopeLabel: Record<BuiltInConstraintScope, string> = {
+    teacher: 'Giáo viên',
+    subject: 'Môn học',
+    class: 'Lớp',
+    assignment: 'Phân công',
+    global: 'Toàn trường',
+  };
+  return `${scopeLabel[meta.group]}: ${meta.label}`;
+}
+
+function defaultExampleVi(meta: ConstraintMeta): string {
+  return `${defaultLabelVi(meta)}.`;
+}
 
 export const CHECKED_KINDS = new Set<ConstraintKind>(
   CONSTRAINT_REGISTRY.filter((m) => m.hasChecker).map((m) => m.kind)
@@ -182,6 +239,24 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
 ] as const satisfies readonly ConstraintKind[];
 
 export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);
+
+export const BUILT_IN_CONSTRAINT_DEFINITIONS: BuiltInConstraintDefinition[] = CONSTRAINT_REGISTRY
+  .filter((meta): meta is ConstraintMeta & { kind: Exclude<ConstraintKind, 'custom_dsl'> } => meta.kind !== 'custom_dsl')
+  .map((meta) => ({
+    kind: meta.kind,
+    scope: meta.group,
+    labelVi: LABEL_VI_BY_KIND[meta.kind] ?? defaultLabelVi(meta),
+    descriptionVi: LABEL_VI_BY_KIND[meta.kind] ?? defaultLabelVi(meta),
+    exampleVi: EXAMPLE_VI_BY_KIND[meta.kind] ?? defaultExampleVi(meta),
+    severityAllowed: ['hard', 'soft'],
+    paramsSchema: { required: meta.requiredParams },
+    hasSolverEncoder: SOLVER_ENCODABLE_KINDS.has(meta.kind),
+    hasValidator: meta.hasChecker,
+  }));
+
+export const BUILT_IN_CONSTRAINT_KINDS = new Set<Exclude<ConstraintKind, 'custom_dsl'>>(
+  BUILT_IN_CONSTRAINT_DEFINITIONS.map((definition) => definition.kind)
+);
 
 export function getConstraintMeta(kind: ConstraintKind): ConstraintMeta | undefined {
   return CONSTRAINT_REGISTRY.find((m) => m.kind === kind);
