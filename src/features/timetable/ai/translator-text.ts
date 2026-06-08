@@ -312,8 +312,33 @@ export function splitFallbackConstraintText(text: string): string[] {
       clause,
     );
 
+  // "đồng thời" is only a clause separator when NOT preceded by a negation word
+  // like "không". "không đồng thời dạy" = "not simultaneously teach" — keep together.
+  const splitDongThoi = (t: string): string[] => {
+    const pattern = /\s+(?:đồng\s+thời|dong\s+thoi)\s+/iu;
+    const parts: string[] = [];
+    let remaining = t;
+    while (remaining) {
+      const m = pattern.exec(remaining);
+      if (!m) {
+        parts.push(remaining);
+        break;
+      }
+      const before = remaining.slice(0, m.index);
+      // Check if "đồng thời" is preceded by a negation — if so, don't split here
+      if (/(không|khong|chẳng|chang|chưa|chua|đừng|dung)\s*$/iu.test(before)) {
+        parts.push(remaining);
+        break;
+      }
+      parts.push(before);
+      remaining = remaining.slice(m.index + m[0].length);
+    }
+    return parts;
+  };
+
   return text
-    .split(/(?:;|\n|\r|\s+(?:đồng\s+thời|dong\s+thoi)\s+)/iu)
+    .split(/(?:;|\n|\r)/u)
+    .flatMap(splitDongThoi)
     .flatMap((segment) => {
       const clauses: string[] = [];
       let remainder = segment.trim();
