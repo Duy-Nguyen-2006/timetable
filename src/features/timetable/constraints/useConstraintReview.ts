@@ -39,7 +39,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
     () => initial?.confirmedConstraints ?? []
   );
   const [parseLoading, setParseLoading] = useState(false);
-  const [reparseLoading, setReparseLoading] = useState(false);
+  const [reparseLoadingId, setReparseLoadingId] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [newConstraintIds, setNewConstraintIds] = useState<Set<string>>(() => new Set());
   const hydratedRef = useRef(false);
@@ -150,7 +150,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
         return null;
       }
 
-      setReparseLoading(true);
+      setReparseLoadingId(rawConstraint.id);
       try {
         const previousAttempts: ReparseAttempt[] = [
           ...(currentDraft.previousAttempts ?? []),
@@ -284,7 +284,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
         setParseError(e instanceof Error ? e.message : 'Diễn giải lại thất bại');
         return null;
       } finally {
-        setReparseLoading(false);
+        setReparseLoadingId(null);
       }
     },
     []
@@ -388,7 +388,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
     constraintDrafts,
     confirmedConstraints,
     parseLoading,
-    reparseLoading,
+    reparseLoading: reparseLoadingId,
     parseError,
     hydrateFromWorkspace,
     invalidateReview,

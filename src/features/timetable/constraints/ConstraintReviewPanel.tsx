@@ -19,7 +19,7 @@ type ConstraintReviewPanelProps = {
   confirmed: ConfirmedConstraint[];
   newConstraintIds: Set<string>;
   agentInput: AgentInputPayload;
-  reparseLoading?: boolean;
+  reparseLoading?: string | null;
   parseError: string | null;
   canSolve: boolean;
   solveBlockHint: string | null;
@@ -115,7 +115,7 @@ export function ConstraintReviewPanel({
                   ? () => onAiAnalyze(constraint, draftByRaw.get(constraint.id)!)
                   : undefined
               }
-              isReparsing={reparseLoading}
+              isReparsing={reparseLoading === constraint.id}
               highlight={highlightConstraintIds?.has(constraint.id)}
             />
           ))

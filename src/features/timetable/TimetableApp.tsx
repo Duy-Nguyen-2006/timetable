@@ -887,6 +887,17 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     setIntakeError(null)
     try {
       const raw = rawInputFromText(rawText, type, weight, pendingAiPreview?.item.id)
+
+      // Cache lookup: chỉ cache lần phân tích đầu (không có conversation)
+      const cacheKey = `${rawText.trim().toLowerCase()}|${type}|${weight ?? 0}`
+      if (!conversation?.length) {
+        const cached = conversationCache.current.get(cacheKey)
+        if (cached && Date.now() - cached.timestamp < 300_000) {
+          setPendingAiPreview(cached.result)
+          return
+        }
+      }
+
       const result = await fetchConstraintIntakeAiAnalysis(raw, constraintAgentInput, aiProvider, {
         rejectedDisplayText: pendingAiPreview?.draft.displayText,
         previousAttempts: pendingAiPreview ? [{
@@ -912,13 +923,18 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
         const existingConversation = conversation ?? pendingAiPreview?.conversation ?? []
         const aiResponse = draft.displayText || draft.explanation || rawText
         const newConversation = [...existingConversation, { role: 'assistant' as const, content: aiResponse }]
-        setPendingAiPreview({
+        const preview: PendingAiPreview = {
           rawText,
           item,
           draft,
           reparseCount: (pendingAiPreview?.reparseCount ?? 0) + 1,
           conversation: newConversation,
-        })
+        }
+        setPendingAiPreview(preview)
+        // Cache lần phân tích đầu (không có conversation) trong 5 phút
+        if (!conversation?.length) {
+          conversationCache.current.set(cacheKey, { result: preview, timestamp: Date.now() })
+        }
       }
     } catch (err) {
       setIntakeError(err instanceof Error ? err.message : 'AI phân tích thất bại.')
