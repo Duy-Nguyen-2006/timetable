@@ -183,8 +183,10 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [customNormalizeLoading, setCustomNormalizeLoading] = useState(false)
   const [customNormalizeError, setCustomNormalizeError] = useState<string | null>(null)
   const [intakeLoading, setIntakeLoading] = useState(false)
+  const [chatLoading, setChatLoading] = useState(false)
   const [intakeError, setIntakeError] = useState<string | null>(null)
   const [pendingAiPreview, setPendingAiPreview] = useState<PendingAiPreview | null>(null)
+  const conversationCache = useRef<Map<string, { result: PendingAiPreview; timestamp: number }>>(new Map())
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
@@ -873,16 +875,18 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }
 
   // === AI phân tích raw input from panel ===
-  const handleIntakeAiAnalysis = async (rawText: string, type: 'required' | 'preferred', weight?: number) => {
+  const handleIntakeAiAnalysis = async (rawText: string, type: 'required' | 'preferred', weight?: number, conversation?: Array<{ role: 'user' | 'assistant'; content: string }>) => {
     if (!aiProvider) {
       setShowSettingsModal(true)
       setIntakeError('Vui lòng cấu hình AI trước khi phân tích.')
       return
     }
-    setIntakeLoading(true)
+    const isChat = Boolean(conversation?.length)
+    if (isChat) setChatLoading(true)
+    else setIntakeLoading(true)
     setIntakeError(null)
     try {
-      const raw = rawInputFromText(rawText, type, weight)
+      const raw = rawInputFromText(rawText, type, weight, pendingAiPreview?.item.id)
       const result = await fetchConstraintIntakeAiAnalysis(raw, constraintAgentInput, aiProvider, {
         rejectedDisplayText: pendingAiPreview?.draft.displayText,
         previousAttempts: pendingAiPreview ? [{
@@ -891,6 +895,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
           source: pendingAiPreview.draft.proposedSpecs[0] ? 'built_in' as const : 'semantic' as const,
           confidence: pendingAiPreview.draft.confidence ?? 'low',
         }] : [],
+        conversationMessages: conversation,
       })
 
       let draft: ParsedConstraintDraft | null = null
@@ -903,19 +908,33 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       }
 
       if (draft) {
-        const item = constraintItemFromPending(raw.id, rawText, type, weight)
+        const item = pendingAiPreview?.item ?? constraintItemFromPending(raw.id, rawText, type, weight)
+        const existingConversation = conversation ?? pendingAiPreview?.conversation ?? []
+        const aiResponse = draft.displayText || draft.explanation || rawText
+        const newConversation = [...existingConversation, { role: 'assistant' as const, content: aiResponse }]
         setPendingAiPreview({
           rawText,
           item,
           draft,
           reparseCount: (pendingAiPreview?.reparseCount ?? 0) + 1,
+          conversation: newConversation,
         })
       }
     } catch (err) {
       setIntakeError(err instanceof Error ? err.message : 'AI phân tích thất bại.')
     } finally {
       setIntakeLoading(false)
+      setChatLoading(false)
     }
+  }
+
+  // === Send chat message to AI within preview ===
+  const sendChatMessage = (message: string) => {
+    if (!pendingAiPreview || !aiProvider) return
+    const existingConversation = pendingAiPreview.conversation ?? []
+    const newConversation = [...existingConversation, { role: 'user' as const, content: message }]
+    setPendingAiPreview({ ...pendingAiPreview, conversation: newConversation })
+    void handleIntakeAiAnalysis(pendingAiPreview.rawText, pendingAiPreview.item.type, pendingAiPreview.item.weight, newConversation)
   }
 
   // === Accept AI preview → import into review ===
@@ -932,7 +951,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   // === Reanalyze AI preview ===
   const reanalyzeAiPreview = () => {
     if (!pendingAiPreview) return
-    handleIntakeAiAnalysis(pendingAiPreview.rawText, pendingAiPreview.item.type, pendingAiPreview.item.weight)
+    handleIntakeAiAnalysis(pendingAiPreview.rawText, pendingAiPreview.item.type, pendingAiPreview.item.weight, pendingAiPreview.conversation)
   }
 
   // === Dismiss AI preview ===
@@ -2045,6 +2064,8 @@ const handleDownloadExcel = useCallback(async () => {
                       onAcceptAiPreview={acceptAiPreview}
                       onReanalyzeAiPreview={reanalyzeAiPreview}
                       onDismissAiPreview={dismissAiPreview}
+                      onSendChatMessage={sendChatMessage}
+                      chatLoading={chatLoading}
                     />
                     <ConstraintReviewPanel
                       constraints={sortedConstraintList}

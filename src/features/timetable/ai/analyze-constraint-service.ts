@@ -106,7 +106,7 @@ const analyzeResponseSchema = z.object({
   unresolvedQuestions: z.array(z.string()).nullable().optional().transform((value) => value ?? []),
 });
 
-type AnalyzeChatMessage = { role: 'system' | 'user'; content: string };
+type AnalyzeChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 function extractText(payload: unknown): string {
   if (!payload || typeof payload !== 'object') return '';
@@ -443,6 +443,7 @@ export async function analyzeConstraint(
       source: 'built_in' | 'semantic';
       confidence: 'high' | 'medium' | 'low';
     }>;
+    conversationMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   }
 ): Promise<AnalyzeConstraintResult> {
   const systemPrompt = buildSystemPrompt(agentInput);
@@ -460,10 +461,14 @@ export async function analyzeConstraint(
   }
 
   try {
-    const response = await invokeAnalyzeChat(config, [
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },
-    ]);
+    ];
+    if (options?.conversationMessages?.length) {
+      messages.push(...options.conversationMessages);
+    }
+    const response = await invokeAnalyzeChat(config, messages);
     const content = response.content;
 
     if (!content?.trim()) {

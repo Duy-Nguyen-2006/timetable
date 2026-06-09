@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Circle, Loader2, Plus, Sparkles } from 'lucide-react';
+import { Circle, Loader2, Plus, Sparkles, Send } from 'lucide-react';
 
 import {
   constraintTypeList,
@@ -27,11 +27,17 @@ export type ConstraintDraftForm = {
   weight: number;
 };
 
+export type ConversationMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 export type PendingAiPreview = {
   rawText: string;
   item: ConstraintItem;
   draft: ParsedConstraintDraft;
   reparseCount: number;
+  conversation?: ConversationMessage[];
 };
 
 type ConstraintInputPanelProps = {
@@ -47,6 +53,8 @@ type ConstraintInputPanelProps = {
   onAcceptAiPreview: () => void;
   onReanalyzeAiPreview: () => void;
   onDismissAiPreview: () => void;
+  onSendChatMessage?: (message: string) => void;
+  chatLoading?: boolean;
 };
 
 function uniqueLabels(labels: string[]): string[] {
@@ -94,8 +102,11 @@ export function ConstraintInputPanel({
   onAcceptAiPreview,
   onReanalyzeAiPreview,
   onDismissAiPreview,
+  onSendChatMessage,
+  chatLoading,
 }: ConstraintInputPanelProps) {
   const [suggestion, setSuggestion] = useState<BuiltInSuggestion | null>(null);
+  const [chatInput, setChatInput] = useState('');
 
   const runSuggestion = () => {
     if (!draft.text.trim()) return;
@@ -277,11 +288,42 @@ export function ConstraintInputPanel({
               <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Hiểu là</p>
               <p className="mt-1 whitespace-pre-line leading-relaxed text-white">{pendingAiPreview.draft.displayText || pendingAiPreview.draft.explanation || pendingAiPreview.rawText}</p>
             </div>
+            {pendingAiPreview.draft.clarificationQuestions?.length ? (
+              <div className="rounded border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
+                <p className="text-[10px] font-medium uppercase tracking-widest text-amber-300/70">AI cần hỏi thêm</p>
+                <ul className="mt-1 list-disc pl-4 leading-relaxed text-amber-200/80">
+                  {pendingAiPreview.draft.clarificationQuestions.map((q, i) => (<li key={q.id ?? i}>{q.prompt}</li>))}
+                </ul>
+              </div>
+            ) : null}
+            {pendingAiPreview.conversation?.length ? (
+              <div className="space-y-1.5 rounded border border-white/[0.06] bg-[#0a0a0a] px-2.5 py-2">
+                {pendingAiPreview.conversation.map((msg, i) => (
+                  <div key={i} className={msg.role === 'user' ? 'text-right' : 'text-left'}>
+                    <span className={`inline-block max-w-[85%] rounded px-2 py-1 ${msg.role === 'user' ? 'bg-violet-500/20 text-violet-100' : 'bg-white/[0.06] text-white/70'}`}>
+                      {msg.content}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" onClick={onAcceptAiPreview} className="w-full rounded-md bg-[#4DB848] px-3 py-2 text-xs font-medium text-[#0a0a0a] hover:bg-[#40993C]">Đồng ý</button>
-            <button type="button" onClick={onReanalyzeAiPreview} disabled={aiLoading || pendingAiPreview.reparseCount >= 3} className="w-full rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-50">
-              {aiLoading ? <span className="flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" /></span> : 'Phân tích lại'}
+          <div className="mt-2 flex gap-1.5">
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (chatInput.trim() && onSendChatMessage) { onSendChatMessage(chatInput.trim()); setChatInput(''); } } }}
+              placeholder="Nhập phản hồi cho AI..."
+              className="h-8 flex-1 rounded border border-white/[0.08] bg-[#0a0a0a] px-2 text-xs text-white outline-none placeholder:text-white/25 focus:border-white/20"
+            />
+            <button type="button" disabled={!chatInput.trim() || chatLoading || !onSendChatMessage} onClick={() => { if (chatInput.trim() && onSendChatMessage) { onSendChatMessage(chatInput.trim()); setChatInput(''); } }} className="flex h-8 w-8 items-center justify-center rounded border border-violet-500/40 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25 disabled:opacity-40">
+              {chatLoading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button type="button" onClick={onAcceptAiPreview} disabled={!pendingAiPreview.draft.proposedSpecs.length || pendingAiPreview.draft.status === 'unsupported'} className="w-full rounded-md bg-[#4DB848] px-3 py-2 text-xs font-medium text-[#0a0a0a] hover:bg-[#40993C] disabled:opacity-40 disabled:cursor-not-allowed">Đồng ý</button>
+            <button type="button" onClick={onDismissAiPreview} className="w-full rounded-md border border-red-500/40 bg-red-500/15 px-3 py-2 text-xs font-medium text-red-200 hover:bg-red-500/25">
+              Bỏ
             </button>
           </div>
           {pendingAiPreview.reparseCount >= 3 ? <p className="mt-2 text-[10px] text-white/30">Đã phân tích 3 lần — bấm «Đồng ý» hoặc sửa câu nhập.</p> : null}

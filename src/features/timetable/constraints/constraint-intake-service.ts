@@ -45,6 +45,7 @@ export async function fetchConstraintIntakeAiAnalysis(
       source: 'built_in' | 'semantic';
       confidence: 'high' | 'medium' | 'low';
     }>;
+    conversationMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   }
 ): Promise<ConstraintIntakeAiResult> {
   // Use new unified analyze-constraint endpoint
@@ -62,6 +63,7 @@ export async function fetchConstraintIntakeAiAnalysis(
         source: a.source,
         confidence: a.confidence,
       })),
+      conversationMessages: options?.conversationMessages,
     }),
   });
 

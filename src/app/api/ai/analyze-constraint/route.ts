@@ -14,6 +14,7 @@ type AnalyzeConstraintRequest = {
     source: 'built_in' | 'semantic';
     confidence: 'high' | 'medium' | 'low';
   }>;
+  conversationMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 };
 
 export async function POST(request: Request) {
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
       body.weight,
       body.agentInput,
       body.providerConfig,
-      { previousAttempts: body.previousAttempts }
+      { previousAttempts: body.previousAttempts, conversationMessages: body.conversationMessages }
     );
 
     return NextResponse.json(result);
