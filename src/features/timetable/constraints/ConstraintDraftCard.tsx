@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Check, Circle, Info, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { AlertCircle, Check, Circle, Info, Sparkles, Loader2 } from 'lucide-react';
 
 import { humanizeDraft } from '../ai/constraint-humanizer';
 import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
@@ -219,8 +219,8 @@ export function ConstraintDraftCard({
             Bỏ qua
           </button>
         ) : null}
-        <button type="button" onClick={onDelete} className="ml-auto p-1 transition hover:bg-white/[0.04]">
-          <Trash2 size={20} className="text-red-400/60 hover:text-red-400" strokeWidth={1.5} />
+        <button type="button" onClick={onDelete} className="ml-auto rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20">
+          Loại bỏ
         </button>
       </div>
     </div>

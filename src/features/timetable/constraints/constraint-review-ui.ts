@@ -66,4 +66,5 @@ export function unconfirmedRequiredConstraintIds(
     .map((c) => c.id);
 }
 
-export const MAX_AI_ANALYSIS_ATTEMPTS = 2;
+export const MAX_AI_ANALYSIS_ATTEMPTS = 3;
+export const MAX_AI_INPUT_PREVIEW_ATTEMPTS = 3;

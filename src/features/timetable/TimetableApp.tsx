@@ -30,8 +30,11 @@ import {
   constraintItemsToRaw,
   validateConfirmedSolveRequest,
 } from './ai/solver-constraint-gate'
-import { ConstraintInputPanel } from './constraints/ConstraintInputPanel'
+import { ConstraintInputPanel, type PendingAiPreview } from './constraints/ConstraintInputPanel'
 import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
+import { fetchConstraintIntakeAiAnalysis } from './constraints/constraint-intake-service'
+import { buildDraftFromReparseResult, buildDraftFromCustomNormalization, rawInputFromText } from './constraints/constraint-intake-ai'
+import { constraintItemFromPending } from './constraints/import-pending-constraint'
 import {
   ConstraintInterpretationCard,
   type InterpretationCandidate,
@@ -42,15 +45,10 @@ import {
   readConstraintWorkspace,
   writeConstraintWorkspace,
 } from './constraints/constraint-workspace-storage'
-import {
-  buildCustomDraftFromNormalization,
-  severityFromConstraintType,
-} from './constraints/custom-normalization-draft'
 import { normalizeConstraintsToBuiltInDrafts } from './constraints/constraint-normalization'
 import { unconfirmedRequiredConstraintIds } from './constraints/constraint-review-ui'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SettingsModal } from './SettingsModal'
-import type { CustomConstraintNormalizationResult } from './ai/custom-normalization-service'
 import type {
   AIProviderConfig,
   AgentLifecycleEvent,
@@ -185,6 +183,9 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [quickImportError, setQuickImportError] = useState<string | null>(null)
   const [customNormalizeLoading, setCustomNormalizeLoading] = useState(false)
   const [customNormalizeError, setCustomNormalizeError] = useState<string | null>(null)
+  const [intakeLoading, setIntakeLoading] = useState(false)
+  const [intakeError, setIntakeError] = useState<string | null>(null)
+  const [pendingAiPreview, setPendingAiPreview] = useState<PendingAiPreview | null>(null)
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
@@ -864,90 +865,86 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       return true
     }
   
-  const normalizeCustomConstraintDraft = async () => {
-    const lines = parseLines(constraintDraft.text)
-    if (!lines.length) return
+  // === Import suggestion into review list ===
+  const importSuggestion = (item: ConstraintItem, draft: ParsedConstraintDraft) => {
+    setConstraintList((current) => [...current, item])
+    updateDraft(draft)
+    markConstraintsAdded([item.id])
+  }
+
+  // === AI phân tích raw input from panel ===
+  const handleIntakeAiAnalysis = async (rawText: string, type: 'required' | 'preferred', weight?: number) => {
     if (!aiProvider) {
       setShowSettingsModal(true)
-      setCustomNormalizeError('Vui lòng cấu hình nhà cung cấp AI trước khi chuẩn hóa ràng buộc đặc biệt.')
+      setIntakeError('Vui lòng cấu hình AI trước khi phân tích.')
       return
     }
-
-    setCustomNormalizeLoading(true)
-    setCustomNormalizeError(null)
+    setIntakeLoading(true)
+    setIntakeError(null)
     try {
-      const now = Date.now()
-      const createdAt = new Date().toISOString()
-      const newItems: ConstraintItem[] = []
-      const newDrafts: ParsedConstraintDraft[] = []
+      const raw = rawInputFromText(rawText, type, weight)
+      const result = await fetchConstraintIntakeAiAnalysis(raw, constraintAgentInput, aiProvider, {
+        rejectedDisplayText: pendingAiPreview?.draft.displayText,
+        previousAttempts: pendingAiPreview ? [{
+          summary: pendingAiPreview.draft.explanation ?? '',
+          displayText: pendingAiPreview.draft.displayText ?? pendingAiPreview.rawText,
+          source: pendingAiPreview.draft.proposedSpecs[0] ? 'built_in' as const : 'semantic' as const,
+          confidence: pendingAiPreview.draft.confidence ?? 'low',
+        }] : [],
+      })
 
-      for (const [index, text] of lines.entries()) {
-        const item: ConstraintItem = {
-          id: `${now}-${index}-${text}`,
-          type: constraintDraft.type,
-          text,
-          weight: constraintDraft.type === 'preferred' ? constraintDraft.weight : undefined,
-        }
-        const raw: RawConstraintInput = {
-          id: item.id,
-          text: item.text,
-          type: item.type,
-          weight: item.weight,
-          createdAt,
-        }
-        const response = await fetch('/api/ai/normalize-custom-constraint', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            request: {
-              severity: severityFromConstraintType(item.type),
-              originalText: item.text,
-            },
-            providerConfig: aiProvider,
-            agentInput: constraintAgentInput,
-          }),
-        })
-        const body = (await response.json().catch(() => null)) as
-          | CustomConstraintNormalizationResult
-          | { error?: string }
-          | null
-        if (!body) {
-          throw new Error('Chuẩn hóa ràng buộc đặc biệt thất bại.')
-        }
-        if (!('status' in body)) {
-          throw new Error(body.error || 'Chuẩn hóa ràng buộc đặc biệt thất bại.')
-        }
-        if (!response.ok) {
-          throw new Error('Chuẩn hóa ràng buộc đặc biệt thất bại.')
-        }
-        newItems.push(item)
-        newDrafts.push(buildCustomDraftFromNormalization(raw, body, constraintAgentInput))
+      let draft: ParsedConstraintDraft | null = null
+      if (result.kind === 'reparse') {
+        draft = buildDraftFromReparseResult(raw, result.result, constraintAgentInput, (pendingAiPreview?.reparseCount ?? 0) + 1)
+      } else {
+        draft = buildDraftFromCustomNormalization(raw, result.body, constraintAgentInput)
       }
 
-      setConstraintList((current) => [...current, ...newItems])
-      newDrafts.forEach((draft) => updateDraft(draft))
-      setConstraintDraft((current) => ({ ...current, text: '' }))
-      markConstraintsAdded(newItems.map((item) => item.id))
-    } catch (error) {
-      setCustomNormalizeError(error instanceof Error ? error.message : 'Chuẩn hóa ràng buộc đặc biệt thất bại.')
+      if (draft) {
+        const item = constraintItemFromPending(raw.id, rawText, type, weight)
+        setPendingAiPreview({
+          rawText,
+          item,
+          draft,
+          reparseCount: (pendingAiPreview?.reparseCount ?? 0) + 1,
+        })
+      }
+    } catch (err) {
+      setIntakeError(err instanceof Error ? err.message : 'AI phân tích thất bại.')
     } finally {
-      setCustomNormalizeLoading(false)
+      setIntakeLoading(false)
     }
   }
 
-  const createBuiltInConstraint = (constraint: ConstraintItem, draft: ParsedConstraintDraft) => {
-    setConstraintList((current) => [...current, constraint])
-    updateDraft(draft)
-    markConstraintsAdded([constraint.id])
+  // === Accept AI preview → import into review ===
+  const acceptAiPreview = () => {
+    if (!pendingAiPreview) return
+    setConstraintList((current) => [...current, pendingAiPreview.item])
+    updateDraft({ ...pendingAiPreview.draft, rawConstraintId: pendingAiPreview.item.id, id: `draft_${pendingAiPreview.item.id}` })
+    markConstraintsAdded([pendingAiPreview.item.id])
+    setPendingAiPreview(null)
+    setConstraintDraft((current) => ({ ...current, text: '' }))
+  }
+
+  // === Reanalyze AI preview ===
+  const reanalyzeAiPreview = () => {
+    if (!pendingAiPreview) return
+    handleIntakeAiAnalysis(pendingAiPreview.rawText, pendingAiPreview.item.type, pendingAiPreview.item.weight)
+  }
+
+  // === Dismiss AI preview ===
+  const dismissAiPreview = () => {
+    setPendingAiPreview(null)
+    setIntakeError(null)
   }
 
   const deleteConstraint = (id: string) => {
     const deletedConstraint = constraintList.find((constraint) => constraint.id === id)
     openConfirmDialog(
-      'Xác nhận xóa ràng buộc',
+      'Xác nhận loại bỏ ràng buộc',
       deletedConstraint
-        ? `Bạn có chắc chắn muốn xóa ràng buộc: "${deletedConstraint.text}"?`
-        : 'Bạn có chắc chắn muốn xóa ràng buộc này?',
+        ? `Bạn có chắc chắn muốn loại bỏ ràng buộc: "${deletedConstraint.text}"?`
+        : 'Bạn có chắc chắn muốn loại bỏ ràng buộc này?',
       'danger',
       () => {
         setConstraintList((current) => current.filter((constraint) => constraint.id !== id))
@@ -2035,12 +2032,16 @@ const handleDownloadExcel = useCallback(async () => {
                     <ConstraintInputPanel
                       draft={constraintDraft}
                       onDraftChange={(patch) => setConstraintDraft((current) => ({ ...current, ...patch }))}
-                      onNormalizeCustom={() => void normalizeCustomConstraintDraft()}
-                      onCreateBuiltIn={createBuiltInConstraint}
                       agentInput={constraintAgentInput}
                       totalCount={constraintList.length}
-                      customNormalizeLoading={customNormalizeLoading}
-                      customNormalizeError={customNormalizeError}
+                      onImportSuggestion={importSuggestion}
+                      onAiAnalyzeRaw={(text, type, weight) => handleIntakeAiAnalysis(text, type, weight)}
+                      aiLoading={intakeLoading}
+                      aiError={intakeError}
+                      pendingAiPreview={pendingAiPreview}
+                      onAcceptAiPreview={acceptAiPreview}
+                      onReanalyzeAiPreview={reanalyzeAiPreview}
+                      onDismissAiPreview={dismissAiPreview}
                     />
                     <ConstraintReviewPanel
                       constraints={sortedConstraintList}
