@@ -2,6 +2,8 @@ import { TokenBudgetGuard } from './budget-guard';
 import { runCoderTurn } from './coder';
 import type { ConstraintSpec, ScheduleEntry } from './constraint-spec';
 import { verifyCpSatRoundTrip } from './cp-sat-roundtrip';
+import { runDeterministicSolver } from './deterministic-solver';
+import { getDeterministicEligibility } from './deterministic-solver-eligibility';
 import { validateSchedule } from './deterministic-validator';
 import { compressPayload, digestError } from './input-compressor';
 import { runPlannerTurn } from './planner';
@@ -165,6 +167,48 @@ export async function runLocalAgent(
     );
     board.setConstraintSpecs(deduped);
     board.setDataset(compressed);
+
+    const hasConfirmedSpecs = Boolean(preTranslated?.length);
+    const allowExperimentalAiCodegen = config.allowExperimentalAiCodegen === true;
+    const eligibility = getDeterministicEligibility(deduped);
+
+    // ===== Deterministic fast path =====
+    // Nếu có confirmed specs VÀ batch đủ điều kiện deterministic → chạy
+    // solver trực tiếp, KHÔNG gọi planner/coder/repair LLM.
+    if (hasConfirmedSpecs && eligibility.ok) {
+      return runDeterministicSolver(input, config, {
+        constraintSpecs: deduped,
+      });
+    }
+
+    // ===== Fallback guard =====
+    // Nếu có confirmed specs nhưng KHÔNG eligible VÀ experimental off →
+    // reject sớm, KHÔNG âm thầm rơi vào AI codegen cũ.
+    if (hasConfirmedSpecs && !eligibility.ok && !allowExperimentalAiCodegen) {
+      const msg = eligibility.reason;
+      emit(config, { type: 'error', message: msg, fatal: true });
+      return { success: false, error: msg };
+    }
+
+    // ===== Experimental AI codegen pipeline =====
+    // Phần dưới đây CHỈ chạy khi:
+    //   - Không có confirmed specs (legacy: vẫn cần translator → planner → coder), HOẶC
+    //   - Có confirmed specs nhưng không eligible VÀ user bật allowExperimentalAiCodegen.
+    if (!hasConfirmedSpecs) {
+      emit(config, {
+        type: 'phase',
+        phase: 'translator',
+        message: 'Đang dịch constraints (legacy path)',
+        iteration: 0,
+      });
+    } else {
+      emit(config, {
+        type: 'phase',
+        phase: 'planner',
+        message: 'Experimental: dùng AI codegen (allowExperimentalAiCodegen=true)',
+        iteration: 0,
+      });
+    }
 
     emit(config, { type: 'phase', phase: 'planner', message: 'Đang tạo kế hoạch solver', iteration: 0 });
     emit(config, { type: 'stage_started', stage: 'planner', message: 'Planner started' });

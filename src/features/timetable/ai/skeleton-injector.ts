@@ -1,3 +1,12 @@
+/**
+ * skeleton-injector.ts
+ *
+ * `injectConstraintCode` không chỉ dành cho AI code injection. Nó còn
+ * được dùng để inject empty custom constraint block trong deterministic
+ * mode (`injectConstraintCode(skeleton, '')`), trong đó marker được fill
+ * bằng `pass` và skeleton giữ nguyên built-in constraint encoders.
+ */
+
 const MARKER_LINE = /^[ \t]*#\s*<<<\s*AI_FILL_HERE\s*>>>\s*$/m;
 const BUILD_CUSTOM_CONSTRAINTS = /^([ \t]*)def\s+build_custom_constraints\s*\([^)]*\)\s*:\s*(.*)$/;
 const PYTHON_FENCE = /^```(?:[ \t]*(?:python|py))?[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/i;

@@ -1854,3 +1854,22 @@ export function validateSchedule(
     hardUncheckedConstraintIds,
   };
 }
+
+/**
+ * Public helper: trả về `true` nếu `kind` có checker deterministic thực sự
+ * (không tính custom_dsl / kind lạ).
+ *
+ * Dùng để solver eligibility check TRƯỚC khi run — fail-closed nếu hard
+ * constraint không có checker.
+ */
+export function isDeterministicallyCheckedKind(kind: ConstraintSpec['kind']): boolean {
+  return CHECKED_KINDS.has(kind);
+}
+
+/**
+ * Public helper: tập kind có checker. Trả về readonly view để tránh
+ * mutation ngoài ý muốn.
+ */
+export function getDeterministicallyCheckedKinds(): ReadonlySet<ConstraintSpec['kind']> {
+  return CHECKED_KINDS;
+}

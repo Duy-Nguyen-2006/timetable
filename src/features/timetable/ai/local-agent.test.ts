@@ -430,3 +430,255 @@ test('runLocalAgent returns a clear repeated-violation error instead of stopped 
     (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
   }
 });
+
+test('runLocalAgent dùng deterministic fast path khi có confirmed specs eligible, không gọi LLM', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let chatCalls = 0;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+    if (url.endsWith('/api/ai/chat')) {
+      chatCalls += 1;
+      return Response.json({ ok: true, content: '{}', usage: { total_tokens: 1 } });
+    }
+    if (url.endsWith('/api/ai/python-execute')) {
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['monday'],
+            periods: [2, 3],
+            schedule: [
+              { assignmentId: 'asg_1', class: '6A', day: 'monday', period: 2, subject: 'Toán', teacher: 'Sơn' },
+              { assignmentId: 'asg_1', class: '6A', day: 'monday', period: 3, subject: 'Toán', teacher: 'Sơn' },
+            ],
+          },
+        },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'monday', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { monday: 4 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'asg_1',
+            teacher: { id: 't1', label: 'Sơn' },
+            subject: { id: 's1', label: 'Toán' },
+            class: { id: 'c1', label: '6A' },
+            weeklyPeriods: 2,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' },
+      {
+        preTranslatedConstraintSpecs: [
+          {
+            id: 'c1',
+            original: 'Sơn không dạy tiết 1',
+            severity: 'hard',
+            kind: 'teacher_block_period',
+            params: { teacher: 'Sơn', period: 1 },
+          },
+        ],
+      }
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(chatCalls, 0, 'Không được gọi LLM nào (planner/coder/repair)');
+    assert.equal(result.finalResult?.attemptHistorySummary[0]?.stage, 'deterministic_fast_path');
+    assert.match(result.finalResult?.diagnostics[0] ?? '', /Deterministic fast-path/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
+
+test('runLocalAgent reject confirmed specs không eligible khi không bật experimental', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let chatCalls = 0;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url.endsWith('/api/ai/chat')) {
+      chatCalls += 1;
+      return Response.json({ ok: true, content: '{}', usage: { total_tokens: 1 } });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'monday', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { monday: 4 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'asg_1',
+            teacher: { id: 't1', label: 'Sơn' },
+            subject: { id: 's1', label: 'Toán' },
+            class: { id: 'c1', label: '6A' },
+            weeklyPeriods: 2,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' },
+      {
+        preTranslatedConstraintSpecs: [
+          {
+            id: 'c1',
+            original: 'Ràng buộc custom',
+            severity: 'hard',
+            kind: 'custom_dsl',
+            params: {},
+          },
+        ],
+      }
+    );
+
+    assert.equal(result.success, false);
+    assert.match(result.error ?? '', /custom_dsl hard/);
+    assert.equal(chatCalls, 0, 'Không được gọi LLM khi reject');
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
+
+test('runLocalAgent dùng AI codegen khi confirmed specs không eligible VÀ allowExperimentalAiCodegen=true', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  let chatCalls = 0;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/prompts/translator.system.md')) return new Response('translator');
+    if (url.endsWith('/prompts/planner.system.md')) return new Response('planner');
+    if (url.endsWith('/prompts/coder.system.md')) return new Response('coder');
+    if (url.endsWith('/prompts/repair.system.md')) return new Response('repair');
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+    if (url.endsWith('/api/ai/chat')) {
+      chatCalls += 1;
+      const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: Array<{ role: string; content: string }> };
+      const systemPrompt = body.messages?.[0]?.content;
+      if (systemPrompt === 'planner') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            decisionVars: 'slots',
+            domainSize: { classes: 1, days: 1, periods: 1 },
+            constraintOrder: [],
+            reifiedNeeded: [],
+            objective: 'none',
+            templatesUsed: [],
+            risks: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+      if (systemPrompt === 'coder') {
+        return Response.json({
+          ok: true,
+          content: JSON.stringify({
+            plan_summary: 'ok',
+            constraint_code: 'pass',
+            covered_constraint_ids: [],
+            assumptions: [],
+          }),
+          usage: { total_tokens: 1 },
+        });
+      }
+      return Response.json({ ok: true, content: '{}', usage: { total_tokens: 1 } });
+    }
+    if (url.endsWith('/api/ai/python-syntax-check')) return Response.json({ ok: true, result: { ok: true } });
+    if (url.endsWith('/api/ai/python-execute')) {
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['monday'],
+            periods: [1, 2, 3, 4],
+            schedule: [
+              { assignmentId: 'asg_1', class: '6A', day: 'monday', period: 1, subject: 'Toán', teacher: 'Sơn' },
+              { assignmentId: 'asg_1', class: '6A', day: 'monday', period: 2, subject: 'Toán', teacher: 'Sơn' },
+            ],
+          },
+        },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'monday', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { monday: 4 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'asg_1',
+            teacher: { id: 't1', label: 'Sơn' },
+            subject: { id: 's1', label: 'Toán' },
+            class: { id: 'c1', label: '6A' },
+            weeklyPeriods: 2,
+          },
+        ],
+        constraints: [],
+      },
+      {
+        baseURL: 'http://example.test',
+        apiKey: 'test',
+        model: 'test',
+        allowExperimentalAiCodegen: true,
+      },
+      {
+        preTranslatedConstraintSpecs: [
+          {
+            id: 'c1',
+            original: 'Ràng buộc custom',
+            severity: 'hard',
+            kind: 'custom_dsl',
+            params: {},
+          },
+        ],
+      }
+    );
+
+    assert.ok(chatCalls > 0, 'Phải gọi AI codegen (planner hoặc coder) khi experimental=true');
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});

@@ -1,3 +1,10 @@
+/**
+ * repair.ts
+ *
+ * Experimental repair stage for AI-generated Python.
+ * Not part of default deterministic solver path.
+ */
+
 import { z } from 'zod';
 
 import type { Plan, Violation } from './constraint-spec';

@@ -1,3 +1,11 @@
+/**
+ * coder.ts
+ *
+ * Experimental AI custom constraint codegen.
+ * Default solve path (deterministic) must NOT call this for confirmed
+ * built-in constraints. Only used in `allowExperimentalAiCodegen` mode.
+ */
+
 import { z } from 'zod';
 
 import type { ConstraintSpec, Plan } from './constraint-spec';

@@ -1,3 +1,12 @@
+/**
+ * planner.ts
+ *
+ * Experimental AI planning stage.
+ * Not used in default confirmed-constraint solve path.
+ * Only enabled when `allowExperimentalAiCodegen === true` in
+ * `LocalAgentConfig` (or when solver không có preTranslated specs).
+ */
+
 import { z } from 'zod';
 
 import type { ConstraintSpec, Plan } from './constraint-spec';
