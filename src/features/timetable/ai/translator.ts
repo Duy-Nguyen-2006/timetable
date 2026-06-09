@@ -156,6 +156,60 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       });
       const severity = constraint.type === 'required' ? 'hard' : 'soft';
 
+    // Reversed IF: "X không dạy thứ 3 nếu Y không dạy thứ 2" → "Nếu Y dạy thứ 2 thì X không dạy thứ 3"
+    // Detect: contains "nếu" but NOT "thì". Split HEAD (THEN-side) and TAIL (IF-side, negated).
+    // Build IF condition from TAIL (strip leading "không" → positive teacher_teaches_at_slot/on_day).
+    // Build THEN from HEAD (existing block-day/period builder).
+    if (/\bn[uế]?u\b/iu.test(constraint.text) && !/\bth[uì]?i\b/iu.test(constraint.text)) {
+      const m = constraint.text.match(/^(?<head>.+?)\s+n[uế]?u\s+(?<tail>.+)$/iu);
+      if (m?.groups) {
+        const head = m.groups.head.trim();
+        const tail = m.groups.tail.trim();
+        const tailTeachers = matchTeacherLabels(tail, teacherLabels);
+        const tailDay = extractDayId(tail, input.days);
+        const tailPeriod = extractPeriodNumber(tail);
+        if (tailTeachers.length > 0 && tailDay) {
+          const wrapNot = (atom: ConditionExpr): ConditionExpr => ({ op: 'not', arg: atom });
+          let ifCondition: ConditionExpr;
+          if (tailPeriod !== null) {
+            ifCondition = wrapNot({ op: 'teacher_teaches_at_slot', teacher: tailTeachers[0], day: tailDay, period: tailPeriod });
+          } else {
+            ifCondition = wrapNot({ op: 'teacher_teaches_on_day', teacher: tailTeachers[0], day: tailDay });
+          }
+          // Build THEN from HEAD
+          const thenSubClauses = splitThenClause(head);
+          const thenSpecsRaw: Array<{ kind: string; params: Record<string, unknown> }> = [];
+          for (const subClause of thenSubClauses) {
+            const subTeachers = matchTeacherLabels(subClause, teacherLabels);
+            const subDay = extractDayId(subClause, input.days);
+            const subPeriod = extractPeriodNumber(subClause);
+            const isNegative = /(không|khong)/iu.test(subClause);
+            if (isNegative && subDay && subTeachers.length > 0) {
+              for (const teacher of subTeachers) {
+                if (subPeriod !== null) {
+                  thenSpecsRaw.push({ kind: 'teacher_block_slot', params: { teacher, day: subDay, period: subPeriod } });
+                } else {
+                  thenSpecsRaw.push({ kind: 'teacher_block_day', params: { teacher, day: subDay } });
+                }
+              }
+            }
+          }
+          if (thenSpecsRaw.length > 0) {
+            return [{
+              id,
+              original: constraint.text,
+              severity,
+              kind: 'if_then',
+              params: {
+                if: ifCondition,
+                then: thenSpecsRaw,
+              },
+            } satisfies ConstraintSpec];
+          }
+        }
+      }
+    }
+
     if (/nếu|neu/iu.test(constraint.text) && /thì|thi/iu.test(constraint.text)) {
       const [ifClauseRaw, thenClauseRaw = ''] = constraint.text.split(/thì|thi/iu);
 
