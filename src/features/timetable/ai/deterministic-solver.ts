@@ -11,9 +11,8 @@
  *   - Dễ audit/rollback so với pipeline AI codegen cũ.
  *
  * Eligibility của constraint batch do `getDeterministicEligibility` quyết
- * định. Nếu không eligible, hàm này trả `{ success: false, error }` — không
- * tự ý gọi AI codegen. Caller chịu trách nhiệm fallback nếu bật
- * `allowExperimentalAiCodegen`.
+ * định. Nếu không eligible, hàm này trả `{ success: false, error }` —
+ * caller (`local-agent.ts`) chịu trách nhiệm fail-closed.
  */
 
 import { verifyCpSatRoundTrip } from './cp-sat-roundtrip';

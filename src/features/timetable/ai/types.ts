@@ -190,16 +190,6 @@ export interface LocalAgentConfig extends AIProviderConfig {
   solverProfile?: SolverProfile;
   solverWorkers?: number;
   onEvent?: (event: AgentEvent) => void;
-  /**
-   * Bật fallback experimental AI codegen (planner/coder/repair LLM).
-   * Default: false — solver deterministic là path duy nhất.
-   *
-   * Chỉ bật khi constraint batch KHÔNG eligible cho deterministic solver
-   * mà người dùng vẫn muốn thử dùng AI. Nếu bật và constraint vẫn đủ
-   * điều kiện deterministic, solver vẫn chạy deterministic trước
-   * (deterministic path là default).
-   */
-  allowExperimentalAiCodegen?: boolean;
 }
 
 export type SolveArtifact = {

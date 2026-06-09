@@ -151,7 +151,14 @@ const config: LocalAgentConfig = {
   let result: { success: boolean; finalResult?: { solverStatus?: string; message?: string; schedule?: unknown[]; violations?: unknown[] }; error?: string } = { success: false, error: 'skipped' };
   if (apiServerReachable) {
     const t0 = Date.now();
-    result = await runLocalAgent(input, config);
+    // Pipeline AI codegen đã bị gỡ — local-agent giờ yêu cầu specs đã xác nhận.
+    // Dùng rule parser (Tier 1) để dịch constraints rồi truyền làm preTranslated.
+    const translator = await import('../src/features/timetable/ai/translator');
+    const fallbackFromRuleParser = translator.__translatorInternal.fallbackFromRuleParser;
+    const { sanitizeSpecs } = translator.__translatorInternal;
+    const raw = fallbackFromRuleParser(input);
+    const preTranslatedConstraintSpecs = sanitizeSpecs(input, raw);
+    result = await runLocalAgent(input, config, { preTranslatedConstraintSpecs });
     const elapsed = Date.now() - t0;
     console.log('===');
     console.log('elapsedMs', elapsed);

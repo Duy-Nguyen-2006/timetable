@@ -4,9 +4,9 @@
  * Quyết định một batch ConstraintSpec có thể chạy qua deterministic solver
  * (CP-SAT + skeleton cố định) hay không.
  *
- * Default solve path chỉ chấp nhận batch `eligible`. Batch không eligible mà
- * không bật `allowExperimentalAiCodegen` sẽ bị reject sớm để tránh âm thầm
- * rơi vào pipeline AI codegen cũ.
+ * Default solve path chỉ chấp nhận batch `eligible`. Batch không eligible
+ * sẽ bị reject sớm ở `local-agent.ts` (fail-closed) — không còn nhánh
+ * AI codegen để fallback.
  */
 
 import { isSolverEncodableKind, SOLVER_ENCODABLE_KINDS } from './constraint-registry';

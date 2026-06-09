@@ -10,9 +10,6 @@ if (missing.length > 0) {
 }
 
 const requiredPrompts = [
-  'public/prompts/coder.system.md',
-  'public/prompts/planner.system.md',
-  'public/prompts/repair.system.md',
   'public/prompts/translator.system.md',
 ];
 const missingPrompts = requiredPrompts.filter((p) => !existsSync(p));
