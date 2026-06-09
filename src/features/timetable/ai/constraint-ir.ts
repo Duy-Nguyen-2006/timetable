@@ -308,6 +308,7 @@ export const KNOWN_ENCODABLE_KINDS = new Set([
   'teacher_balanced_load',
   'teacher_max_subjects_per_day',
   'teacher_max_consecutive_days',
+  'teacher_min_off_days',
   'teacher_preferred_periods',
   'teacher_max_classes_per_day',
   'teacher_pair_not_same_slot',

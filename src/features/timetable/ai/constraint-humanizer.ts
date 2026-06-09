@@ -173,6 +173,16 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
       return `${prefix}Giáo viên ${paramStr(p.teacher)} dạy ít nhất ${paramStr(p.minPerDay)} tiết mỗi ngày${soft(spec)}.`;
     case 'teacher_no_gaps':
       return `${prefix}Giáo viên ${paramStr(p.teacher)} không có tiết trống giữa các tiết dạy${soft(spec)}.`;
+    case 'teacher_min_working_days':
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} dạy ít nhất ${paramStr(p.minDays)} ngày/tuần${soft(spec)}.`;
+    case 'teacher_max_gaps':
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} tối đa ${paramStr(p.maxGaps)} tiết trống/ngày${soft(spec)}.`;
+    case 'teacher_min_consecutive':
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} mỗi khi dạy phải ít nhất ${paramStr(p.minConsecutive)} tiết liền${soft(spec)}.`;
+    case 'teacher_min_off_days':
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} được nghỉ tối thiểu ${paramStr(p.minOffDays ?? p.min)} ngày/tuần${soft(spec)}.`;
+    case 'subject_min_days':
+      return `${prefix}Môn ${paramStr(p.subject)} phải được rải ít nhất ${paramStr(p.minDays)} ngày${soft(spec)}.`;
     case 'teacher_allowed_days':
       return `${prefix}Giáo viên ${paramStr(p.teacher)} chỉ dạy vào ${dayListInText(p.days)}${soft(spec)}.`;
     case 'teacher_allowed_periods':

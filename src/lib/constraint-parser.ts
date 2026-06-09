@@ -23,8 +23,26 @@ export type ParsedConstraint =
   | { kind: 'teacher_max_classes_per_day'; teacherLabels: string[] | '*'; max: number }
   | { kind: 'teacher_pair_not_same_slot'; teacherLabels: string[]; dayIds: string[] }
   | { kind: 'teacher_pair_not_same_day'; teacherLabels: string[]; dayIds: string[] }
+  | { kind: 'teacher_pair_same_slot'; teacherLabels: string[]; dayIds: string[] }
   | { kind: 'teacher_homeroom_first_period'; teacherLabels: string[]; classLabels: string[]; dayIds: string[]; period: number }
   | { kind: 'subject_not_last_period'; subjectLabels: string[]; classFilter?: string[] }
+  | { kind: 'subject_not_consecutive'; subjectLabels: string[]; classFilter?: string[] }
+  | { kind: 'subject_block_days'; subjectLabels: string[]; dayIds: string[]; classFilter?: string[] }
+  | { kind: 'class_allow_only_days'; classLabels: string[]; dayIds: string[] }
+  | { kind: 'class_allow_only_periods'; classLabels: string[]; periods: number[] }
+  | { kind: 'subject_allow_only_days'; subjectLabels: string[]; dayIds: string[]; classFilter?: string[] }
+  | { kind: 'class_no_gaps'; classLabels: string[] | '*' }
+  | { kind: 'class_min_per_day'; classLabels: string[]; minPerDay: number }
+  | { kind: 'class_max_per_day'; classLabels: string[]; maxPerDay: number }
+  | { kind: 'teacher_min_per_day'; teacherLabels: string[]; minPerDay: number }
+  | { kind: 'teacher_no_gaps'; teacherLabels: string[] | '*' }
+  | { kind: 'teacher_min_working_days'; teacherLabels: string[]; minDays: number }
+  | { kind: 'teacher_max_gaps'; teacherLabels: string[]; maxGaps: number }
+  | { kind: 'teacher_min_consecutive'; teacherLabels: string[]; minConsecutive: number }
+  | { kind: 'subject_min_gap_days'; subjectLabels: string[]; minGapDays: number; classFilter?: string[] }
+  | { kind: 'subject_min_days'; subjectLabels: string[]; minDays: number; classFilter?: string[] }
+  | { kind: 'pair_same_slot'; teacherLabels: string[]; dayIds: string[] }
+  | { kind: 'mutual_exclusion'; subjectLabels: string[] }
   | { kind: 'class_subjects_not_same_day'; classLabels: string[] | '*'; subjectLabels: string[]; maxSubjectsPerDay: number; softHint: boolean }
   | { kind: 'class_max_heavy_subjects_per_day'; classLabels: string[] | '*'; subjectLabels: string[]; maxHeavy: number }
   | { kind: 'class_max_heavy_subjects_per_session'; classLabels: string[] | '*'; subjectLabels: string[]; subjectGroups?: string[][]; maxHeavyInSession: number; sessionIds: string[]; softHint?: boolean }
@@ -115,9 +133,10 @@ function resolveDayId(dayIndex: number, ctxDayIds?: Record<string, string>): str
 
 function extractDays(text: string, ctxDayIds?: Record<string, string>): string[] {
   const days: string[] = []
-  const compact = text.match(/\bthứ\s*([2-7](?:\s+[2-7])+)\b/u)
+  // Comma/space separated: "thứ 2, 3, 4" or "thứ 2 3 4" → match list of digits 2-7.
+  const compact = text.match(/\bthứ\s*([2-7](?:[\s,]+[2-7])+)\b/u)
   if (compact) {
-    for (const n of compact[1].split(/\s+/)) {
+    for (const n of compact[1].split(/[\s,]+/)) {
       const dayIndex = Number(n) - 2; // "thứ 2" → index 0
       if (dayIndex >= 0 && dayIndex <= 5) {
         days.push(resolveDayId(dayIndex, ctxDayIds));
@@ -208,7 +227,7 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     if (max !== null) return { kind: 'teacher_max_consecutive', teacherLabels: allTeacherToken(raw) ? '*' : teachers, max }
   }
 
-  if (/ngày\s*nghỉ\s*tối\s*thiểu|ngay\s*nghi\s*toi\s*thieu/u.test(raw)) {
+  if (/ngày\s*nghỉ\s*tối\s*thiểu|ngay\s*nghi\s*toi\s*thieu|nghỉ\s*tối\s*thiểu|nghi\s*toi\s*thieu/u.test(raw)) {
     const min = extractFirstNumber(raw) ?? 1
     return { kind: 'teacher_min_off_days', teacherLabels: allTeacherToken(raw) || teachers.length === 0 ? '*' : teachers, min }
   }
@@ -280,7 +299,7 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     (/tối\s*đa|toi\s*da|không\s*quá|khong\s*qua/u.test(raw)) &&
     /(lớp|lop)/u.test(raw) &&
     /(mỗi\s*ngày|moi\s*ngay|ngày|ngay)/u.test(raw) &&
-    teachers.length > 0
+    (teachers.length > 0 || allTeacherToken(raw))
   ) {
     const max = extractFirstNumber(raw)
     if (max !== null) {
@@ -290,6 +309,191 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
         max,
       }
     }
+  }
+
+  // class_max_per_day: "lớp 10A học tối đa 6 tiết/ngày" (no teacher mention).
+  if (
+    classes.length > 0 &&
+    /(tối\s*đa|toi\s*da|max).*(tiết|tiet).*(ngày|ngay)/u.test(raw)
+  ) {
+    const max = extractFirstNumber(raw)
+    if (max !== null) {
+      return { kind: 'class_max_per_day', classLabels: classes, maxPerDay: max }
+    }
+  }
+
+  // class_min_per_day: "lớp 10A học ít nhất 4 tiết/ngày" (no teacher mention).
+  if (
+    classes.length > 0 &&
+    /(ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|min).*(tiết|tiet).*(ngày|ngay)/u.test(raw)
+  ) {
+    const min = extractFirstNumber(raw)
+    if (min !== null) {
+      return { kind: 'class_min_per_day', classLabels: classes, minPerDay: min }
+    }
+  }
+
+  // teacher_min_per_day: "giáo viên A dạy ít nhất 2 tiết/ngày".
+  if (
+    teachers.length > 0 &&
+    /(ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|min).*(tiết|tiet).*(ngày|ngay)/u.test(raw)
+  ) {
+    const min = extractFirstNumber(raw)
+    if (min !== null) {
+      return { kind: 'teacher_min_per_day', teacherLabels: teachers, minPerDay: min }
+    }
+  }
+
+  // class_no_gaps: "lớp 10A không có tiết trống" | "lớp 10A không có tiết trống giữa ngày"
+  if (
+    classes.length > 0 &&
+    /(không\s*có|khong\s*co).*(tiết\s*trống|tiet\s*trong|trống|trong)/u.test(raw)
+  ) {
+    return { kind: 'class_no_gaps', classLabels: allClassToken(raw) ? '*' : classes }
+  }
+
+  // teacher_no_gaps: "giáo viên A không có tiết trống"
+  if (
+    teachers.length > 0 &&
+    /(không\s*có|khong\s*co).*(tiết\s*trống|tiet\s*trong|trống|trong)/u.test(raw)
+  ) {
+    return { kind: 'teacher_no_gaps', teacherLabels: teachers }
+  }
+
+  // teacher_max_gaps: "giáo viên A tối đa 2 tiết trống/ngày"
+  if (
+    teachers.length > 0 &&
+    /(tối\s*đa|toi\s*da|max).*(trống|trong)/u.test(raw)
+  ) {
+    const maxGaps = extractFirstNumber(raw)
+    if (maxGaps !== null) {
+      return { kind: 'teacher_max_gaps', teacherLabels: teachers, maxGaps }
+    }
+  }
+
+  // teacher_min_consecutive: "giáo viên A khi dạy thì ít nhất 2 tiết liền"
+  if (
+    teachers.length > 0 &&
+    /(khi\s*dạy|khi\s*day).*(ít\s*nhất|it\s*nhat|min).*?(liên\s*tiếp|lien\s*tiep|liền|lien)/u.test(raw)
+  ) {
+    const minConsecutive = extractFirstNumber(raw)
+    if (minConsecutive !== null) {
+      return { kind: 'teacher_min_consecutive', teacherLabels: teachers, minConsecutive }
+    }
+  }
+
+  // teacher_min_working_days: "giáo viên A dạy ít nhất 4 ngày/tuần"
+  if (
+    teachers.length > 0 &&
+    /(ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|min).*(ngày|ngay)/u.test(raw) &&
+    !/(tiết|tiet)/u.test(raw)
+  ) {
+    const minDays = extractFirstNumber(raw)
+    if (minDays !== null) {
+      return { kind: 'teacher_min_working_days', teacherLabels: teachers, minDays }
+    }
+  }
+
+  // class_allow_only_days: "lớp 10A chỉ học thứ 2, 3, 4"
+  if (
+    classes.length > 0 &&
+    /chỉ\s*học|chi\s*hoc|chỉ\s*xếp|chi\s*xep/u.test(raw) &&
+    /(thứ|thu|ngày|ngay)/u.test(raw) &&
+    !/(tiết|tiet)/u.test(raw)
+  ) {
+    if (days.length > 0) {
+      return { kind: 'class_allow_only_days', classLabels: classes, dayIds: days }
+    }
+  }
+
+  // subject_allow_only_days: "môn Thể dục chỉ học thứ 3 hoặc thứ 5"
+  if (
+    subjects.length > 0 &&
+    /chỉ\s*học|chi\s*hoc|chỉ\s*xếp|chi\s*xep/u.test(raw) &&
+    days.length > 0 &&
+    periods.length === 0
+  ) {
+    return { kind: 'subject_allow_only_days', subjectLabels: subjects, dayIds: days }
+  }
+
+  // class_allow_only_periods: "lớp 10A chỉ học tiết 1-5"
+  if (
+    classes.length > 0 &&
+    /chỉ\s*học|chi\s*hoc|chỉ\s*xếp|chi\s*xep/u.test(raw) &&
+    /(tiết|tiet)/u.test(raw) &&
+    periods.length > 0
+  ) {
+    return { kind: 'class_allow_only_periods', classLabels: classes, periods }
+  }
+
+  // subject_block_days: "môn Thể dục không học thứ 7" | "thể dục không học thứ 2 buổi sáng"
+  if (
+    subjects.length > 0 &&
+    /không\s*học|khong\s*hoc|không\s*xếp|khong\s*xep|không\s*dạy|khong\s*day/u.test(raw) &&
+    days.length > 0 &&
+    periods.length === 0 &&
+    sessions.length === 0
+  ) {
+    const classFilter = classFilterFromText(raw, ctx.classLabels)
+    return classFilter
+      ? { kind: 'subject_block_days', subjectLabels: subjects, dayIds: days, classFilter }
+      : { kind: 'subject_block_days', subjectLabels: subjects, dayIds: days }
+  }
+
+  // subject_not_consecutive: "môn Thể dục không 2 tiết liền nhau" | "...không 2 tiết liên tiếp"
+  if (
+    subjects.length > 0 &&
+    /(không|khong).*(2|hai|2 tiết|2 buổi|2\s*tiết|2\s*buổi).*?(liền nhau|lien nhau|liên\s*tiếp|lien\s*tiep|liền|lien)/u.test(raw)
+  ) {
+    const classFilter = classFilterFromText(raw, ctx.classLabels)
+    return classFilter
+      ? { kind: 'subject_not_consecutive', subjectLabels: subjects, classFilter }
+      : { kind: 'subject_not_consecutive', subjectLabels: subjects }
+  }
+
+  // subject_min_gap_days: "môn Toán rải ít nhất 3 ngày" | "2 buổi học cùng môn cách nhau ít nhất 1 ngày"
+  if (
+    subjects.length > 0 &&
+    /cách\s*nhau|cach\s*nhau|rải|rai|trải|trai/u.test(raw) &&
+    /(ngày|ngay)/u.test(raw)
+  ) {
+    const minGapDays = extractFirstNumber(raw) ?? 1
+    const classFilter = classFilterFromText(raw, ctx.classLabels)
+    return classFilter
+      ? { kind: 'subject_min_gap_days', subjectLabels: subjects, minGapDays, classFilter }
+      : { kind: 'subject_min_gap_days', subjectLabels: subjects, minGapDays }
+  }
+
+  // subject_min_days: "môn Toán rải ít nhất 3 ngày" (alternative phrasing)
+  if (
+    subjects.length > 0 &&
+    /(rải|rai|trải|trai).*(ít\s*nhất|it\s*nhat|min).*?(ngày|ngay)/u.test(raw) &&
+    !/cách\s*nhau|cach\s*nhau/u.test(raw)
+  ) {
+    const minDays = extractFirstNumber(raw)
+    if (minDays !== null) {
+      const classFilter = classFilterFromText(raw, ctx.classLabels)
+      return classFilter
+        ? { kind: 'subject_min_days', subjectLabels: subjects, minDays, classFilter }
+        : { kind: 'subject_min_days', subjectLabels: subjects, minDays }
+    }
+  }
+
+  // pair_same_slot: "giáo viên A và B cùng dạy song song" | "cùng dạy cùng tiết"
+  if (
+    teachers.length >= 2 &&
+    /(cùng\s*dạy|cung\s*day|song\s*song|dạy\s*song\s*song)/u.test(raw)
+  ) {
+    return { kind: 'pair_same_slot', teacherLabels: teachers.slice(0, 2), dayIds: days }
+  }
+
+  // mutual_exclusion: "các môn Toán, Lý, Hóa không cùng tiết" | "Toán Lý Hóa không cùng tiết"
+  if (
+    subjects.length >= 2 &&
+    /(không\s*cùng|khong\s*cung).*(tiết|tiet|slot)/u.test(raw) &&
+    !/không\s*liên\s*tiếp|khong\s*lien\s*tiep/u.test(raw)
+  ) {
+    return { kind: 'mutual_exclusion', subjectLabels: subjects }
   }
 
   if (

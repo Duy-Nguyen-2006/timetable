@@ -56,6 +56,7 @@ const constraintSpecSchema = z.object({
     'teacher_balanced_load',
     'teacher_max_subjects_per_day',
     'teacher_max_consecutive_days',
+    'teacher_min_off_days',
     'teacher_preferred_periods',
     'teacher_max_classes_per_day',
     'teacher_pair_not_same_slot',
@@ -788,6 +789,240 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           ...(classes.length ? { classes } : {}),
         },
       } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'subject_not_consecutive' && parsed.subjectLabels[0]) {
+      const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_not_consecutive',
+        params: {
+          subject: parsed.subjectLabels[0],
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'subject_block_days' && parsed.subjectLabels[0] && parsed.dayIds.length > 0) {
+      const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+      return parsed.dayIds.map((day, idx) => ({
+        id: parsed.dayIds.length === 1 ? id : `${id}_${idx + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'subject_block_days' as const,
+        params: { subject: parsed.subjectLabels[0], days: [day], ...(classes.length ? { classes } : {}) },
+      }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'class_allow_only_days' && parsed.classLabels[0] && parsed.dayIds.length > 0) {
+      const allowedDays = new Set(parsed.dayIds);
+      return input.days
+        .map((day) => day.id)
+        .filter((day) => !allowedDays.has(day))
+        .map((day) => ({
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'class_block_day',
+          params: { class: parsed.classLabels[0], day },
+        }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'class_allow_only_periods' && parsed.classLabels[0] && parsed.periods.length > 0) {
+      const allowedPeriods = new Set(parsed.periods);
+      return buildTranslatorPeriods(input)
+        .filter((period) => !allowedPeriods.has(period))
+        .map((period) => ({
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'class_block_period',
+          params: { class: parsed.classLabels[0], period },
+        }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'subject_allow_only_days' && parsed.subjectLabels[0] && parsed.dayIds.length > 0) {
+      return parsed.dayIds.map((day, idx) => ({
+        id: parsed.dayIds.length === 1 ? id : `${id}_${idx + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'subject_allowed_days' as const,
+        params: { subject: parsed.subjectLabels[0], days: [day] },
+      }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'class_no_gaps' && parsed.classLabels[0]) {
+      const targets = parsed.classLabels === '*' ? classLabels : parsed.classLabels;
+      return targets.map((klass, idx) => ({
+        id: targets.length === 1 ? id : `${id}_${idx + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'class_no_gaps' as const,
+        params: { class: klass },
+      }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'class_max_per_day' && parsed.classLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'class_max_per_day',
+        params: { class: parsed.classLabels[0], maxPerDay: parsed.maxPerDay },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'class_min_per_day' && parsed.classLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'class_min_per_day',
+        params: { class: parsed.classLabels[0], minPerDay: parsed.minPerDay },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_min_per_day' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_min_per_day',
+        params: { teacher: parsed.teacherLabels[0], minPerDay: parsed.minPerDay },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_no_gaps' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_no_gaps',
+        params: { teacher: parsed.teacherLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_min_working_days' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_min_working_days',
+        params: { teacher: parsed.teacherLabels[0], minDays: parsed.minDays },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_min_off_days') {
+      const totalDays = input.days.length;
+      const minOff = parsed.min;
+      // minOff days off = max (totalDays - minOff) working days.
+      const maxWorking = Math.max(1, totalDays - minOff);
+      if (parsed.teacherLabels === '*') {
+        return input.assignments
+          .map((a) => a.teacher.label)
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .map((teacher, idx) => ({
+            id: `${id}_${idx + 1}`,
+            original: constraint.text,
+            severity,
+            kind: 'teacher_max_working_days' as const,
+            params: { teacher, maxDays: maxWorking },
+          }) satisfies ConstraintSpec);
+      }
+      const teacher = parsed.teacherLabels[0];
+      if (teacher) {
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_max_working_days',
+          params: { teacher, maxDays: maxWorking },
+        } satisfies ConstraintSpec;
+      }
+    }
+
+    if (parsed.kind === 'teacher_max_gaps' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_max_gaps',
+        params: { teacher: parsed.teacherLabels[0], maxGaps: parsed.maxGaps },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_min_consecutive' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_min_consecutive',
+        params: { teacher: parsed.teacherLabels[0], minConsecutive: parsed.minConsecutive },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'subject_min_gap_days' && parsed.subjectLabels[0]) {
+      const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_min_gap_days',
+        params: {
+          subject: parsed.subjectLabels[0],
+          minGapDays: parsed.minGapDays,
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'subject_min_days' && parsed.subjectLabels[0]) {
+      const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_min_days',
+        params: {
+          subject: parsed.subjectLabels[0],
+          minDays: parsed.minDays,
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'pair_same_slot' && parsed.teacherLabels.length >= 2) {
+      const day = parsed.dayIds[0];
+      const matched = input.assignments.filter((a) => parsed.teacherLabels.includes(a.teacher.label));
+      const assignmentIds = [...new Set(matched.map((a) => a.id))];
+      if (assignmentIds.length >= 2) {
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'pair_same_slot',
+          params: {
+            assignmentIds: assignmentIds.slice(0, 2),
+            ...(day ? { scope: { day } } : {}),
+          },
+        } satisfies ConstraintSpec;
+      }
+    }
+
+    if (parsed.kind === 'mutual_exclusion' && parsed.subjectLabels.length >= 2) {
+      const matched = input.assignments.filter((a) => parsed.subjectLabels.includes(a.subject.label));
+      const assignmentIds = [...new Set(matched.map((a) => a.id))];
+      if (assignmentIds.length >= 2) {
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'mutual_exclusion',
+          params: { assignmentIds },
+        } satisfies ConstraintSpec;
+      }
     }
 
     const mentionsLegacyNoDouble =
@@ -1668,6 +1903,7 @@ export async function runTranslatorTurn(
                         'teacher_balanced_load',
                         'teacher_max_subjects_per_day',
                         'teacher_max_consecutive_days',
+                        'teacher_min_off_days',
                         'teacher_pair_not_same_slot',
                         'teacher_pair_not_same_day',
                         'teacher_homeroom_first_period',
