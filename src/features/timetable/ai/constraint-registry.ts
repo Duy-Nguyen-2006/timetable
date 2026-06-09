@@ -46,6 +46,7 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'teacher_preferred_periods', label: 'Teacher preferred periods', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'periods'] },
   { kind: 'teacher_max_classes_per_day', label: 'Teacher max classes per day', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'maxClasses'] },
   { kind: 'teacher_pair_not_same_slot', label: 'Teacher pair not same slot', group: 'teacher', hasChecker: true, requiredParams: ['teachers'] },
+  { kind: 'teacher_pair_not_same_day', label: 'Teacher pair not same day', group: 'teacher', hasChecker: true, requiredParams: ['teachers'] },
   { kind: 'teacher_homeroom_first_period', label: 'Teacher homeroom first period', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'class'] },
   { kind: 'subject_pin_period', label: 'Subject pin period', group: 'subject', hasChecker: true, requiredParams: ['subject', 'period'] },
   { kind: 'subject_preferred_periods', label: 'Subject preferred periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'periods'] },
@@ -174,6 +175,7 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
   'teacher_preferred_periods',
   'teacher_max_classes_per_day',
   'teacher_pair_not_same_slot',
+  'teacher_pair_not_same_day',
   'teacher_homeroom_first_period',
   // Subject constraints
   'subject_pin_period',

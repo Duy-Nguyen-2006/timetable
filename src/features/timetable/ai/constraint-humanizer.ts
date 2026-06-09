@@ -155,6 +155,18 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
       const dayPart = scopeDay ? ` trong ngày ${dayInText(scopeDay)}` : '';
       return `${prefix}Hai giáo viên ${teachers} không dạy cùng một tiết${dayPart}${soft(spec)}.`;
     }
+    case 'teacher_pair_not_same_slot': {
+      const teachers = Array.isArray(p.teachers) ? p.teachers.join(' và ') : paramStr(p.teachers);
+      const scopeDay = (p.scope as { day?: string } | undefined)?.day ?? p.day;
+      const dayPart = scopeDay ? ` trong ngày ${dayInText(scopeDay)}` : '';
+      return `${prefix}Hai giáo viên ${teachers} không dạy cùng một tiết${dayPart}${soft(spec)}.`;
+    }
+    case 'teacher_pair_not_same_day': {
+      const teachers = Array.isArray(p.teachers) ? p.teachers.join(' và ') : paramStr(p.teachers);
+      const scopeDay = (p.scope as { day?: string } | undefined)?.day ?? p.day;
+      const dayPart = scopeDay ? ` trong ngày ${dayInText(scopeDay)}` : '';
+      return `${prefix}Hai giáo viên ${teachers} không dạy cùng một ngày${dayPart}${soft(spec)}.`;
+    }
     case 'teacher_max_working_days':
       return `${prefix}Giáo viên ${paramStr(p.teacher)} dạy tối đa ${paramStr(p.maxDays)} ngày/tuần${soft(spec)}.`;
     case 'teacher_min_per_day':

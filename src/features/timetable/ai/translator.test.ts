@@ -232,6 +232,63 @@ test('fallback parser covers remaining constraint kinds', () => {
   assert.equal(specs[6].kind, 'if_then');
 });
 
+test('fallback parser maps teacher pair not same day to built-in spec', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    assignments: [
+      {
+        id: 'asg_1',
+        teacher: { id: 't1', label: 'Hiếu' },
+        subject: { id: 's1', label: 'Toán' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 2,
+      },
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Thủy' },
+        subject: { id: 's2', label: 'Văn' },
+        class: { id: 'c2', label: '6B' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Hiếu và Thủy không dạy cùng ngày' }],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs.length, 1);
+  assert.equal(specs[0].kind, 'teacher_pair_not_same_day');
+  assert.deepEqual(specs[0].params.teachers, ['Hiếu', 'Thủy']);
+});
+
+test('fallback parser maps scoped teacher pair not same day', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    assignments: [
+      {
+        id: 'asg_1',
+        teacher: { id: 't1', label: 'Hiếu' },
+        subject: { id: 's1', label: 'Toán' },
+        class: { id: 'c1', label: '6A' },
+        weeklyPeriods: 2,
+      },
+      {
+        id: 'asg_2',
+        teacher: { id: 't2', label: 'Thủy' },
+        subject: { id: 's2', label: 'Văn' },
+        class: { id: 'c2', label: '6B' },
+        weeklyPeriods: 2,
+      },
+    ],
+    constraints: [{ type: 'required', text: 'Hiếu và Thủy không dạy cùng ngày thứ 3' }],
+  };
+
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+
+  assert.equal(specs[0].kind, 'teacher_pair_not_same_day');
+  assert.deepEqual(specs[0].params.scope, { day: 'tue' });
+});
+
 test('fallback parser expands teacher allow-only days into blocked days', () => {
   const input: AgentInputPayload = {
     ...sampleInput,

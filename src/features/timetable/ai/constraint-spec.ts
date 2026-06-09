@@ -18,6 +18,7 @@ export type ConstraintKind =
   | 'teacher_preferred_periods'
   | 'teacher_max_classes_per_day'
   | 'teacher_pair_not_same_slot'
+  | 'teacher_pair_not_same_day'
   | 'teacher_homeroom_first_period'
   | 'subject_pin_period'
   | 'subject_preferred_periods'

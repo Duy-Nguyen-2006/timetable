@@ -311,6 +311,7 @@ export const KNOWN_ENCODABLE_KINDS = new Set([
   'teacher_preferred_periods',
   'teacher_max_classes_per_day',
   'teacher_pair_not_same_slot',
+  'teacher_pair_not_same_day',
   'teacher_homeroom_first_period',
   // Subject constraints
   'subject_pin_period',

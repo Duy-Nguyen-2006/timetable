@@ -59,6 +59,7 @@ const constraintSpecSchema = z.object({
     'teacher_preferred_periods',
     'teacher_max_classes_per_day',
     'teacher_pair_not_same_slot',
+    'teacher_pair_not_same_day',
     'teacher_homeroom_first_period',
     'subject_pin_period',
     'subject_preferred_periods',
@@ -529,6 +530,20 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         original: constraint.text,
         severity,
         kind: 'teacher_pair_not_same_slot',
+        params: {
+          teachers: parsed.teacherLabels.slice(0, 2),
+          ...(day ? { scope: { day } } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_pair_not_same_day' && parsed.teacherLabels.length >= 2) {
+      const day = parsed.dayIds[0];
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_pair_not_same_day',
         params: {
           teachers: parsed.teacherLabels.slice(0, 2),
           ...(day ? { scope: { day } } : {}),
@@ -1653,6 +1668,9 @@ export async function runTranslatorTurn(
                         'teacher_balanced_load',
                         'teacher_max_subjects_per_day',
                         'teacher_max_consecutive_days',
+                        'teacher_pair_not_same_slot',
+                        'teacher_pair_not_same_day',
+                        'teacher_homeroom_first_period',
                         'subject_pin_period',
                         'subject_consecutive',
                         'subject_max_consecutive',

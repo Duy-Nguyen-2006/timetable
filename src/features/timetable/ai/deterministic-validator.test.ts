@@ -171,6 +171,12 @@ const checkerCases: CheckerCase[] = [
     fail: [entry('6A', 'mon', 1, 'Toán', 'Sơn'), entry('6B', 'mon', 1, 'Văn', 'Thúy')],
   },
   {
+    kind: 'teacher_pair_not_same_day',
+    spec: spec('teacher_pair_not_same_day', 'teacher_pair_not_same_day', { teachers: ['Hiếu', 'Thủy'] }),
+    pass: [entry('6A', 'mon', 1, 'Toán', 'Hiếu'), entry('6B', 'tue', 1, 'Văn', 'Thủy')],
+    fail: [entry('6A', 'mon', 1, 'Toán', 'Hiếu'), entry('6B', 'mon', 2, 'Văn', 'Thủy')],
+  },
+  {
     kind: 'custom_dsl',
     spec: spec('custom_dsl', 'custom_dsl', { naturalLanguage: 'custom expression' }, 'soft'),
     pass: [entry('6A', 'mon', 1, 'Toán', 'Sơn')],

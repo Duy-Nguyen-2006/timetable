@@ -1414,6 +1414,36 @@ const checkTeacherPairNotSameSlot: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+const checkTeacherPairNotSameDay: CheckFn = (spec, schedule) => {
+  const teachers = Array.isArray(spec.params.teachers)
+    ? spec.params.teachers.map((value) => String(value))
+    : [];
+  if (teachers.length !== 2) return [];
+  const scope = (spec.params.scope ?? {}) as { day?: string };
+  const relevant = schedule.filter((entry) => {
+    if (!teachers.includes(entry.teacher)) return false;
+    if (scope.day && entry.day !== scope.day) return false;
+    return true;
+  });
+  const byDay = new Map<string, ScheduleEntry[]>();
+  for (const entry of relevant) {
+    appendToGroup(byDay, entry.day, entry);
+  }
+  const violations: Violation[] = [];
+  for (const [day, entries] of byDay.entries()) {
+    const uniqTeachers = new Set(entries.map((entry) => entry.teacher));
+    if (uniqTeachers.size > 1) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `${teachers[0]} và ${teachers[1]} cùng dạy trong ngày ${day}.`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
 const checkTeacherHomeroomFirstPeriod: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
   const klass = String(spec.params.class ?? '');
@@ -1742,6 +1772,7 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_preferred_periods: checkTeacherPreferredPeriods,
   teacher_max_classes_per_day: checkTeacherMaxClassesPerDay,
   teacher_pair_not_same_slot: checkTeacherPairNotSameSlot,
+  teacher_pair_not_same_day: checkTeacherPairNotSameDay,
   teacher_homeroom_first_period: checkTeacherHomeroomFirstPeriod,
   subject_pin_period: checkSubjectPinPeriod,
   subject_preferred_periods: checkSubjectPreferredPeriods,

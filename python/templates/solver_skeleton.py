@@ -1114,6 +1114,28 @@ def build_custom_constraints(model, slots, data):
                         <= 1
                     )
 
+        elif kind == "teacher_pair_not_same_day":
+            teachers = params.get("teachers", [])
+            if len(teachers) != 2:
+                raise NotImplementedError(f"Invalid teacher_pair_not_same_day: {spec.get('id')}")
+            t1, t2 = teachers
+            scope_day = (params.get("scope") or {}).get("day")
+            days_to_check = [scope_day] if scope_day else days
+            asgs1 = [a for a in assignments if a["teacher"] == t1]
+            asgs2 = [a for a in assignments if a["teacher"] == t2]
+            for d in days_to_check:
+                t1_vars = _slot_vars(_slot_var(a, d, p) for a in asgs1 for p in _periods_for(d))
+                t2_vars = _slot_vars(_slot_var(a, d, p) for a in asgs2 for p in _periods_for(d))
+                if not t1_vars or not t2_vars:
+                    continue
+                t1_present = model.NewBoolVar(f"tpnsd_{t1}_{d}")
+                t2_present = model.NewBoolVar(f"tpnsd_{t2}_{d}")
+                model.Add(sum(t1_vars) >= 1).OnlyEnforceIf(t1_present)
+                model.Add(sum(t1_vars) == 0).OnlyEnforceIf(t1_present.Not())
+                model.Add(sum(t2_vars) >= 1).OnlyEnforceIf(t2_present)
+                model.Add(sum(t2_vars) == 0).OnlyEnforceIf(t2_present.Not())
+                model.Add(t1_present + t2_present <= 1)
+
         elif kind == "teacher_homeroom_first_period":
             teacher = params.get("teacher")
             cls = params.get("class")

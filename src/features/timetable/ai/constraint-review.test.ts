@@ -126,6 +126,18 @@ test('humanizeConstraintSpec allowed/block day lists never expose ids', () => {
   }
 });
 
+test('humanizeConstraintSpec teacher_pair_not_same_day in Vietnamese', () => {
+  const line = humanizeConstraintSpec({
+    id: 'c1',
+    original: 'Hiếu và Thủy không dạy cùng ngày',
+    severity: 'hard',
+    kind: 'teacher_pair_not_same_day',
+    params: { teachers: ['Hiếu', 'Thủy'] },
+  });
+  assert.equal(line, 'Hai giáo viên Hiếu và Thủy không dạy cùng một ngày.');
+  assert.doesNotMatch(line, /custom|dsl|teacher_pair|same_day/i);
+});
+
 test('humanizeConstraintSpec subject_preferred_periods in Vietnamese', () => {
   const line = humanizeConstraintSpec({
     id: 'c1',

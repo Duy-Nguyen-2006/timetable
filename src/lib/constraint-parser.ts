@@ -22,6 +22,7 @@ export type ParsedConstraint =
   | { kind: 'teacher_prefer_periods'; teacherLabels: string[]; periods: number[] }
   | { kind: 'teacher_max_classes_per_day'; teacherLabels: string[] | '*'; max: number }
   | { kind: 'teacher_pair_not_same_slot'; teacherLabels: string[]; dayIds: string[] }
+  | { kind: 'teacher_pair_not_same_day'; teacherLabels: string[]; dayIds: string[] }
   | { kind: 'teacher_homeroom_first_period'; teacherLabels: string[]; classLabels: string[]; dayIds: string[]; period: number }
   | { kind: 'subject_not_last_period'; subjectLabels: string[]; classFilter?: string[] }
   | { kind: 'class_subjects_not_same_day'; classLabels: string[] | '*'; subjectLabels: string[]; maxSubjectsPerDay: number; softHint: boolean }
@@ -220,6 +221,14 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     return { kind: 'subjects_not_consecutive', subjectLabels: subjects }
   }
 
+  if (teachers.length >= 2 && /(không|khong).*(cùng|trùng).*(ngày|ngay)/u.test(raw)) {
+    return { kind: 'teacher_pair_not_same_day', teacherLabels: teachers.slice(0, 2), dayIds: days }
+  }
+
+  if (teachers.length >= 2 && /(không|khong).*(cùng|trùng).*(tiết|tiet|slot)/u.test(raw)) {
+    return { kind: 'teacher_pair_not_same_slot', teacherLabels: teachers.slice(0, 2), dayIds: days }
+  }
+
   if (/không\s*dạy|khong\s*day|không\s*có\s*lịch|khong\s*co\s*lich|tránh\s*dạy|tranh\s*day|tránh\s*tiết|tranh\s*tiet|tránh|tranh/u.test(raw) && teachers.length > 0) {
     if (days.length > 0 && periods.length > 0) return { kind: 'teacher_block_day_period', teacherLabels: teachers, dayIds: days, periods }
     if (sessions.length > 0 && days.length > 0) return { kind: 'teacher_block_session_day', teacherLabels: teachers, sessionIds: sessions, dayIds: days }
@@ -281,10 +290,6 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
         max,
       }
     }
-  }
-
-  if (teachers.length >= 2 && /(không|khong).*(cùng|trùng).*(tiết|tiet|slot)/u.test(raw)) {
-    return { kind: 'teacher_pair_not_same_slot', teacherLabels: teachers.slice(0, 2), dayIds: days }
   }
 
   if (
