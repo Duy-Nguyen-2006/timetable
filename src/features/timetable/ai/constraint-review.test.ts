@@ -82,6 +82,50 @@ test('humanizeConstraintSpec maps monday to Thứ 2', () => {
   assert.doesNotMatch(line, /\bmonday\b/i);
 });
 
+test('humanizeConstraintSpec teacher_allowed_days maps day ids to Vietnamese', () => {
+  const line = humanizeConstraintSpec({
+    id: 'c1',
+    original: 'Sơn chỉ dạy thứ 3',
+    severity: 'hard',
+    kind: 'teacher_allowed_days',
+    params: { teacher: 'Sơn', days: ['tuesday'] },
+  });
+  assert.equal(line, 'Giáo viên Sơn chỉ dạy vào Thứ 3.');
+  assert.doesNotMatch(line, /\btuesday\b/i);
+});
+
+test('humanizeConstraintSpec allowed/block day lists never expose ids', () => {
+  const lines = [
+    humanizeConstraintSpec({
+      id: 'c1',
+      original: 'Toán chỉ học thứ 3 và thứ 5',
+      severity: 'hard',
+      kind: 'subject_allowed_days',
+      params: { subject: 'Toán', days: ['tuesday', 'thursday'] },
+    }),
+    humanizeConstraintSpec({
+      id: 'c2',
+      original: 'Văn không học thứ 4',
+      severity: 'hard',
+      kind: 'subject_block_days',
+      params: { subject: 'Văn', days: ['wednesday'] },
+    }),
+    humanizeConstraintSpec({
+      id: 'c3',
+      original: '6A chỉ học thứ 2',
+      severity: 'hard',
+      kind: 'class_allowed_days',
+      params: { class: '6A', days: ['monday'] },
+    }),
+  ];
+  assert.match(lines[0], /Thứ 3 và Thứ 5/);
+  assert.match(lines[1], /Thứ 4/);
+  assert.match(lines[2], /Thứ 2/);
+  for (const line of lines) {
+    assert.doesNotMatch(line, /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+  }
+});
+
 test('humanizeConstraintSpec subject_preferred_periods in Vietnamese', () => {
   const line = humanizeConstraintSpec({
     id: 'c1',

@@ -74,6 +74,13 @@ function dayInText(dayId: unknown): string {
   return label || paramStr(dayId);
 }
 
+function dayListInText(days: unknown): string {
+  if (!Array.isArray(days)) return dayInText(days);
+  const labels = days.map((day) => dayInText(day)).filter(Boolean);
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} và ${labels[labels.length - 1]}`;
+}
+
 function soft(spec: ConstraintSpec): string {
   return severityPhrase(spec.severity, spec.weight);
 }
@@ -155,7 +162,7 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
     case 'teacher_no_gaps':
       return `${prefix}Giáo viên ${paramStr(p.teacher)} không có tiết trống giữa các tiết dạy${soft(spec)}.`;
     case 'teacher_allowed_days':
-      return `${prefix}Giáo viên ${paramStr(p.teacher)} chỉ dạy vào ${paramStr(p.days)}${soft(spec)}.`;
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} chỉ dạy vào ${dayListInText(p.days)}${soft(spec)}.`;
     case 'teacher_allowed_periods':
       return `${prefix}Giáo viên ${paramStr(p.teacher)} chỉ dạy các tiết ${paramStr(p.periods)}${soft(spec)}.`;
     case 'teacher_max_classes_per_day':
@@ -169,11 +176,11 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
     case 'teacher_balanced_load':
       return `${prefix}Cân bằng tải giáo viên (dung sai ${paramStr(p.tolerance)})${soft(spec)}.`;
     case 'subject_allowed_days':
-      return `${prefix}Môn ${paramStr(p.subject)} chỉ được xếp vào ${paramStr(p.days)}${soft(spec)}.`;
+      return `${prefix}Môn ${paramStr(p.subject)} chỉ được xếp vào ${dayListInText(p.days)}${soft(spec)}.`;
     case 'subject_block_period':
       return `${prefix}Môn ${paramStr(p.subject)} không được xếp vào tiết ${paramStr(p.periods)}${soft(spec)}.`;
     case 'subject_block_days':
-      return `${prefix}Môn ${paramStr(p.subject)} không được xếp vào ${paramStr(p.days)}${soft(spec)}.`;
+      return `${prefix}Môn ${paramStr(p.subject)} không được xếp vào ${dayListInText(p.days)}${soft(spec)}.`;
     case 'subject_not_consecutive':
       return `${prefix}Môn ${paramStr(p.subject)} không được xếp vào các tiết liên tiếp${soft(spec)}.`;
     case 'subject_daily_max_periods':
@@ -199,7 +206,7 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
     case 'class_block_slot':
       return `${prefix}Lớp ${paramStr(p.class)} không học ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
     case 'class_allowed_days':
-      return `${prefix}Lớp ${paramStr(p.class)} chỉ học vào ${paramStr(p.days)}${soft(spec)}.`;
+      return `${prefix}Lớp ${paramStr(p.class)} chỉ học vào ${dayListInText(p.days)}${soft(spec)}.`;
     case 'class_max_consecutive':
       return `${prefix}Lớp ${paramStr(p.class)} tối đa ${paramStr(p.maxConsecutive)} tiết liên tiếp${soft(spec)}.`;
     case 'class_balanced_load':
