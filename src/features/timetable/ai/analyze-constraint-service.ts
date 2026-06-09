@@ -326,6 +326,36 @@ function mergedDeterministicFallbackSpecs(
   return fallbackBuiltInSpecs(rawText, constraintType, weight, agentInput);
 }
 
+function hasUnknownIfThenCondition(specs: ConstraintSpec[]): boolean {
+  return specs.some((spec) => {
+    if (spec.kind !== 'if_then') return false;
+    const condition = spec.params.if;
+    return !condition || typeof condition !== 'object' || !('op' in condition);
+  });
+}
+
+function hasTechnicalOrUnknownText(text: string): boolean {
+  return /\b[a-z]+(?:_[a-z]+)+\b/u.test(text) || text.includes('điều kiện chưa xác định');
+}
+
+function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
+  return {
+    status: 'needs_clarification',
+    normalizedText: 'AI chưa đủ thông tin để hiểu ràng buộc này một cách chắc chắn.',
+    specs: [],
+    confidence: 'low',
+    clarificationQuestions: [
+      `Mình chưa rõ điều kiện trong câu “${rawText}”. “Hiếu và Thúy dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
+      '“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định Hiếu/Thúy không dạy tiết 4?',
+      'Ràng buộc này áp dụng cho tất cả lớp hay chỉ một lớp cụ thể?',
+    ],
+    assumptions: [],
+    unresolvedQuestions: [
+      'Thiếu điều kiện/ngữ cảnh để map chắc chắn sang ràng buộc máy hiểu.',
+    ],
+  };
+}
+
 // ─── System Prompt ─────────══─────────────────────────────────────────────────
 
 function buildSystemPrompt(agentInput: AgentInputPayload): string {
@@ -391,6 +421,7 @@ Quy tắc map built-in:
 - Nếu người dùng liệt kê nhiều môn trong cùng một ràng buộc (ví dụ: "Toán, Văn"), PHẢI trả đủ một spec cho từng môn, không được bỏ sót môn nào.
 - Nếu câu có thể diễn đạt bằng built-in -> trả về specs[] với kind và params chính xác.
 - Nếu built-in KHÔNG đủ diễn đạt -> chuyển sang Bước 3.
+- Nếu câu if-then còn mơ hồ (ví dụ “1 người”, “ngày bất kỳ”, “cùng ngày” nhưng không rõ áp dụng cho ngày/lớp nào, hoặc không rõ ai bị chặn) thì PHẢI trả status "needs_clarification" và hỏi lại bằng tiếng Việt. KHÔNG được tạo spec có params.if rỗng, KHÔNG được đưa tên kind kỹ thuật như teacher_block_period ra normalizedText.
 - KHÔNG được trả "needs_clarification" / "điều kiện chưa xác định" cho câu if-then rõ ràng — PHẢI map sang if_then.
 
 ## Bước 3: Semantic/Custom (fallback chính thức)
@@ -512,6 +543,14 @@ export async function analyzeConstraint(
         resolvedConfidence = 'high';
         resolvedNormalizedText = deterministic.map((s) => humanizeConstraintSpec(s)).join('\n');
       }
+    }
+
+    if (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText)) {
+      return {
+        ...clarifyAmbiguousIfThen(rawText),
+        rawResponse: content,
+        usageTokens: response.usage?.total_tokens,
+      };
     }
 
     return {
