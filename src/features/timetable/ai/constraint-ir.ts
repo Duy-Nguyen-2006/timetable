@@ -389,8 +389,9 @@ export function checkHardConstraintMechanism(
     return { id: spec.id, ok: true, mechanism: 'ir_expr' };
   }
 
-  // Has IR expr
-  if (spec.expr && typeof spec.expr === 'object') {
+  // Has IR expr (top-level or under params)
+  const exprFromParams = (spec.params as Record<string, unknown> | undefined)?.expr;
+  if ((spec.expr && typeof spec.expr === 'object') || (exprFromParams && typeof exprFromParams === 'object')) {
     return { id: spec.id, ok: true, mechanism: 'ir_expr' };
   }
 

@@ -2,7 +2,27 @@ import os from 'node:os';
 import type { ConstraintSpec } from './constraint-spec';
 import type { AgentEvent, LocalAgentConfig } from './types';
 
-export type SolverRuntimeConfig = { timeoutMs: number; workers: number };
+export type SolverRuntimeConfig = { timeoutMs: number; workers: number; seed: number };
+
+/**
+ * Section 14.8: Solver determinism. The seed is derived from the constraint
+ * specs hash so that the same input always produces the same output.
+ */
+export const DEFAULT_SOLVER_SEED = 42;
+export const SOLVER_SEED_SALT = 0x5e2d3a91;
+
+export function deriveSolverSeed(specs: readonly { id: string; kind: string; params: Record<string, unknown> }[]): number {
+  const sorted = [...specs].sort((a, b) => a.id.localeCompare(b.id));
+  let h = 0x811c9dc5;
+  for (const spec of sorted) {
+    const payload = JSON.stringify({ k: spec.kind, p: sortObjectDeep(spec.params) });
+    for (let i = 0; i < payload.length; i += 1) {
+      h ^= payload.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+  }
+  return ((h ^ SOLVER_SEED_SALT) >>> 0) & 0x7fffffff;
+}
 
 export function emit(config: LocalAgentConfig, event: AgentEvent) {
   config.onEvent?.(event);
@@ -18,18 +38,21 @@ export function getAvailableCpuCount(): number {
   return (os?.cpus?.() ?? []).length || 2;
 }
 
-export function resolveSolverRuntime(config: LocalAgentConfig): SolverRuntimeConfig {
+export function resolveSolverRuntime(config: LocalAgentConfig, specs?: ConstraintSpec[]): SolverRuntimeConfig {
   const cpuCount = getAvailableCpuCount();
   const profile = config.solverProfile ?? 'balanced';
   const defaults: Record<string, SolverRuntimeConfig> = {
-    fast: { timeoutMs: 20_000, workers: Math.max(1, Math.floor(cpuCount / 2)) },
-    balanced: { timeoutMs: 60_000, workers: Math.max(1, cpuCount - 1) },
-    deep: { timeoutMs: 180_000, workers: cpuCount },
+    fast: { timeoutMs: 20_000, workers: Math.max(1, Math.floor(cpuCount / 2)), seed: DEFAULT_SOLVER_SEED },
+    balanced: { timeoutMs: 60_000, workers: Math.max(1, cpuCount - 1), seed: DEFAULT_SOLVER_SEED },
+    deep: { timeoutMs: 180_000, workers: cpuCount, seed: DEFAULT_SOLVER_SEED },
   };
   const resolved = defaults[profile] ?? defaults.balanced;
+  // Section 14.8: same input → same seed for reproducible solver runs
+  const seed = specs && specs.length > 0 ? deriveSolverSeed(specs) : resolved.seed;
   return {
     timeoutMs: config.timeoutMs ?? resolved.timeoutMs,
     workers: Math.min(8, Math.max(1, Math.floor(config.solverWorkers ?? resolved.workers))),
+    seed,
   };
 }
 

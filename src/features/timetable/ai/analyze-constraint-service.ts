@@ -21,10 +21,10 @@ import type { SemanticConstraint } from './semantic-constraint';
 import { humanizeConstraintSpec } from './constraint-humanizer';
 import { __translatorInternal } from './translator';
 import { matchKnownEntities, suggestBuiltInConstraint } from './built-in-suggestion';
-import { SOLVER_ENCODABLE_KIND_LIST } from './constraint-registry';
-import {
-  BUILT_IN_CONSTRAINT_DEFINITIONS,
-} from './constraint-registry';
+import { SOLVER_ENCODABLE_KIND_LIST, BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
+import type { BuiltInConstraintScope } from './constraint-registry';
+import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
+import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -141,7 +141,7 @@ function extractText(payload: unknown): string {
   return '';
 }
 
-async function invokeAnalyzeChat(
+export async function invokeAnalyzeChat(
   config: AIProviderConfig,
   messages: AnalyzeChatMessage[]
 ): Promise<{ content?: string; usage?: { total_tokens?: number } }> {
@@ -355,95 +355,77 @@ function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
     ],
   };
 }
+// ─── Stage 1: Resolver (CODE) ─────────────────────────────────────────────────
 
-// ─── System Prompt ─────────══─────────────────────────────────────────────────
+function buildResolverHints(
+  rawText: string,
+  agentInput: AgentInputPayload
+): ConstraintResolverHints {
+  const normalized = normalizeConstraintText(rawText);
+  const teachers = uniqueLabels(agentInput.assignments.map((a) => a.teacher.label));
+  const subjects = uniqueLabels(agentInput.assignments.map((a) => a.subject.label));
+  const classes = uniqueLabels(agentInput.assignments.map((a) => a.class.label));
+  const resolvedTeachers = matchKnownEntities(rawText, teachers);
+  const resolvedSubjects = matchKnownEntities(rawText, subjects);
+  const resolvedClasses = matchKnownEntities(rawText, classes);
+  const resolvedTeacher = resolvedTeachers[0] ?? null;
+  const resolvedSubject = resolvedSubjects[0] ?? null;
+  const resolvedClass = resolvedClasses[0] ?? null;
 
-function buildSystemPrompt(agentInput: AgentInputPayload): string {
+  let inferredScope: BuiltInConstraintScope | null = null;
+  if (resolvedTeacher) inferredScope = 'teacher';
+  else if (resolvedSubject) inferredScope = 'subject';
+  else if (resolvedClass) inferredScope = 'class';
+
+  return {
+    normalizedText: normalized,
+    resolvedTeacher,
+    resolvedTeachers,
+    resolvedSubject,
+    resolvedSubjects,
+    resolvedClass,
+    resolvedClasses,
+    extractedNumber: extractFirstNumber(rawText),
+    extractedPeriods: [],
+    extractedDays: agentInput.days
+      .map((d) => (normalized.includes(d.id) || normalized.includes(d.label.toLowerCase()) ? d.id : null))
+      .filter(Boolean) as string[],
+    inferredScope,
+    mentionsBlock: /\b(khong|cam|nghi)\b/iu.test(normalized) && /dạy|hoc|u/iu.test(normalized),
+    mentionsMax: /tối\s*đa|tối\s*da|quá|không.*quá|khong.*qua/iu.test(normalized),
+    mentionsMin: /ít\s*nhất|tối\s*thiểu/iu.test(normalized),
+    mentionsConsecutive: /liên\s*tiếp|liên\s*tục/iu.test(normalized),
+    mentionsOnly: /chi\b|chỉ\b/iu.test(normalized) && /dạy|u/iu.test(normalized),
+    mentionsPreferred: /ưu\s*tiên|thích|nên/iu.test(normalized),
+    mentionsIfThen: /nếu.*thì|neu.*thi/iu.test(normalized),
+  };
+}
+
+// ─── Small System Prompt (Retrieve-then-Fill) ─────────────────────────────────
+
+function buildSmallSystemPrompt(
+  agentInput: AgentInputPayload,
+  hints: ConstraintResolverHints,
+  topKCandidates: ReturnType<typeof retrieveTopK>
+): string {
   const contextBlock = buildContextBlock(agentInput);
-  const builtInRef = buildBuiltInKindReference();
+  const topKSection = buildTopKPromptSection(topKCandidates, hints.inferredScope);
 
-  return `Bạn là AI chuyên phân tích ràng buộc thời khóa biểu tiếng Việt cho trường học.
+  return `Bạn map MỘT câu ràng buộc tiếng Việt vào MỘT trong các kind được cung cấp.
+Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả "custom" kèm IR.
+KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
+Dùng các "extracted hints" cho param; chỉ map, không tự suy số.
+Output JSON: { kind | "custom", params, confidence, missingParams[] }
 
-## QUAN TRỌNG: Bạn chỉ phân tích 1 ràng buộc duy nhất
-Bạn nhận được ĐÚNG 1 câu ràng buộc từ người dùng. Phân tích câu đó thôi, KHÔNG phân tích nhiều câu cùng lúc.
+## Top-k kind candidates (theo scope "${hints.inferredScope ?? 'all'}"):
+${topKSection}
 
-## QUAN TRỌNG: Kiểm tra entity trước khi phân tích
-TRƯỚC KHI phân tích, bạn PHẢI kiểm tra từng entity (giáo viên, lớp, môn, ngày, tiết) có trong danh sách context không.
-
-### Quy tắc kiểm tra entity:
-1. **Giáo viên**: Tên giáo viên PHẢI khớp chính xác (không phân biệt hoa/thường, bỏ dấu) với danh sách giáo viên từ context.
-   - Ví dụ: User nhập "Cô Lan" nhưng context chỉ có ["Sơn", "Hương", "Hiếu", "Thủy"]
-   - → PHẢI trả status: "needs_clarification" với câu hỏi: "Giáo viên 'Lan' không có trong danh sách giáo viên hiện tại. Bạn có muốn thêm giáo viên này vào danh sách trước, hay chọn giáo viên khác?"
-   - KHÔNG được tự ý map "Lan" thành "Sơn" hay bất kỳ ai khác.
-
-2. **Lớp**: Tên lớp PHẢI khớp chính xác với danh sách lớp từ context.
-   - Nếu không khớp → trả needs_clarification: "Lớp 'X' không có trong danh sách lớp hiện tại."
-
-3. **Môn học**: Tên môn PHẢI khớp chính xác với danh sách môn từ context.
-   - Nếu không khớp → trả needs_clarification: "Môn 'X' không có trong danh sách môn hiện tại."
-
-4. **Ngày**: PHẢI khớp với danh sách ngày từ context (Thứ 2, Thứ 3, ..., Thứ 7, Chủ nhật).
-   - Nếu không khớp → trả needs_clarification: "Ngày 'X' không có trong danh sách ngày học."
-
-5. **Tiết**: PHẢI nằm trong phạm vi số tiết cho phép từ context.
-   - Nếu không khớp → trả needs_clarification: "Tiết 'X' không hợp lệ. Số tiết tối đa là Y."
-
-## Bước 1: Chuẩn hóa ý định (LUÔN thực hiện)
-Chuyển câu gốc thành câu tiếng Việt rõ ràng, chuẩn, dễ hiểu. Ví dụ:
-- "Sơn bận việc nhà hay đi muộn nên ko dạy tiết 1" → "Giáo viên Sơn không dạy tiết 1."
-- "Cô Thúy hay đi muộn tiết đầu" → "Giáo viên Thúy không dạy tiết 1."
-- "Nếu Hiếu dạy thứ 2 thì Hương không dạy thứ 3" → "Nếu Giáo viên Hiếu dạy Thứ 2 thì Giáo viên Hương không dạy Thứ 3."
-- "Toán không nên xếp 3 tiết liên tiếp cho bất kỳ lớp nào" → "Môn Toán không xếp quá 2 tiết liên tiếp cho mỗi lớp."
-- "Nếu Dung dạy thứ 2 thì Sơn phải dạy thứ 4" → "Nếu Giáo viên Dung dạy Thứ 2 thì Giáo viên Sơn phải dạy Thứ 4."
-
-Quy tắc chuẩn hóa:
-- LUÔN dùng danh sách giáo viên/lớp/môn từ context để canonical hóa tên entity.
-- KHÔNG được invent giáo viên/lớp/môn ngoài danh sách context.
-- Nếu tên không khớp chính xác, trả về "needs_clarification" với câu hỏi gợi ý.
-- Nếu câu mơ hồ về entity (ví dụ: "thầy ấy", "lớp kia"), trả về "needs_clarification".
-
-## Bước 2: Map sang built-in (ưu tiên, NHẤT ĐỊNH phải thử cho if-then cơ bản)
-Sau khi chuẩn hóa, CỐ GẮNG map sang built-in spec nếu phù hợp.
-
-### Quy tắc BẮT BUỘC cho if-then tiếng Việt:
-Câu có dạng "Nếu <điều kiện> thì <kết quả>" PHẢI map sang kind "if_then" với:
-- params.if: object mô tả điều kiện (teacher_teaches_on_day / teacher_teaches_at_slot / class_teacher_at_slot, có thể AND/OR/NOT).
-- params.then: mảng các action (teacher_block_day / teacher_block_period / teacher_block_slot / teacher_required_day / teacher_required_slot).
-
-Ví dụ BẮT BUỘC phải trả built-in if_then:
-- "Nếu Dung dạy thứ 2 thì Sơn phải dạy thứ 4" -> kind: "if_then", if: {op: "teacher_teaches_on_day", teacher: "Dung", day: "monday"}, then: [{kind: "teacher_required_day", params: {teacher: "Sơn", day: "wednesday"}}].
-- "Nếu Hiếu và Dung dạy thứ 3 tiết 2 thì Thủy không dạy thứ 5" -> if: {op: "and", args: [...]}, then: [{kind: "teacher_block_day", params: {teacher: "Thủy", day: "friday"}}].
-
-Danh sách built-in kinds:
-${builtInRef}
-
-Quy tắc map built-in:
-- Nếu người dùng liệt kê nhiều môn trong cùng một ràng buộc (ví dụ: "Toán, Văn"), PHẢI trả đủ một spec cho từng môn, không được bỏ sót môn nào.
-- Nếu câu có thể diễn đạt bằng built-in -> trả về specs[] với kind và params chính xác.
-- Nếu built-in KHÔNG đủ diễn đạt -> chuyển sang Bước 3.
-- Nếu câu if-then còn mơ hồ (ví dụ “1 người”, “ngày bất kỳ”, “cùng ngày” nhưng không rõ áp dụng cho ngày/lớp nào, hoặc không rõ ai bị chặn) thì PHẢI trả status "needs_clarification" và hỏi lại bằng tiếng Việt. KHÔNG được tạo spec có params.if rỗng, KHÔNG được đưa tên kind kỹ thuật như teacher_block_period ra normalizedText.
-- KHÔNG được trả "needs_clarification" / "điều kiện chưa xác định" cho câu if-then rõ ràng — PHẢI map sang if_then.
-
-## Bước 3: Semantic/Custom (fallback chính thức)
-Nếu built-in không đủ, trả về semantic representation:
-- type: "if_then" cho ràng buộc điều kiện
-- type: "all_of" cho tập hợp ràng buộc
-- type: "unsupported_precise_text" nếu chỉ có thể diễn đạt bằng text
-
-## Bước 4: Thiếu thông tin
-Nếu câu thiếu entity quan trọng (giáo viên/lớp/môn/ngày/tiết không rõ), trả về:
-- status: "needs_clarification"
-- clarificationQuestions: danh sách câu hỏi tiếng Việt cụ thể
-
-## Quy tắc chung
-1. LUÔN trả về normalizedText tiếng Việt rõ ràng cho GUI hiển thị.
-2. KHÔNG lặp lại cách hiểu cũ nếu user bấm "Phân tích lại" (previousAttempts).
-3. Nếu status = "mapped_builtin" → specs[] PHẢI có ít nhất 1 phần tử.
-4. Nếu status = "semantic_only" → semantic PHẢI có dữ liệu.
-5. Nếu status = "needs_clarification" → clarificationQuestions PHẢI có ít nhất 1 câu hỏi.
-6. Nếu status = "unsupported" → normalizedText PHẢI giải thích lý do.
-7. Confidence: "high" nếu chắc chắn, "medium" nếu có thể đúng, "low" nếu không chắc.
-8. CHỈ phân tích 1 câu ràng buộc, KHÔNG phân tích nhiều câu.
+## Entity đã resolve:
+- Giáo viên: ${hints.resolvedTeachers.join(', ') || '(chưa xác định)'}
+- Môn: ${hints.resolvedSubjects.join(', ') || '(chưa xác định)'}
+- Lớp: ${hints.resolvedClasses.join(', ') || '(chưa xác định)'}
+- Số extracted: ${hints.extractedNumber ?? '(chưa có)'}
+- Tiết extracted: ${hints.extractedDays.join(', ') || '(chưa có)'}
 
 ${contextBlock}
 
@@ -454,9 +436,9 @@ ${contextBlock}
   "specs": [{ "kind": "built_in_kind", "params": { ... } }],
   "semantic": { "type": "if_then|all_of|unsupported_precise_text", ... },
   "confidence": "high" | "medium" | "low",
-  "clarificationQuestions": ["Câu hỏi 1?", "Câu hỏi 2?"],
-  "assumptions": ["Giả định 1", "Giả định 2"],
-  "unresolvedQuestions": ["Vấn đề chưa giải quyết"]
+  "clarificationQuestions": ["Câu hỏi 1?"],
+  "assumptions": [],
+  "unresolvedQuestions": []
 }`;
 }
 
@@ -477,7 +459,12 @@ export async function analyzeConstraint(
     conversationMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   }
 ): Promise<AnalyzeConstraintResult> {
-  const systemPrompt = buildSystemPrompt(agentInput);
+  // Stage 1: Build resolver hints (CODE — no LLM)
+  const hints = buildResolverHints(rawText, agentInput);
+  // Stage 2: Retrieve top-k candidates (CODE)
+  const topKCandidates = retrieveTopK(hints, hints.inferredScope, 5);
+  // Stage 3: LLM slot-fill with small prompt
+  const systemPrompt = buildSmallSystemPrompt(agentInput, hints, topKCandidates);
 
   let userMessage = `## Ràng buộc cần phân tích
 - Nội dung: "${rawText}"

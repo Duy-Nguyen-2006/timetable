@@ -11,6 +11,8 @@ import type { ExecutionResult } from './types';
 export interface PythonBridgeOptions {
   timeoutMs?: number;
   solverWorkers?: number;
+  /** Section 14.8: optional fixed seed for solver determinism. */
+  solverSeed?: number;
   signal?: AbortSignal;
 }
 
@@ -28,7 +30,7 @@ export async function executeGeneratedCode(
   // In production this will be an IPC call to the main process
   // which actually spawns the bundled binary.
   if (typeof window !== 'undefined' && window.electron?.python?.executeCode) {
-    return window.electron.python.executeCode(code, input, timeout, options.solverWorkers);
+    return window.electron.python.executeCode(code, input, timeout, options.solverWorkers, options.solverSeed);
   }
 
   // Web fallback: call server-side executor route.

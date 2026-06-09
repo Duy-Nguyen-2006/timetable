@@ -23,7 +23,7 @@ test('constraintSignature distinguishes soft weights', () => {
 });
 
 test('resolveSolverRuntime maps profiles to bounded timeouts and workers', () => {
-  assert.deepEqual(__localAgentInternal.resolveSolverRuntime({ baseURL: 'x', apiKey: 'k', model: 'm', solverProfile: 'fast', solverWorkers: 99 }), { timeoutMs: 20_000, workers: 8 });
+  assert.deepEqual(__localAgentInternal.resolveSolverRuntime({ baseURL: 'x', apiKey: 'k', model: 'm', solverProfile: 'fast', solverWorkers: 99 }), { timeoutMs: 20_000, workers: 8, seed: 42 });
   assert.equal(__localAgentInternal.resolveSolverRuntime({ baseURL: 'x', apiKey: 'k', model: 'm', solverProfile: 'deep', timeoutMs: 1234 }).timeoutMs, 1234);
 });
 

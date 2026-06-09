@@ -53,7 +53,7 @@ function hasWholePhrase(text: string, phrase: string): boolean {
   return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegExp(normalizedPhrase)}(?=$|[^\\p{L}\\p{N}_])`, 'u').test(text);
 }
 
-function matchEntity(text: string, labels: string[], entityName: string): EntityMatch {
+export function matchEntity(text: string, labels: string[], entityName: string): EntityMatch {
   const exactMatches = labels.filter((label) => hasWholePhrase(text, label));
   if (exactMatches.length === 1) return { status: 'matched', label: exactMatches[0] };
   if (exactMatches.length > 1) {
@@ -91,7 +91,7 @@ function supportedDefinition(
   return definitions.find((definition) => definition.kind === kind) ?? null;
 }
 
-function extractPeriodList(text: string): number[] {
+export function extractPeriodList(text: string): number[] {
   const periods = new Set<number>();
   const normalized = normalizeConstraintText(text);
   for (const match of normalized.matchAll(/\btiet\s*(\d+)(?:\s*(?:-|den|toi)\s*(\d+))?/gu)) {

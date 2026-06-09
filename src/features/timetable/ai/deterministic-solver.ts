@@ -77,7 +77,7 @@ export async function runDeterministicSolver(
   config: LocalAgentConfig,
   options: DeterministicSolverOptions
 ): Promise<DeterministicSolverResult> {
-  const runtime = resolveSolverRuntime(config);
+  const runtime = resolveSolverRuntime(config, options.constraintSpecs);
   const timeoutMs = config.timeoutMs ?? runtime.timeoutMs;
   const deduped = options.constraintSpecs;
 
@@ -116,9 +116,10 @@ export async function runDeterministicSolver(
   const execResult = await executeGeneratedCode(injected.solverCode, executePayload, {
     timeoutMs,
     solverWorkers: runtime.workers,
-  });
+    // Section 14.8: pass seed for solver determinism (same input → same output)
+    solverSeed: runtime.seed,
+  } as Parameters<typeof executeGeneratedCode>[2]);
   emit(config, { type: 'execution_result', attempt: 1, result: execResult });
-
   if (!execResult.ok || !execResult.resultData) {
     const msg = execResult.errorDigest || 'Solver execution failed.';
     emit(config, { type: 'error', message: msg, fatal: true });
