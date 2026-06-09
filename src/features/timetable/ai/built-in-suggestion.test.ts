@@ -104,6 +104,35 @@ test('suggestBuiltInConstraint maps subject banned exact consecutive run to max 
   assert.deepEqual(suggestion.paramsDraft, { subject: 'Văn', max: 2, maxConsecutive: 2 });
 });
 
+test('suggestBuiltInConstraint maps heavy subject limit phrase to max consecutive without decrement', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Các môn nặng như Toán không xếp vào 2 tiết liên tiếp trong cùng 1 buổi cho 1 lớp.',
+    teachers: ['Sơn'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'subject_max_consecutive');
+  assert.equal(suggestion.scope, 'subject');
+  assert.deepEqual(suggestion.paramsDraft, { subject: 'Toán', max: 2, maxConsecutive: 2 });
+});
+
+test('suggestBuiltInConstraint maps multiple heavy subjects to multiple specs', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Các môn nặng như Toán, Văn không xếp vào 2 tiết liên tiếp trong cùng 1 buổi cho 1 lớp.',
+    teachers: ['Sơn'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'subject_max_consecutive');
+  assert.deepEqual(suggestion.paramsDraft, { subject: 'Toán', max: 2, maxConsecutive: 2 });
+  assert.deepEqual(suggestion.specsDraft, [
+    { kind: 'subject_max_consecutive', paramsDraft: { subject: 'Toán', max: 2, maxConsecutive: 2 } },
+    { kind: 'subject_max_consecutive', paramsDraft: { subject: 'Văn', max: 2, maxConsecutive: 2 } },
+  ]);
+});
+
 test('suggestBuiltInConstraint maps class period block', () => {
   const suggestion = suggestBuiltInConstraint({
     ...baseInput,

@@ -163,10 +163,10 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
     // Build IF condition from TAIL (strip leading "không" → positive teacher_teaches_at_slot/on_day).
     // Build THEN from HEAD (existing block-day/period builder).
     if (/\bn[uế]?u\b/iu.test(constraint.text) && !/\bth[uì]?i\b/iu.test(constraint.text)) {
-      const m = constraint.text.match(/^(?<head>.+?)\s+n[uế]?u\s+(?<tail>.+)$/iu);
-      if (m?.groups) {
-        const head = m.groups.head.trim();
-        const tail = m.groups.tail.trim();
+      const m = constraint.text.match(/^(.+?)\s+n[uế]?u\s+(.+)$/iu);
+      if (m) {
+        const head = m[1].trim();
+        const tail = m[2].trim();
         const tailTeachers = matchTeacherLabels(tail, teacherLabels);
         const tailDay = extractDayId(tail, input.days);
         const tailPeriod = extractPeriodNumber(tail);

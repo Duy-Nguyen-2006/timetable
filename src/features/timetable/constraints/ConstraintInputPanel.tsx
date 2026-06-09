@@ -12,6 +12,7 @@ import {
   primaryButtonClass,
 } from '../constants';
 import { suggestBuiltInConstraint, type BuiltInSuggestion } from '../ai/built-in-suggestion';
+import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ParsedConstraintDraft } from '../ai/constraint-review-types';
 import type { AgentInputPayload } from '../ai/types';
 import type { ConstraintItem } from '../types';
@@ -119,13 +120,26 @@ export function ConstraintInputPanel({
       text: draft.text,
       weight: draft.type === 'preferred' ? draft.weight : undefined,
     };
+    // Tạo spec thật từ suggestion để solver có thể dùng luôn
+    const severity = draft.type === 'required' ? 'hard' : 'soft';
+    const specsDraft = suggestion.specsDraft?.length
+      ? suggestion.specsDraft
+      : [{ kind: suggestion.kind, paramsDraft: suggestion.paramsDraft }];
+    const proposedSpecs: ConstraintSpec[] = specsDraft.map((specDraft, index) => ({
+      id: `spec_${id}_${index}`,
+      original: draft.text,
+      severity,
+      kind: specDraft.kind,
+      params: { ...specDraft.paramsDraft },
+      ...(draft.type === 'preferred' ? { weight: draft.weight } : {}),
+    }));
     onImportSuggestion(item, {
       id: `draft_${id}`,
       rawConstraintId: id,
       original: draft.text,
-      proposedSpecs: [],
-      status: 'unparsed',
-      confidence: 'low',
+      proposedSpecs,
+      status: 'parsed',
+      confidence: 'high',
       explanation: suggestion.explanation,
       issues: [],
       source: 'rule',
@@ -137,13 +151,26 @@ export function ConstraintInputPanel({
   const handleAiClick = () => {
     const text = draft.text.trim();
     if (!text) return;
-    setSuggestion(null);
     onAiAnalyzeRaw(text, draft.type, draft.type === 'preferred' ? draft.weight : undefined);
   };
 
   const isBuiltIn = suggestion?.decision === 'suggest_built_in';
   const isCustom = suggestion?.decision === 'use_custom';
   const hasPreview = Boolean(pendingAiPreview);
+  const suggestionSpecs = isBuiltIn && suggestion?.specsDraft?.length
+    ? suggestion.specsDraft
+    : isBuiltIn && suggestion
+      ? [{ kind: suggestion.kind, paramsDraft: suggestion.paramsDraft }]
+      : [];
+  const subjectList = suggestionSpecs
+    .map((spec) => spec.paramsDraft.subject)
+    .filter((value): value is string => typeof value === 'string');
+  const displayedParams = isBuiltIn && suggestion
+    ? {
+        ...suggestion.paramsDraft,
+        ...(subjectList.length > 1 ? { subject: subjectList.join(', ') } : {}),
+      }
+    : {};
 
   return (
     <section className={`${panelClass} p-4`}>
@@ -209,12 +236,15 @@ export function ConstraintInputPanel({
             <p>Loại: {draft.type === 'required' ? 'Bắt buộc' : 'Nên có'}</p>
             <p>Đối tượng: {CONSTRAINT_GROUP_LABELS[suggestion.scope]}</p>
             <p>Ràng buộc: {CONSTRAINT_TEMPLATES.find((t) => t.id === suggestion.kind)?.label ?? suggestion.explanation}</p>
-            {Object.entries(suggestion.paramsDraft).map(([k, v]) => (<p key={k}>{paramDisplay(agentInput, k, v)}</p>))}
+            {Object.entries(displayedParams).map(([k, v]) => (<p key={k}>{paramDisplay(agentInput, k, v)}</p>))}
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" onClick={importBuiltInSuggestion} className={`${primaryButtonClass} w-full`}>Dùng gợi ý</button>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <button type="button" onClick={importBuiltInSuggestion} className={`${primaryButtonClass} w-full`}>Dùng và xác nhận</button>
             <button type="button" onClick={handleAiClick} disabled={aiLoading} className="w-full rounded-md border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-medium text-violet-200 hover:bg-violet-500/25 disabled:opacity-50">
-              {aiLoading ? <span className="flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" /></span> : <span className="flex items-center justify-center gap-1"><Sparkles size={12} /> AI phân tích</span>}
+              {aiLoading ? <span className="flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" /> Đang phân tích...</span> : <span className="flex items-center justify-center gap-1"><Sparkles size={12} /> AI phân tích</span>}
+            </button>
+            <button type="button" onClick={() => setSuggestion(null)} className="w-full rounded-md border border-red-500/40 bg-red-500/15 px-3 py-2 text-xs font-medium text-red-200 hover:bg-red-500/25">
+              Bỏ
             </button>
           </div>
         </div>
@@ -226,7 +256,7 @@ export function ConstraintInputPanel({
           <p className="font-medium text-amber-200">Không khớp mẫu có sẵn</p>
           <p className="mt-1 text-white/45">{suggestion.reason}</p>
           <button type="button" onClick={handleAiClick} disabled={aiLoading} className="mt-3 w-full rounded-md border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-medium text-violet-200 hover:bg-violet-500/25 disabled:opacity-50">
-            {aiLoading ? <span className="flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" /></span> : <span className="flex items-center justify-center gap-1"><Sparkles size={12} /> AI phân tích</span>}
+            {aiLoading ? <span className="flex items-center justify-center gap-1"><Loader2 size={12} className="animate-spin" /> Đang phân tích...</span> : <span className="flex items-center justify-center gap-1"><Sparkles size={12} /> AI phân tích</span>}
           </button>
         </div>
       ) : null}

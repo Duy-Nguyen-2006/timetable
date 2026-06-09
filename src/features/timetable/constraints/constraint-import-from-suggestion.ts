@@ -1,4 +1,5 @@
 import type { BuiltInSuggestion } from '../ai/built-in-suggestion';
+import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { RawConstraintInput, ParsedConstraintDraft } from '../ai/constraint-review-types';
 import type { AgentInputPayload } from '../ai/types';
 import {
@@ -45,12 +46,36 @@ export function buildDraftFromBuiltInSuggestion(
   suggestion: Extract<BuiltInSuggestion, { decision: 'suggest_built_in' }>,
   agentInput: AgentInputPayload
 ): ParsedConstraintDraft {
-  if (!isFormTemplateKind(suggestion.kind)) {
+  const specsDraft = suggestion.specsDraft?.length
+    ? suggestion.specsDraft
+    : [{ kind: suggestion.kind, paramsDraft: suggestion.paramsDraft }];
+  if (specsDraft.some((spec) => !isFormTemplateKind(spec.kind))) {
     return buildDraftFromSpecs(`draft_${raw.id}`, raw, [], agentInput, {
       source: 'rule',
       confidence: 'low',
       explanation: suggestion.explanation,
     });
+  }
+  if (specsDraft.length > 1) {
+    const severity = raw.type === 'required' ? 'hard' : 'soft';
+    const specs: ConstraintSpec[] = specsDraft.map((spec, index) => ({
+      id: `spec_${raw.id}_${index}`,
+      original: raw.text,
+      severity,
+      kind: spec.kind,
+      params: { ...spec.paramsDraft },
+      ...(raw.type === 'preferred' ? { weight: raw.weight } : {}),
+    }));
+    return {
+      ...buildDraftFromSpecs(`draft_${raw.id}`, raw, specs, agentInput, {
+        source: 'rule',
+        confidence: 'high',
+        explanation: suggestion.explanation,
+      }),
+      source: 'rule',
+      confidence: 'high',
+      explanation: suggestion.explanation,
+    };
   }
   const baseDraft = buildDraftFromSpecs(`draft_${raw.id}`, raw, [], agentInput, {
     source: 'rule',

@@ -33,7 +33,7 @@ import {
 import { ConstraintInputPanel, type PendingAiPreview } from './constraints/ConstraintInputPanel'
 import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
 import { fetchConstraintIntakeAiAnalysis } from './constraints/constraint-intake-service'
-import { buildDraftFromReparseResult, buildDraftFromCustomNormalization, rawInputFromText } from './constraints/constraint-intake-ai'
+import { buildDraftFromReparseResult, buildDraftFromCustomNormalization, buildDraftFromAnalyzeResult, rawInputFromText } from './constraints/constraint-intake-ai'
 import { constraintItemFromPending } from './constraints/import-pending-constraint'
 import {
   ConstraintInterpretationCard,
@@ -161,7 +161,6 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     updateDraft,
     rejectAndReparse,
     applyTemplate,
-    markConstraintsAdded,
     removeConstraintReview,
     newConstraintIds,
     preflight: constraintPreflight,
@@ -421,10 +420,11 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
   const solveBlockHint = useMemo(() => {
     if (canProceedToSolve) return null
-    return (
-      constraintSolvePreflight.messages[0] ??
-      'Còn ràng buộc bắt buộc chưa duyệt. Bấm «Đúng rồi» hoặc «AI phân tích» trên từng dòng vàng bên phải.'
-    )
+    const messages = constraintSolvePreflight.messages
+    if (messages.length === 0) {
+      return 'Còn ràng buộc bắt buộc chưa duyệt. Bấm «Đúng rồi» hoặc «AI phân tích» trên từng dòng vàng bên phải.'
+    }
+    return messages.map((m, i) => `${i + 1}. ${m}`).join('\n')
   }, [canProceedToSolve, constraintSolvePreflight.messages])
 
   const focusUnconfirmedConstraints = useCallback(() => {
@@ -869,7 +869,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const importSuggestion = (item: ConstraintItem, draft: ParsedConstraintDraft) => {
     setConstraintList((current) => [...current, item])
     updateDraft(draft)
-    markConstraintsAdded([item.id])
+    confirmDraft(item.id, [draft])
   }
 
   // === AI phân tích raw input from panel ===
@@ -894,7 +894,9 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       })
 
       let draft: ParsedConstraintDraft | null = null
-      if (result.kind === 'reparse') {
+      if (result.kind === 'analyze') {
+        draft = buildDraftFromAnalyzeResult(raw, result.result, constraintAgentInput, (pendingAiPreview?.reparseCount ?? 0) + 1)
+      } else if (result.kind === 'reparse') {
         draft = buildDraftFromReparseResult(raw, result.result, constraintAgentInput, (pendingAiPreview?.reparseCount ?? 0) + 1)
       } else {
         draft = buildDraftFromCustomNormalization(raw, result.body, constraintAgentInput)
@@ -919,9 +921,10 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   // === Accept AI preview → import into review ===
   const acceptAiPreview = () => {
     if (!pendingAiPreview) return
+    const acceptedDraft = { ...pendingAiPreview.draft, rawConstraintId: pendingAiPreview.item.id, id: `draft_${pendingAiPreview.item.id}` }
     setConstraintList((current) => [...current, pendingAiPreview.item])
-    updateDraft({ ...pendingAiPreview.draft, rawConstraintId: pendingAiPreview.item.id, id: `draft_${pendingAiPreview.item.id}` })
-    markConstraintsAdded([pendingAiPreview.item.id])
+    updateDraft(acceptedDraft)
+    confirmDraft(pendingAiPreview.item.id, [acceptedDraft])
     setPendingAiPreview(null)
     setConstraintDraft((current) => ({ ...current, text: '' }))
   }
@@ -2019,7 +2022,7 @@ const handleDownloadExcel = useCallback(async () => {
                         Nhập ràng buộc cho thời khóa biểu
                       </h1>
                       <p className="mt-4 max-w-3xl text-sm text-white/40">
-                        Thêm câu ràng buộc, đọc «Hiểu là», bấm «Đúng rồi» hoặc «AI phân tích» nếu chưa đúng, rồi Tiếp tục.
+                        Thêm câu ràng buộc, đọc «Hiểu là», bấm «Đúng rồi» hoặc «AI phân tích» nếu chưa đúng, rồi Tiếp tục. Mọi ràng buộc bắt buộc phải được duyệt rõ ràng trước khi sang bước xếp lịch — bước xếp lịch chạy tự động, không cần AI nữa.
                       </p>
                     </div>
                     <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>

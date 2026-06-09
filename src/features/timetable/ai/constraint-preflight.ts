@@ -36,6 +36,26 @@ function isExecutableCustomDsl(spec: { kind: string; params: Record<string, unkn
   return spec.kind !== 'custom_dsl' || Boolean(spec.params.expr) || Boolean(spec.pythonPredicate?.trim());
 }
 
+function fixHintForReason(reason: PreflightResult['blockReasons'][number]): string {
+  switch (reason) {
+    case 'hard_raw_unconfirmed':
+    case 'constraint_unconfirmed':
+      return 'Hướng xử lý: Bấm «Gợi ý» để chọn mẫu có sẵn, hoặc «AI phân tích» rồi «Đồng ý» / «Đúng rồi» trên từng dòng bên phải.';
+    case 'hard_draft_unresolved':
+    case 'constraint_needs_clarification':
+    case 'constraint_unparsed':
+      return 'Hướng xử lý: Sửa lại câu cho rõ giáo viên/lớp/môn/ngày/tiết, hoặc chọn lại mẫu, hoặc bấm «AI phân tích» để AI giải thích lại.';
+    case 'hard_custom_unexecutable':
+      return 'Hướng xử lý: Ràng buộc dạng custom chưa có luật máy hiểu. Hãy sửa câu thành dạng mẫu có sẵn, hoặc bỏ qua ràng buộc này.';
+    case 'hard_spec_unchecked':
+      return 'Hướng xử lý: Loại ràng buộc này hiện chưa được solver hỗ trợ. Hãy sửa thành mẫu khác hoặc bỏ qua.';
+    case 'no_confirmed_specs':
+      return 'Hướng xử lý: Xác nhận ít nhất một ràng buộc bằng nút «Đúng rồi» trước khi xếp lịch.';
+    default:
+      return 'Hướng xử lý: Quay lại bước trước và xử lý từng dòng.';
+  }
+}
+
 export function assertSolvableConstraintState(
   rawConstraints: RawConstraintInput[],
   drafts: ParsedConstraintDraft[],
@@ -49,64 +69,48 @@ export function assertSolvableConstraintState(
     return { ok: true, canSolve: true, blockReasons: [], messages, warnings };
   }
 
-  const unconfirmed = rawConstraints.filter((raw) => !isConstraintConfirmed(raw.id, drafts, confirmed));
-  if (unconfirmed.length > 0) {
-    blockReasons.push('constraint_unconfirmed');
-    const preview = unconfirmed
-      .slice(0, 3)
-      .map((r) => `“${r.text.slice(0, 72)}${r.text.length > 72 ? '…' : ''}”`)
-      .join(', ');
-    messages.push(
-      `Còn ${unconfirmed.length} ràng buộc chưa được duyệt (${preview}). Phân tích và bấm «Đúng rồi» trên từng dòng trước khi xếp lịch.`
-    );
-  }
+  // Mỗi raw constraint chỉ được block 1 lần, dùng set để tránh duplicate
+  const blockedRawIds = new Set<string>();
+  const perRawReasons = new Map<string, PreflightResult['blockReasons'][number]>();
 
-  const needsClarification = drafts.filter(
-    (d) =>
-      rawConstraints.some((r) => r.id === d.rawConstraintId) &&
-      NEEDS_CLARIFICATION.has(d.status) &&
-      !confirmed.some((c) => c.rawConstraintId === d.rawConstraintId)
-  );
-  if (needsClarification.length > 0) {
-    blockReasons.push('constraint_needs_clarification');
-    messages.push(
-      `Còn ${needsClarification.length} ràng buộc cần làm rõ ý nghĩa (chọn đáp án hoặc «Sửa cách hiểu»).`
-    );
-  }
+  const recordBlock = (
+    rawId: string,
+    reason: PreflightResult['blockReasons'][number]
+  ) => {
+    blockedRawIds.add(rawId);
+    // Ghi nhận lý do đầu tiên gặp (ưu tiên lý do cụ thể hơn)
+    if (!perRawReasons.has(rawId)) {
+      perRawReasons.set(rawId, reason);
+      blockReasons.push(reason);
+    }
+  };
 
-  const unparsedOnly = drafts.filter(
-    (d) =>
-      d.status === 'unparsed' &&
-      rawConstraints.some((r) => r.id === d.rawConstraintId) &&
-      !confirmed.some((c) => c.rawConstraintId === d.rawConstraintId)
-  );
-  if (unparsedOnly.length > 0) {
-    blockReasons.push('constraint_unparsed');
-    messages.push(
-      `Còn ${unparsedOnly.length} ràng buộc chưa có bản duyệt. Chọn mẫu hoặc tạo lại bằng Custom.`
-    );
-  }
-
-  const hardRaw = rawConstraints.filter((r) => r.type === 'required');
-  for (const raw of hardRaw) {
+  // Đếm theo rawId thay vì push message nhiều lần
+  const unconfirmedIds: string[] = [];
+  for (const raw of rawConstraints) {
     if (!isConstraintConfirmed(raw.id, drafts, confirmed)) {
-      blockReasons.push('hard_raw_unconfirmed');
-      messages.push(`Ràng buộc bắt buộc chưa xác nhận: “${raw.text.slice(0, 80)}…”`);
+      unconfirmedIds.push(raw.id);
     }
   }
 
-  for (const raw of hardRaw) {
-    const draft = drafts.find((d) => d.rawConstraintId === raw.id);
-    if (!draft) continue;
-    if (UNRESOLVED_DRAFT.includes(draft.status) && !confirmed.some((c) => c.rawConstraintId === raw.id)) {
-      blockReasons.push('hard_draft_unresolved');
-      messages.push(`Ràng buộc bắt buộc chưa xử lý xong (trạng thái ${draft.status}).`);
-    }
-    if (draft.status === 'ignored') {
-      warnings.push(`Ràng buộc phòng/bỏ qua: ${draft.original}`);
+  if (unconfirmedIds.length > 0) {
+    for (const id of unconfirmedIds) {
+      const raw = rawConstraints.find((r) => r.id === id);
+      // Xác định lý do cụ thể hơn
+      const draft = drafts.find((d) => d.rawConstraintId === id);
+      if (raw?.type === 'required' && !confirmed.some((c) => c.rawConstraintId === id)) {
+        if (draft && UNRESOLVED_DRAFT.includes(draft.status)) {
+          recordBlock(id, 'hard_draft_unresolved');
+        } else {
+          recordBlock(id, 'hard_raw_unconfirmed');
+        }
+      } else {
+        recordBlock(id, 'constraint_unconfirmed');
+      }
     }
   }
 
+  // Kiểm tra confirmed specs có vấn đề gì không
   for (const c of confirmed) {
     for (const spec of c.specs) {
       if (spec.severity === 'hard' && !isExecutableCustomDsl(spec)) {
@@ -122,6 +126,12 @@ export function assertSolvableConstraintState(
     }
   }
 
+  // Warnings: soft unsupported và ignored
+  for (const draft of drafts) {
+    if (draft.status === 'ignored') {
+      warnings.push(`Ràng buộc phòng/bỏ qua: ${draft.original}`);
+    }
+  }
   const softUnsupported = drafts.filter(
     (d) =>
       rawConstraints.find((r) => r.id === d.rawConstraintId)?.type === 'preferred' &&
@@ -131,7 +141,31 @@ export function assertSolvableConstraintState(
     warnings.push(`Ràng buộc nên có sẽ không áp dụng: ${d.original}`);
   }
 
+  // Build summary message từ blockedRawIds (chỉ 1 message tổng, không per-constraint)
+  if (blockedRawIds.size > 0) {
+    const preview = [...blockedRawIds]
+      .slice(0, 3)
+      .map((id) => {
+        const r = rawConstraints.find((raw) => raw.id === id);
+        return `“${r?.text.slice(0, 60) ?? id}${r && r.text.length > 60 ? '…' : ''}”`;
+      })
+      .join(', ');
+    messages.push(
+      `Còn ${blockedRawIds.size} ràng buộc chưa được duyệt (${preview}). Hãy bấm «Đúng rồi» hoặc sửa lại trên từng dòng bên phải.`
+    );
+  }
+
+  // Hướng xử lý: gom theo reason, không lặp lại
   const uniqueBlocks = [...new Set(blockReasons)];
+  const seenHints = new Set<string>();
+  for (const reason of uniqueBlocks) {
+    const hint = fixHintForReason(reason);
+    if (!seenHints.has(hint)) {
+      seenHints.add(hint);
+      messages.push(hint);
+    }
+  }
+
   const ok = uniqueBlocks.length === 0;
   return {
     ok,

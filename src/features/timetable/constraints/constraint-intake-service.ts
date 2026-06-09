@@ -1,10 +1,12 @@
 import type { AgentInputPayload, AIProviderConfig } from '../ai/types';
+import type { AnalyzeConstraintResult } from '../ai/analyze-constraint-service';
 import type { ReparseResult } from '../ai/semantic-constraint';
 import type { CustomConstraintNormalizationResult } from '../ai/custom-normalization-service';
 import { buildCustomNormalizationInput } from '../ai/custom-normalization-service';
 import type { RawConstraintInput } from '../ai/constraint-review-types';
 
 export type ConstraintIntakeAiResult =
+  | { kind: 'analyze'; result: AnalyzeConstraintResult }
   | { kind: 'reparse'; result: ReparseResult }
   | { kind: 'custom'; body: CustomConstraintNormalizationResult };
 
@@ -30,7 +32,7 @@ function buildIntakeContext(agentInput: AgentInputPayload) {
   };
 }
 
-/** AI phân tích raw input (ưu tiên reparse built-in, fallback custom normalize). */
+/** AI phân tích raw input — unified flow via /api/ai/analyze-constraint. */
 export async function fetchConstraintIntakeAiAnalysis(
   raw: RawConstraintInput,
   agentInput: AgentInputPayload,
@@ -45,65 +47,36 @@ export async function fetchConstraintIntakeAiAnalysis(
     }>;
   }
 ): Promise<ConstraintIntakeAiResult> {
-  const rejectedDisplay = options?.rejectedDisplayText?.trim() || raw.text;
-  const reparseRes = await fetch('/api/ai/reparse-constraint', {
+  // Use new unified analyze-constraint endpoint
+  const analyzeRes = await fetch('/api/ai/analyze-constraint', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      request: {
-        rawConstraint: {
-          id: raw.id,
-          text: raw.text,
-          type: raw.type,
-          weight: raw.weight,
-        },
-        rejectedDraft: {
-          summary: '',
-          displayText: rejectedDisplay,
-        },
-        previousAttempts: options?.previousAttempts ?? [],
-        context: buildIntakeContext(agentInput),
-      },
-      providerConfig: provider,
+      rawText: raw.text,
+      constraintType: raw.type,
+      weight: raw.weight,
       agentInput,
+      providerConfig: provider,
+      previousAttempts: options?.previousAttempts?.map((a) => ({
+        displayText: a.displayText,
+        source: a.source,
+        confidence: a.confidence,
+      })),
     }),
   });
-  const reparseJson = (await reparseRes.json().catch(() => null)) as ReparseResult | { error?: string } | null;
-  if (
-    reparseRes.ok &&
-    reparseJson &&
-    'status' in reparseJson &&
-    reparseJson.status === 'candidate' &&
-    reparseJson.candidate.specs?.length
-  ) {
-    return { kind: 'reparse', result: reparseJson };
-  }
 
-  const normRes = await fetch('/api/ai/normalize-custom-constraint', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      request: {
-        severity: raw.type === 'required' ? 'hard' : 'soft',
-        originalText: raw.text,
-      },
-      providerConfig: provider,
-      agentInput,
-    }),
-  });
-  const normBody = (await normRes.json().catch(() => null)) as
-    | CustomConstraintNormalizationResult
+  const analyzeJson = (await analyzeRes.json().catch(() => null)) as
+    | AnalyzeConstraintResult
     | { error?: string }
     | null;
-  if (!normBody || !('status' in normBody)) {
+
+  if (!analyzeRes.ok || !analyzeJson || !('status' in analyzeJson)) {
     throw new Error(
-      (normBody && 'error' in normBody && normBody.error) || 'AI phân tích thất bại.'
+      (analyzeJson && 'error' in analyzeJson && analyzeJson.error) || 'AI phân tích thất bại.'
     );
   }
-  if (!normRes.ok) {
-    throw new Error('AI phân tích thất bại.');
-  }
-  return { kind: 'custom', body: normBody };
+
+  return { kind: 'analyze', result: analyzeJson };
 }
 
 export function buildCustomNormalizationInputForRaw(

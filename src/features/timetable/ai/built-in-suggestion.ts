@@ -25,6 +25,10 @@ export type BuiltInSuggestion =
       scope: TimetableConstraintScope;
       kind: BuiltInConstraintKind;
       paramsDraft: Record<string, unknown>;
+      specsDraft?: Array<{
+        kind: BuiltInConstraintKind;
+        paramsDraft: Record<string, unknown>;
+      }>;
       missingParams: string[];
       explanation: string;
     }
@@ -46,7 +50,7 @@ function escapeRegExp(value: string): string {
 function hasWholePhrase(text: string, phrase: string): boolean {
   const normalizedPhrase = normalizeConstraintText(phrase);
   if (!normalizedPhrase) return false;
-  return new RegExp(`(?:^|\\s)${escapeRegExp(normalizedPhrase)}(?:\\s|$)`, 'u').test(text);
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegExp(normalizedPhrase)}(?=$|[^\\p{L}\\p{N}_])`, 'u').test(text);
 }
 
 function matchEntity(text: string, labels: string[], entityName: string): EntityMatch {
@@ -66,6 +70,18 @@ function matchEntity(text: string, labels: string[], entityName: string): Entity
     return { status: 'ambiguous', reason: `${entityName} bị mơ hồ: ${partialMatches.join(', ')}` };
   }
   return { status: 'missing', reason: `Không tìm thấy ${entityName}` };
+}
+
+export function matchKnownEntities(text: string, labels: string[]): string[] {
+  const normalized = normalizeConstraintText(text);
+  const exactMatches = labels.filter((label) => hasWholePhrase(normalized, label));
+  if (exactMatches.length > 0) return exactMatches;
+
+  const tokens = new Set(normalized.split(/\s+/u).filter(Boolean));
+  return labels.filter((label) => {
+    const firstToken = normalizeConstraintText(label).split(/\s+/u)[0];
+    return Boolean(firstToken && tokens.has(firstToken));
+  });
 }
 
 function supportedDefinition(
@@ -93,8 +109,12 @@ function resolveBannedConsecutiveMax(text: string): number | null {
   const count = extractFirstNumber(text);
   if (!count || count <= 1) return null;
   const normalized = normalizeConstraintText(text);
-  const bansExactRun = /\b(khong|cam|tranh)\b/u.test(normalized) && /\b(lien tiep|lien tuc)\b/u.test(normalized);
-  return bansExactRun ? count - 1 : count;
+  const mentionsConsecutive = /\b(lien tiep|lien tuc)\b/u.test(normalized);
+  const hasBanWord = /\b(khong|cam|tranh)\b/u.test(normalized);
+  if (!mentionsConsecutive || !hasBanWord) return count;
+  const exactBan = /\b(khong duoc|cam|tranh)\b/u.test(normalized);
+  const limitPhrase = /\b(khong xep vao|khong qua|khong hon|toi da)\b/u.test(normalized);
+  return exactBan && !limitPhrase ? count - 1 : count;
 }
 
 function customDecision(confidence: number, reason: string): BuiltInSuggestion {
@@ -105,15 +125,22 @@ function suggest(
   definition: BuiltInConstraintDefinition,
   confidence: number,
   paramsDraft: Record<string, unknown>,
-  explanation: string
+  explanation: string,
+  specsDraft?: Array<{ kind: BuiltInConstraintKind; paramsDraft: Record<string, unknown> }>
 ): BuiltInSuggestion {
   if (confidence < BUILT_IN_SUGGESTION_THRESHOLD) {
     return customDecision(confidence, 'Độ tin cậy thấp, nên dùng Custom.');
   }
-  const missingParams = definition.paramsSchema.required.filter((paramName) => {
-    const value = paramsDraft[paramName];
-    return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
-  });
+  const requiredParams = definition.paramsSchema.required;
+  const specs = specsDraft ?? [{ kind: definition.kind as BuiltInConstraintKind, paramsDraft }];
+  const missingParams = specs.flatMap((spec) =>
+    requiredParams
+      .filter((paramName) => {
+        const value = spec.paramsDraft[paramName];
+        return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+      })
+      .map((paramName) => specs.length > 1 ? `${spec.kind}.${paramName}` : paramName)
+  );
   if (missingParams.length > 0) {
     return customDecision(confidence, `Thiếu thông tin: ${missingParams.join(', ')}`);
   }
@@ -123,6 +150,7 @@ function suggest(
     scope: definition.scope,
     kind: definition.kind,
     paramsDraft,
+    specsDraft: specsDraft && specsDraft.length > 1 ? specsDraft : undefined,
     missingParams,
     explanation,
   };
@@ -138,6 +166,7 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
 
   const teacherMatch = matchEntity(normalized, input.teachers, 'giáo viên');
   const subjectMatch = matchEntity(normalized, input.subjects, 'môn học');
+  const subjectMatches = matchKnownEntities(input.userText, input.subjects);
   const classMatch = matchEntity(normalized, input.classes, 'lớp');
 
   const day = input.days ? extractDayId(input.userText, input.days) : null;
@@ -148,19 +177,26 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
   const mentionsOnly = /\bchi\b/u.test(normalized) && /\bday\b/u.test(normalized);
   const mentionsDailyMax = /\b(toi da|khong qua|khong hon)\b/u.test(normalized) && /\btiet\b/u.test(normalized) && /\bngay\b/u.test(normalized);
   const mentionsConsecutive = /\b(lien tiep|lien tuc)\b/u.test(normalized);
-  const mentionsSubject = /\b(mon|subject)\b/u.test(normalized) || subjectMatch.status === 'matched';
+  const mentionsSubject = /\b(mon|subject)\b/u.test(normalized) || subjectMatches.length > 0;
   const mentionsClass = /\b(lop|class)\b/u.test(normalized) || classMatch.status === 'matched';
 
-  if (subjectMatch.status === 'matched' && mentionsSubject && mentionsConsecutive) {
+  if (subjectMatches.length > 0 && mentionsSubject && mentionsConsecutive) {
     const max = resolveBannedConsecutiveMax(input.userText);
     if (max) {
       const definition = supportedDefinition(definitions, 'subject_max_consecutive');
       if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+      const specsDraft = subjectMatches.map((subject) => ({
+        kind: 'subject_max_consecutive' as BuiltInConstraintKind,
+        paramsDraft: { subject, max, maxConsecutive: max },
+      }));
       return suggest(
         definition,
         0.93,
-        { subject: subjectMatch.label, max, maxConsecutive: max },
-        'Khớp môn học giới hạn số tiết liên tiếp.'
+        specsDraft[0].paramsDraft,
+        subjectMatches.length > 1
+          ? `Khớp ${subjectMatches.length} môn học giới hạn số tiết liên tiếp.`
+          : 'Khớp môn học giới hạn số tiết liên tiếp.',
+        specsDraft
       );
     }
 
@@ -168,27 +204,39 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
     if (/\b(nen|uu tien|can|phai)\b/u.test(normalized)) {
       const definition = supportedDefinition(definitions, 'subject_consecutive');
       if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+      const specsDraft = subjectMatches.map((subject) => ({
+        kind: 'subject_consecutive' as BuiltInConstraintKind,
+        paramsDraft: { subject, ...(length ? { length } : {}) },
+      }));
       return suggest(
         definition,
         0.86,
-        { subject: subjectMatch.label, ...(length ? { length } : {}) },
-        'Khớp môn học cần xếp thành cụm tiết liên tiếp.'
+        specsDraft[0].paramsDraft,
+        subjectMatches.length > 1
+          ? `Khớp ${subjectMatches.length} môn học cần xếp thành cụm tiết liên tiếp.`
+          : 'Khớp môn học cần xếp thành cụm tiết liên tiếp.',
+        specsDraft
       );
     }
   }
 
-  if (subjectMatch.status === 'matched' && mentionsSubject && periods.length > 0) {
+  if (subjectMatches.length > 0 && mentionsSubject && periods.length > 0) {
     const wantsPreference = /\b(nen|uu tien|thich|prefer)\b/u.test(normalized);
     const wantsBlock = /\b(khong|cam|tranh)\b/u.test(normalized);
     const kind: BuiltInConstraintKind = wantsPreference ? 'subject_preferred_periods' : 'subject_block_period';
     if (wantsPreference || wantsBlock) {
       const definition = supportedDefinition(definitions, kind);
       if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+      const specsDraft = subjectMatches.map((subject) => ({
+        kind,
+        paramsDraft: { subject, periods },
+      }));
       return suggest(
         definition,
         wantsPreference ? 0.87 : 0.9,
-        { subject: subjectMatch.label, periods },
-        wantsPreference ? 'Khớp ưu tiên môn học theo tiết.' : 'Khớp môn học không xếp một số tiết.'
+        specsDraft[0].paramsDraft,
+        wantsPreference ? 'Khớp ưu tiên môn học theo tiết.' : 'Khớp môn học không xếp một số tiết.',
+        specsDraft
       );
     }
   }
