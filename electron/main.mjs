@@ -207,7 +207,6 @@ async function waitForServer(url, timeoutMs = 15000) {
 
 async function verifyApiRoutes(baseUrl) {
   const routes = [
-    { path: '/prompts/coder.system.md', name: 'coder prompt' },
     { path: '/templates/solver_skeleton.py', name: 'solver skeleton' },
   ]
   const issues = []
@@ -229,17 +228,13 @@ async function verifyApiRoutes(baseUrl) {
 }
 
 async function prewarmApiRoutes(baseUrl) {
+  // FIX.md §5 (cleanup): AI codegen routes were removed (planner/coder/repair
+  // pipeline was deleted). Keep only the routes actually used.
   const routes = [
     '/api/provider/test',
     '/api/ai/chat',
-    '/api/ai/python-execute',
-    '/api/ai/python-syntax-check',
-    '/api/ai/python-ast-check',
-    '/api/ai/solver-skeleton',
-    '/prompts/coder.system.md',
-    '/prompts/planner.system.md',
+    '/api/solver/execute',
     '/prompts/translator.system.md',
-    '/prompts/repair.system.md',
     '/templates/solver_skeleton.py',
   ]
   const start = Date.now()

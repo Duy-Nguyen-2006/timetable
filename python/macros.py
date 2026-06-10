@@ -134,6 +134,70 @@ def _to_ir(
     }
 
 
+def _emit_subject_max_consecutive_ir(
+    spec: dict[str, Any],
+    subject: str,
+    max_consecutive: int,
+    classes,
+) -> dict[str, Any]:
+    """Build the IR for one (subject, classes) tuple of subject_max_consecutive.
+
+    Emits a `forall` over classes so a per-class spec can be enforced even when
+    the original spec lists many classes.
+    """
+    if max_consecutive <= 0:
+        window_length = 2
+    else:
+        window_length = max_consecutive + 1
+    target_classes = classes if classes else None
+    ir_body: dict[str, Any] = {
+        "forall": {
+            "var": "d",
+            "in": "days",
+            "body": {
+                "not": {
+                    "consecutive": {
+                        "var": "p",
+                        "in": "periods",
+                        "length": window_length,
+                        "body": {
+                            "classSubjectAt": {
+                                "class": "$c",
+                                "subject": subject,
+                                "day": "$d",
+                                "period": "$p",
+                            }
+                        },
+                    }
+                }
+            },
+        }
+    }
+    if target_classes:
+        # Wrap the forall over classes with a fixed list.
+        return _to_ir(
+            spec,
+            {
+                "forall": {
+                    "var": "c",
+                    "in": {"list": list(target_classes)},
+                    "body": ir_body["forall"]["body"],
+                }
+            },
+        )
+    # No class filter — quantify over all classes.
+    return _to_ir(
+        spec,
+        {
+            "forall": {
+                "var": "c",
+                "in": "classes",
+                "body": ir_body["forall"]["body"],
+            }
+        },
+    )
+
+
 def expand_to_ir(spec: dict[str, Any]) -> list[dict[str, Any]]:
     """Expand a legacy constraint spec into one or more IR constraints.
 
@@ -220,7 +284,14 @@ def expand_to_ir(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
     if kind == "teacher_max_consecutive":
         teacher = params.get("teacher", "")
-        max_consecutive = int(params.get("maxConsecutive", 999))
+        # FIX.md §5: canonical key is maxConsecutive; `max` is legacy
+        # fallback. Do NOT default 999; missing max means malformed.
+        max_consecutive_raw = params.get("maxConsecutive", params.get("max"))
+        if max_consecutive_raw is None:
+            raise ValueError(
+                f"teacher_max_consecutive thiếu maxConsecutive/max (id={spec.get('id')})"
+            )
+        max_consecutive = int(max_consecutive_raw)
         if max_consecutive <= 0:
             # No consecutive teaching allowed: encode as NOT consecutive of length 2
             ir = _to_ir(spec, {
@@ -718,58 +789,63 @@ def expand_to_ir(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
     if kind == "subject_max_consecutive":
         subject = params.get("subject", "")
-        max_consecutive = int(params.get("max", params.get("maxConsecutive", 999)))
+        # FIX.md §5: canonical key is `maxConsecutive`; `max` is legacy
+        # fallback. Do NOT default 999; missing max means malformed.
+        max_consecutive_raw = params.get("maxConsecutive", params.get("max"))
+        if max_consecutive_raw is None:
+            raise ValueError(
+                f"subject_max_consecutive thiếu maxConsecutive/max (id={spec.get('id')})"
+            )
+        max_consecutive = int(max_consecutive_raw)
         classes = params.get("classes")
-        if max_consecutive <= 0:
-            ir = _to_ir(spec, {
-                "forall": {
-                    "var": "d",
-                    "in": "days",
-                    "body": {
-                        "not": {
-                            "consecutive": {
-                                "var": "p",
-                                "in": "periods",
-                                "length": 2,
-                                "body": {
-                                    "classSubjectAt": {
-                                        "class": "$c",
-                                        "subject": subject,
-                                        "day": "$d",
-                                        "period": "$p"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            })
-            return [ir]
-        window_length = max_consecutive + 1
-        ir = _to_ir(spec, {
-            "forall": {
-                "var": "d",
-                "in": "days",
-                "body": {
-                    "not": {
-                        "consecutive": {
-                            "var": "p",
-                            "in": "periods",
-                            "length": window_length,
+        # FIX.md §6.1: when subject is a sentinel (universal "mọi môn"),
+        # the upstream TS normalizer should already have expanded into
+        # subject-specific specs. If it didn't, emit a marker IR that the
+        # IR compiler can resolve at runtime (or, when no resolver is
+        # available, the validator will catch the resulting violations).
+        all_subjects = subject in (
+            "", "__all__", "all", "all_subjects", "all subjects",
+            "mọi môn", "moi mon", "tất cả môn", "tat ca mon",
+        ) or subject is None
+        if all_subjects:
+            # Quantify over all subjects that actually appear in the data.
+            # This is a best-effort fallback when the TS normalizer did not
+            # expand. The IR compiler will use `subjects` from the env.
+            return [
+                _to_ir(
+                    spec,
+                    {
+                        "forall": {
+                            "var": "s",
+                            "in": "subjects",
                             "body": {
-                                "classSubjectAt": {
-                                    "class": "$c",
-                                    "subject": subject,
-                                    "day": "$d",
-                                    "period": "$p"
+                                "forall": {
+                                    "var": "c",
+                                    "in": "classes",
+                                    "body": {
+                                        "not": {
+                                            "consecutive": {
+                                                "var": "p",
+                                                "in": "periods",
+                                                "length": max_consecutive + 1,
+                                                "body": {
+                                                    "classSubjectAt": {
+                                                        "class": "$c",
+                                                        "subject": "$s",
+                                                        "day": "$d",
+                                                        "period": "$p",
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    },
                                 }
-                            }
+                            },
                         }
-                    }
-                }
-            }
-        })
-        return [ir]
+                    },
+                )
+            ]
+        return [_emit_subject_max_consecutive_ir(spec, subject, max_consecutive, classes)]
 
     # ---- Class constraints ----
 

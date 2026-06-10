@@ -9,6 +9,7 @@ import type {
 import { countHeavySubjectsInPeriods, sessionPeriodBuckets } from './class-heavy-session';
 import { CHECKED_KINDS } from './constraint-registry';
 import { appendToGroup, checkBaseConstraints, evaluateCondition, toPeriod } from './validator-helpers';
+import { isAllSubjectValue } from './constraint-spec-normalizer';
 
 type CheckFn = (
   spec: ConstraintSpec,
@@ -93,7 +94,8 @@ const checkTeacherMaxPerDay: CheckFn = (spec, schedule) => {
 
 const checkTeacherMaxConsecutive: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
-  const maxConsecutive = Number(spec.params.maxConsecutive ?? NaN);
+  const parsedMax = Number(spec.params.maxConsecutive ?? spec.params.max);
+  const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();
 
@@ -321,9 +323,24 @@ const checkTeacherMaxWorkingDays: CheckFn = (spec, schedule) => {
 };
 
 const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
-  const subject = String(spec.params.subject ?? '');
-  const parsedMax = Number(spec.params.maxConsecutive);
-  const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
+  const rawSubject = spec.params.subject;
+  const allSubjects = isAllSubjectValue(rawSubject);
+  const subject = String(rawSubject ?? '').trim();
+  const parsedMax = Number(spec.params.maxConsecutive ?? spec.params.max);
+  const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : NaN;
+  if (!allSubjects && !subject) return [];
+  if (!Number.isFinite(maxConsecutive)) {
+    // Malformed spec: cannot enforce, but flag as violation so the result
+    // surfaces the missing max instead of silently passing.
+    return [
+      {
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Ràng buộc ${spec.id} thiếu maxConsecutive/max hợp lệ.`,
+        offendingEntries: [],
+      },
+    ];
+  }
   const classes = Array.isArray(spec.params.classes)
     ? spec.params.classes.map((value) => String(value))
     : null;
@@ -331,9 +348,13 @@ const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
   const byClassDay = new Map<string, ScheduleEntry[]>();
 
   for (const entry of schedule) {
-    if (entry.subject !== subject) continue;
+    if (!allSubjects && entry.subject !== subject) continue;
     if (classes && !classes.includes(entry.class)) continue;
-    const key = `${entry.class}::${entry.day}`;
+    // For "all subjects", group by (class, day, subject) so Văn and Toán are checked independently.
+    // For a specific subject, group by (class, day) only.
+    const key = allSubjects
+      ? `${entry.class}::${entry.day}::${entry.subject}`
+      : `${entry.class}::${entry.day}`;
     appendToGroup(byClassDay, key, entry);
   }
 
@@ -350,11 +371,14 @@ const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
       if (streak > maxSeen) maxSeen = streak;
     }
     if (maxSeen > maxConsecutive) {
-      const [klass, day] = key.split('::');
+      const parts = key.split('::');
+      const klass = parts[0];
+      const day = parts[1];
+      const actualSubject = allSubjects ? parts.slice(2).join('::') : subject;
       violations.push({
         constraintId: spec.id,
         kind: spec.kind,
-        message: `Lớp ${klass} có ${maxSeen} tiết ${subject} liên tiếp ngày ${day} (tối đa ${maxConsecutive}).`,
+        message: `Lớp ${klass} có môn ${actualSubject} ${maxSeen} tiết liên tiếp trong ${day}, vượt tối đa ${maxConsecutive}.`,
         offendingEntries: entries,
       });
     }
@@ -1157,7 +1181,8 @@ const checkClassAllowedPeriods: CheckFn = (spec, schedule) => {
 
 const checkClassMaxConsecutive: CheckFn = (spec, schedule) => {
   const klass = String(spec.params.class ?? '');
-  const maxConsecutive = Number(spec.params.maxConsecutive ?? NaN);
+  const parsedMax = Number(spec.params.maxConsecutive ?? spec.params.max);
+  const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : NaN;
   if (!klass || !Number.isFinite(maxConsecutive)) return [];
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();

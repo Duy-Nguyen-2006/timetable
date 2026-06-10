@@ -53,7 +53,7 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'subject_preferred_periods', label: 'Subject preferred periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'periods'] },
   { kind: 'subject_not_last_period', label: 'Subject not last period', group: 'subject', hasChecker: true, requiredParams: ['subject'] },
   { kind: 'subject_consecutive', label: 'Subject consecutive', group: 'subject', hasChecker: true, requiredParams: ['subject'] },
-  { kind: 'subject_max_consecutive', label: 'Subject max consecutive', group: 'subject', hasChecker: true, requiredParams: ['subject', 'max'] },
+  { kind: 'subject_max_consecutive', label: 'Subject max consecutive', group: 'subject', hasChecker: true, requiredParams: ['subject', 'maxConsecutive'] },
   { kind: 'subject_allowed_days', label: 'Subject allowed days', group: 'subject', hasChecker: true, requiredParams: ['subject', 'days'] },
   { kind: 'subject_min_gap_days', label: 'Subject min gap days', group: 'subject', hasChecker: true, requiredParams: ['subject', 'minGap'] },
   { kind: 'subject_daily_max_periods', label: 'Subject daily max periods', group: 'subject', hasChecker: true, requiredParams: ['subject', 'max'] },

@@ -5,8 +5,12 @@ export type WorkspaceState = {
   dataset?: CompressedPayload;
   constraintSpecs?: ConstraintSpec[];
   plan?: Plan;
-  latestConstraintCode?: string;
-  latestGeneratedSolver?: string;
+  /**
+   * Latest fixed solver code (skeleton + custom_dsl block replaced with
+   * `pass`). Was previously called `latestGeneratedSolver` and held AI
+   * generated code; the AI codegen pipeline was removed.
+   */
+  latestSolverCode?: string;
   violations?: Violation[];
   errorDigest?: string;
   attempts: Array<{
@@ -33,12 +37,8 @@ export class WorkspaceBoard {
     this.state.plan = plan;
   }
 
-  setLatestConstraintCode(latestConstraintCode: string): void {
-    this.state.latestConstraintCode = latestConstraintCode;
-  }
-
-  setLatestGeneratedSolver(latestGeneratedSolver: string): void {
-    this.state.latestGeneratedSolver = latestGeneratedSolver;
+  setLatestSolverCode(latestSolverCode: string): void {
+    this.state.latestSolverCode = latestSolverCode;
   }
 
   setViolations(violations: Violation[]): void {

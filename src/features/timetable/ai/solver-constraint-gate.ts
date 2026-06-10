@@ -7,6 +7,7 @@ import type {
 } from './constraint-review-types';
 import { humanizeDraft } from './constraint-humanizer';
 import { assertSolvableConstraintState, flattenConfirmedSpecs } from './constraint-preflight';
+import { normalizeConstraintSpecsForSolving } from './constraint-spec-normalizer';
 
 export type ConfirmedSolveRequest = {
   input: Omit<AgentInputPayload, 'constraints'>;
@@ -70,7 +71,27 @@ export function validateConfirmedSolveRequest(
       warnings: preflight.warnings,
     };
   }
-  return { ok: true, agentInput, preTranslatedSpecs, warnings: preflight.warnings };
+
+  // Final safety net: normalize confirmed specs one more time so confirmed
+  // specs with `subject='__all__'` / missing subject / no maxConsecutive
+  // are expanded to subject-specific specs (or flagged as malformed)
+  // BEFORE the solver sees them.
+  const normalized = normalizeConstraintSpecsForSolving(agentInput, preTranslatedSpecs);
+  if (normalized.issues.length > 0) {
+    return {
+      ok: false,
+      status: 422,
+      error: 'Một số ràng buộc đã xác nhận chưa hợp lệ để xếp lịch.',
+      messages: normalized.issues.map((i) => i.message),
+      warnings: preflight.warnings,
+    };
+  }
+  return {
+    ok: true,
+    agentInput,
+    preTranslatedSpecs: normalized.specs,
+    warnings: preflight.warnings,
+  };
 }
 
 /** Legacy solve: user đã confirm dialog → gắn specs từ drafts (chưa có UI review đầy đủ). */

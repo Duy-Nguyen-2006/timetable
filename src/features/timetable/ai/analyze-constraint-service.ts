@@ -25,6 +25,7 @@ import { SOLVER_ENCODABLE_KIND_LIST, BUILT_IN_CONSTRAINT_DEFINITIONS, getConstra
 import type { BuiltInConstraintScope } from './constraint-registry';
 import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
 import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
+import { normalizeConstraintSpecsForSolving } from './constraint-spec-normalizer';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -533,6 +534,24 @@ export async function analyzeConstraint(
       }
     }
 
+    // Always normalize resolved specs (subject_max_consecutive universal, maxConsecutive key)
+    // — chặn no-op "mọi môn" trước khi spec chạm validator/solver.
+    const normalized = normalizeConstraintSpecsForSolving(agentInput, resolvedSpecs);
+    if (normalized.issues.length > 0) {
+      return {
+        status: 'needs_clarification',
+        normalizedText: rawText,
+        specs: [],
+        confidence: 'low',
+        clarificationQuestions: normalized.issues.map((i) => i.message),
+        assumptions: [],
+        unresolvedQuestions: normalized.issues.map((i) => i.message),
+        rawResponse: content,
+        usageTokens: response.usage?.total_tokens,
+      };
+    }
+    resolvedSpecs = normalized.specs;
+
     if (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText)) {
       return {
         ...clarifyAmbiguousIfThen(rawText),
@@ -559,10 +578,22 @@ export async function analyzeConstraint(
     // built-in hợp lệ, ưu tiên trả kết quả deterministic thay vì báo lỗi.
     const deterministic = mergedDeterministicFallbackSpecs(rawText, constraintType, weight, agentInput);
     if (deterministic.length > 0) {
+      const normalized = normalizeConstraintSpecsForSolving(agentInput, deterministic);
+      if (normalized.issues.length > 0) {
+        return {
+          status: 'needs_clarification',
+          normalizedText: rawText,
+          specs: [],
+          confidence: 'low',
+          clarificationQuestions: normalized.issues.map((i) => i.message),
+          assumptions: [],
+          unresolvedQuestions: normalized.issues.map((i) => i.message),
+        };
+      }
       return {
         status: 'mapped_builtin',
-        normalizedText: deterministic.map((s) => humanizeConstraintSpec(s)).join('\n'),
-        specs: deterministic,
+        normalizedText: normalized.specs.map((s) => humanizeConstraintSpec(s)).join('\n'),
+        specs: normalized.specs,
         confidence: 'high',
         clarificationQuestions: [],
         assumptions: [

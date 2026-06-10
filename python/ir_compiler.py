@@ -424,10 +424,21 @@ def compile_expr(
 
         # consecutive L: there exists a start position such that
         # body[$var], body[$var+1], ..., body[$var+L-1] are all true.
-        # We check all valid start positions.
+        # FIX.md §7.2: window must be NUMERICALLY consecutive (e.g. [1,2,3]),
+        # not just adjacent in the domain list (which would wrongly accept
+        # windows like [2, 4] when periods_by_day=[1, 2, 4, 5]).
+        def _is_numeric_consecutive_window(values):
+            try:
+                ints = [int(v) for v in values]
+            except (TypeError, ValueError):
+                return True
+            return all(ints[i + 1] == ints[i] + 1 for i in range(len(ints) - 1))
+
         window_vars = []
         for start_idx in range(len(domain_vals) - length + 1):
             window_vals = domain_vals[start_idx : start_idx + length]
+            if not _is_numeric_consecutive_window(window_vals):
+                continue
             window_lits = []
             for i, val in enumerate(window_vals):
                 sub_env = {**env, var: val}
@@ -449,8 +460,10 @@ def compile_expr(
         a = expr["teachesOnDay"]
         teacher = resolve_var_ref(a["teacher"], env)
         day = resolve_var_ref(a["day"], env)
-        # teachesOnDay: OR over all periods for that day
-        periods = env.get("periods", [])
+        # FIX.md §7.2: prefer periods for this day from periodsByDay; fall
+        # back to global periods only when the per-day list is missing/empty.
+        pbd = env.get("periodsByDay") or env.get("periods_by_day") or {}
+        periods = pbd.get(str(day)) or env.get("periods", [])
         if not periods:
             return dv.const(False)
         lits = [dv.teacher_busy(str(teacher), str(day), p) for p in periods]

@@ -10,8 +10,12 @@ export interface DebugBundleSnapshot {
   inputDigest?: string
   compressedPayload?: unknown
   translatorOutput?: { constraintSpecs: ConstraintSpec[]; rawText?: string }
-  plannerOutput?: Plan
-  generatedSolver?: string
+  /**
+   * The fixed solver skeleton with the custom-dsl block replaced by `pass`.
+   * The previous `generatedSolver`/`plannerOutput` fields belonged to the
+   * removed AI codegen pipeline.
+   */
+  solverCodeSnapshot?: string
   executionResult?: unknown
   validationReport?: { violations: Violation[]; ok: boolean }
   finalResult?: unknown

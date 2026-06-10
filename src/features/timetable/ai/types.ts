@@ -22,10 +22,8 @@ export interface AIProviderConfig {
   baseURL: string;
   apiKey: string;
   model: string;
+  /** Model used by the constraint translator (parse/analyze) when distinct from `model`. */
   modelTranslator?: string;
-  modelPlanner?: string;
-  modelCoder?: string;
-  modelRepair?: string;
   solverProfile?: SolverProfile;
   solverRuntimeMode?: SolverRuntimeMode;
 }
@@ -109,6 +107,10 @@ export interface LocalAgentFinalResult {
   deterministicReport: DeterministicValidationReport;
   checkerReport: DeterministicValidationReport;
   violations: Violation[];
+  /** FIX.md §4: soft violations surfaced explicitly (not just inside the report). */
+  softViolations?: Violation[];
+  softViolationCount?: number;
+  hardViolations?: Violation[];
   diagnostics: string[];
   executionErrors: Array<{ constraintId: string; error: string }>;
   validationErrors: Array<{ constraintId: string; error: string }>;
@@ -123,12 +125,9 @@ export interface LocalAgentFinalResult {
 
 export type AgentLifecyclePhase =
   | 'thinking'
-  | 'coding'
   | 'running'
   | 'checking'
-  | 'fixing'
   | 'translator'
-  | 'planner'
   | 'idle';
 
 export interface AgentLifecycleEvent {
@@ -152,40 +151,8 @@ export type AgentEvent =
   | { type: 'final_result'; result: LocalAgentFinalResult }
   | { type: 'error'; message: string; fatal?: boolean };
 
-export interface CoderTurnResult {
-  plan_summary: string;
-  constraint_code: string;
-  covered_constraint_ids: string[];
-  assumptions: string[];
-  rawResponse?: string;
-  usageTokens?: number;
-}
-
-export interface RepairTurnResult {
-  summary: string;
-  patches: Array<{ oldStr: string; newStr: string; reason: string; replaceAll?: boolean }>;
-  assumptions: string[];
-  rawResponse?: string;
-  usageTokens?: number;
-}
-
-export interface TranslatorTurnResult {
-  constraintSpecs: ConstraintSpec[];
-  rawResponse?: string;
-  usageTokens?: number;
-}
-
-export interface PlannerTurnResult {
-  plan: Plan;
-  rawResponse?: string;
-  usageTokens?: number;
-}
-
 export interface LocalAgentConfig extends AIProviderConfig {
   modelTranslator?: string;
-  modelPlanner?: string;
-  modelCoder?: string;
-  modelRepair?: string;
   timeoutMs?: number;
   solverProfile?: SolverProfile;
   solverWorkers?: number;

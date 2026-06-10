@@ -7,6 +7,29 @@ import { buildDraftFromSpecs } from './constraint-draft-validator';
 import { humanizeDraft } from './constraint-humanizer';
 import type { ParsedConstraintDraft, RawConstraintInput } from './constraint-review-types';
 import { inferRuleParseConfidence } from './rule-parse-confidence';
+import {
+  normalizeConstraintSpecsForSolving,
+  type SpecNormalizationIssue,
+} from './constraint-spec-normalizer';
+
+/** Convert normalization issues into parse issues the draft validator understands. */
+function normalizationIssuesToParseIssues(
+  issues: SpecNormalizationIssue[]
+): { code: string; message: string }[] {
+  return issues.map((issue) => ({ code: issue.code, message: issue.message }));
+}
+
+function applyNormalizationOrFail(
+  input: AgentInputPayload,
+  raw: RawConstraintInput,
+  specs: ConstraintSpec[]
+): { specs: ConstraintSpec[]; issues: SpecNormalizationIssue[] } {
+  const result = normalizeConstraintSpecsForSolving(input, specs);
+  if (result.issues.length) {
+    // surface as parse issues so the draft lands in needs_review, not green-confirm.
+  }
+  return { specs: result.specs, issues: result.issues };
+}
 
 function toRawInputs(constraints: ConstraintItemInput[]): RawConstraintInput[] {
   const now = new Date().toISOString();
@@ -111,13 +134,20 @@ export async function parseConstraintDraftsWithRaws(
   for (const raw of raws) {
     const specs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
     const rule = inferRuleParseConfidence(raw.text, specs);
+    const { specs: normalizedSpecs, issues: normIssues } = applyNormalizationOrFail(
+      input,
+      raw,
+      rule.specs
+    );
 
-    if (ruleParserIsSufficient(rule)) {
+    if (ruleParserIsSufficient(rule) && normIssues.length === 0) {
       // High confidence, simple pattern — use rule parser directly
-      drafts.push(buildDraft(input, raw, rule.specs, 'rule', 'high', rule.issues));
+      drafts.push(buildDraft(input, raw, normalizedSpecs, 'rule', 'high', [
+        ...normalizationIssuesToParseIssues(normIssues),
+      ]));
       continue;
     }
-    // Everything else goes to LLM
+    // Everything else goes to LLM (or falls back to rule parser after).
     pendingForLlm.push(raw);
   }
 
@@ -148,19 +178,35 @@ export async function parseConstraintDraftsWithRaws(
     const fromLlm = translatorSpecs.filter(
       (s) => s.original === raw.text || s.original.trim() === raw.text.trim()
     );
+    const ruleSpecs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
+    const rule = inferRuleParseConfidence(raw.text, ruleSpecs);
+    // Apply normalizer to BOTH LLM and rule-parsed specs so the path
+    // doesn't leak "mọi môn" / missing-subject no-op into the draft.
+    const fromLlmNormalized = normalizeConstraintSpecsForSolving(
+      input,
+      fromLlm.length > 0 ? fromLlm : []
+    );
+    const ruleNormalized = normalizeConstraintSpecsForSolving(input, ruleSpecs);
+    const combinedIssues: SpecNormalizationIssue[] = [
+      ...fromLlmNormalized.issues,
+      ...ruleNormalized.issues,
+    ];
+    const extraIssues = [
+      ...normalizationIssuesToParseIssues(combinedIssues),
+      ...rule.issues,
+    ];
 
-    if (fromLlm.length > 0 && !fromLlm.every((s) => s.kind === 'custom_dsl')) {
+    if (fromLlm.length > 0 && !fromLlm.every((s) => s.kind === 'custom_dsl') && fromLlmNormalized.specs.length > 0) {
       // LLM produced meaningful results — use them
-      drafts.push(buildDraft(input, raw, fromLlm, 'translator', 'medium', []));
+      drafts.push(buildDraft(input, raw, fromLlmNormalized.specs, 'translator', 'medium', extraIssues));
     } else {
-      // LLM failed or only produced custom_dsl — fall back to rule parser
-      const ruleSpecs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
-      const rule = inferRuleParseConfidence(raw.text, ruleSpecs);
-      const specs = fromLlm.length > 0 ? fromLlm : ruleSpecs;
-      const source: ParsedConstraintDraft['source'] = fromLlm.length > 0 ? 'translator' : 'rule';
+      // LLM failed, only produced custom_dsl, or normalizer dropped the LLM specs
+      // (e.g. malformed max). Fall back to rule parser.
+      const specs = fromLlmNormalized.specs.length > 0 ? fromLlmNormalized.specs : ruleNormalized.specs;
+      const source: ParsedConstraintDraft['source'] = fromLlmNormalized.specs.length > 0 ? 'translator' : 'rule';
       const confidence: ParsedConstraintDraft['confidence'] =
-        fromLlm.length > 0 ? 'medium' : rule.confidence;
-      drafts.push(buildDraft(input, raw, specs, source, confidence, rule.issues));
+        fromLlmNormalized.specs.length > 0 ? 'medium' : rule.confidence;
+      drafts.push(buildDraft(input, raw, specs, source, confidence, extraIssues));
     }
   }
 

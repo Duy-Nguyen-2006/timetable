@@ -19,13 +19,13 @@ test('buildDebugBundle stamps versions and timestamp', () => {
     },
     snapshot: {
       inputDigest: 'abc',
-      generatedSolver: '# code',
+      solverCodeSnapshot: '# code',
       executionResult: { ok: true },
     },
   })
   assert.equal(bundle.versions, PIPELINE_VERSIONS)
   assert.equal(bundle.inputDigest, 'abc')
-  assert.equal(bundle.generatedSolver, '# code')
+  assert.equal(bundle.solverCodeSnapshot, '# code')
   assert.deepEqual(bundle.executionResult, { ok: true })
   assert.ok(new Date(bundle.generatedAt).getTime() >= before - 1000)
 })

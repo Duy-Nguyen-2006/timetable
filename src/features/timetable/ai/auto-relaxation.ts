@@ -158,3 +158,35 @@ export function buildRelaxationPlan(
 export function applyRelaxation(specs: ConstraintSpec[], plan: RelaxationPlan): ConstraintSpec[] {
   return plan.nextSpecs;
 }
+
+/**
+ * Best-effort safety net for the 4-tiết-Văn regression (FIX.md §10.2):
+ * if a relaxation touches a `subject_max_consecutive` spec, make sure
+ * the relaxation result still uses BOTH `maxConsecutive` and `max` keys
+ * (so legacy readers still see the value).
+ *
+ * Callers should already have run the constraint-spec normalizer; this
+ * is a defensive guard against order-of-operations bugs where the
+ * relaxation runs before the normalizer.
+ */
+export function normalizeRelaxedSpecs(specs: ConstraintSpec[]): ConstraintSpec[] {
+  return specs.map((spec) => {
+    if (
+      spec.kind === 'subject_max_consecutive' ||
+      spec.kind === 'teacher_max_consecutive' ||
+      spec.kind === 'class_max_consecutive'
+    ) {
+      const max = spec.params.maxConsecutive ?? spec.params.max;
+      if (max == null) return spec;
+      return {
+        ...spec,
+        params: {
+          ...spec.params,
+          maxConsecutive: max,
+          max,
+        },
+      };
+    }
+    return spec;
+  });
+}

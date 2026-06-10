@@ -3,6 +3,7 @@ import type { ConstraintSpec } from './constraint-spec';
 import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { ConstraintParseIssue } from './constraint-review-types';
 import { validateConstraintSpecs } from './constraint-draft-validator';
+import { normalizeConstraintSpecsForSolving } from './constraint-spec-normalizer';
 
 export type ReparseSpecInput = { kind: string; params: Record<string, unknown> };
 
@@ -62,7 +63,19 @@ export function validateReparseCandidateSpecs(
     };
   }
 
-  const specs = materializeSpecs(raw, specInputs);
+  const materialized = materializeSpecs(raw, specInputs);
+  const normalized = normalizeConstraintSpecsForSolving(input, materialized);
+  if (normalized.issues.length > 0) {
+    return {
+      ok: false,
+      issues: normalized.issues.map((issue) => ({
+        code: issue.code,
+        message: issue.message,
+      })),
+      status: 'needs_review',
+    };
+  }
+  const specs = normalized.specs;
   const kindIssues = rejectInvalidReparseKinds(specs);
   if (kindIssues.length > 0) {
     return { ok: false, issues: kindIssues, status: 'unsupported' };

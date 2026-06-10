@@ -176,7 +176,10 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
         return out
 
     if kind == "teacher_max_consecutive":
-        max_consecutive = int(params.get("maxConsecutive", 0))
+        max_consecutive_raw = params.get("maxConsecutive", params.get("max"))
+        if max_consecutive_raw is None:
+            return [_violation(cid, kind, "subject_max_consecutive thiếu maxConsecutive/max.", [])]
+        max_consecutive = int(max_consecutive_raw)
         by_day: dict[str, list[int]] = {}
         for entry in schedule:
             if entry.get("teacher") != params.get("teacher"):
@@ -206,6 +209,59 @@ def _check_single(spec: dict[str, Any], schedule: list[dict[str, Any]]) -> list[
                     if e.get("teacher") == params.get("teacher") and e.get("day") == day
                 ]
                 out.append(_violation(cid, kind, "teacher_max_consecutive violated.", entries))
+        return out
+
+    if kind == "subject_max_consecutive":
+        # FIX.md §6.2: support universal subject ("mọi môn") by grouping
+        # by (class, day, subject); support both `maxConsecutive` and
+        # legacy `max` keys; do NOT default max to 0.
+        subject = params.get("subject", "")
+        max_consecutive_raw = params.get("maxConsecutive", params.get("max"))
+        if max_consecutive_raw is None:
+            return [_violation(cid, kind, "subject_max_consecutive thiếu maxConsecutive/max.", [])]
+        max_consecutive = int(max_consecutive_raw)
+        all_subjects = subject in (
+            "", "__all__", "all", "all_subjects", "all subjects",
+            "mọi môn", "moi mon", "tất cả môn", "tat ca mon",
+        ) or subject is None
+        classes = params.get("classes")
+        out: list[dict[str, Any]] = []
+        groups: dict[tuple[str, str, str], list[int]] = {}
+        for entry in schedule:
+            if not all_subjects and entry.get("subject") != subject:
+                continue
+            if classes and entry.get("class") not in classes:
+                continue
+            p = _to_period(entry.get("period"))
+            if p is None:
+                continue
+            day = str(entry.get("day"))
+            klass = str(entry.get("class"))
+            actual_subject = str(entry.get("subject"))
+            key = (klass, day, actual_subject if all_subjects else subject)
+            groups.setdefault(key, []).append(p)
+        for (klass, day, actual_subject), periods in groups.items():
+            sorted_periods = sorted(periods)
+            if len(sorted_periods) <= max_consecutive:
+                continue
+            streak = 1
+            longest = 1 if sorted_periods else 0
+            for i in range(1, len(sorted_periods)):
+                if sorted_periods[i] == sorted_periods[i - 1] + 1:
+                    streak += 1
+                else:
+                    streak = 1
+                longest = max(longest, streak)
+            if longest > max_consecutive:
+                entries = [
+                    e
+                    for e in schedule
+                    if e.get("class") == klass
+                    and e.get("day") == day
+                    and (all_subjects or e.get("subject") == subject)
+                ]
+                msg = f"Lớp {klass} có môn {actual_subject} {longest} tiết liên tiếp ngày {day}, vượt tối đa {max_consecutive}."
+                out.append(_violation(cid, kind, msg, entries))
         return out
 
     if kind == "subject_pin_period":

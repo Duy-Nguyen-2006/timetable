@@ -44,16 +44,8 @@ export function SettingsModal({
   const [apiKey, setApiKey] = useState(initialConfig?.apiKey || '');
   const [model, setModel] = useState(initialConfig?.model || 'deepseek/deepseek-v4-flash');
   const [modelTranslator, setModelTranslator] = useState(initialConfig?.modelTranslator || '');
-  const [modelPlanner, setModelPlanner] = useState(initialConfig?.modelPlanner || '');
-  const [modelCoder, setModelCoder] = useState(initialConfig?.modelCoder || '');
-  const [modelRepair, setModelRepair] = useState(initialConfig?.modelRepair || '');
   const [showAdvancedModels, setShowAdvancedModels] = useState(
-    Boolean(
-      initialConfig?.modelTranslator ||
-        initialConfig?.modelPlanner ||
-        initialConfig?.modelCoder ||
-        initialConfig?.modelRepair,
-    ),
+    Boolean(initialConfig?.modelTranslator),
   );
   const [solverProfile, setSolverProfile] = useState<SolverProfile>(initialConfig?.solverProfile || 'balanced');
   const [solverRuntimeMode, setSolverRuntimeMode] = useState<SolverRuntimeMode>(initialConfig?.solverRuntimeMode || 'bundled');
@@ -151,9 +143,6 @@ export function SettingsModal({
         apiKey: trimmedKey,
         model: trimmedModel,
         modelTranslator: modelTranslator.trim() || undefined,
-        modelPlanner: modelPlanner.trim() || undefined,
-        modelCoder: modelCoder.trim() || undefined,
-        modelRepair: modelRepair.trim() || undefined,
         solverProfile,
         solverRuntimeMode,
       });
@@ -218,9 +207,6 @@ export function SettingsModal({
                 {(
                   [
                     { label: 'Translator model', value: modelTranslator, set: setModelTranslator },
-                    { label: 'Planner model', value: modelPlanner, set: setModelPlanner },
-                    { label: 'Coder model', value: modelCoder, set: setModelCoder },
-                    { label: 'Repair model', value: modelRepair, set: setModelRepair },
                   ] as const
                 ).map(({ label, value, set }) => (
                   <div className="space-y-1" key={label}>
@@ -233,7 +219,8 @@ export function SettingsModal({
                   </div>
                 ))}
                 <p className="text-xs text-muted-foreground">
-                  Để trống ô nào sẽ fallback về model chính. Hữu ích khi muốn dùng model rẻ cho translator và model mạnh cho coder.
+                  Để trống sẽ fallback về model chính. Planner / Coder / Repair
+                  models không còn dùng vì pipeline AI codegen đã được gỡ.
                 </p>
               </div>
             ) : null}

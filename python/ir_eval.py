@@ -321,9 +321,20 @@ def eval_expr(
         body = q["body"]
         if not domain_vals or len(domain_vals) < length:
             return False
-        # Check each window of size `length`
+
+        # FIX.md §7.3: window must be NUMERICALLY consecutive (e.g. [1,2,3]),
+        # not just adjacent in the domain list.
+        def _is_numeric_consecutive_window(values):
+            try:
+                ints = [int(v) for v in values]
+            except (TypeError, ValueError):
+                return True
+            return all(ints[i + 1] == ints[i] + 1 for i in range(len(ints) - 1))
+
         for start_idx in range(len(domain_vals) - length + 1):
             window_vals = domain_vals[start_idx : start_idx + length]
+            if not _is_numeric_consecutive_window(window_vals):
+                continue
             if all(
                 eval_expr(body, schedule, dv, {**env, var: val})
                 for val in window_vals
@@ -343,7 +354,12 @@ def eval_expr(
         a = expr["teachesOnDay"]
         teacher = resolve_var_ref(a["teacher"], env)
         day = resolve_var_ref(a["day"], env)
-        return _teacher_teaches_on_day(str(teacher), str(day), schedule)
+        # FIX.md §7.3: prefer per-day periods; fall back to global.
+        pbd = env.get("periodsByDay") or env.get("periods_by_day") or {}
+        periods = pbd.get(str(day)) or env.get("periods", [])
+        if not periods:
+            return False
+        return any(_teacher_teaches_at(str(teacher), str(day), int(p), schedule) for p in periods)
 
     if "classSubjectAt" in expr:
         a = expr["classSubjectAt"]

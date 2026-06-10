@@ -134,7 +134,7 @@ test('multiple hard unsupported → reason liệt kê cả 2 loại', () => {
   if (!result.ok) {
     assert.equal(result.hardCustomSpecs.length, 1);
     assert.equal(result.unsupportedHardSpecs.length, 1);
-    assert.match(result.reason, /custom_dsl hard chưa được hỗ trợ/);
+    assert.match(result.reason, /custom_dsl hard chưa có IR expr\/pythonPredicate/);
     assert.match(result.reason, /chưa được mã hóa CP-SAT/);
   }
 });

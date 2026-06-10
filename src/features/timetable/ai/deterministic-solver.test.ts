@@ -40,7 +40,7 @@ function setupFetch(execResult: ExecutionResult, options?: { onExecute?: (code: 
         'def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n'
       );
     }
-    if (url.endsWith('/api/ai/python-execute')) {
+    if (url.endsWith('/api/solver/execute')) {
       const body = JSON.parse(String(init?.body ?? '{}')) as { code?: string; input?: unknown };
       options?.onExecute?.(body.code ?? '', body.input);
       return Response.json({ ok: true, result: execResult });

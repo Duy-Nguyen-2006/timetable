@@ -36,10 +36,14 @@ class DerivedVars:
         model: Model,
         slots: dict[SlotKey, BoolVar],
         assignments: list[dict],
+        periods: list[int | str] | None = None,
+        periods_by_day: dict[str, list[int | str]] | None = None,
     ):
         self.model = model
         self.slots = slots
         self.assignments = assignments
+        self.periods = list(periods or [])
+        self.periods_by_day = dict(periods_by_day or {})
         self._cache: dict[tuple, BoolVar] = {}
 
         # Indexes for fast lookup without scanning all assignments
@@ -79,19 +83,30 @@ class DerivedVars:
         return b
 
     def teachesOnDay(self, teacher: str, day: str) -> BoolVar:
-        """BoolVar: teacher teaches at least one period on this day."""
+        """BoolVar: teacher teaches at least one period on this day.
+
+        FIX.md §7.4: previously a placeholder that was always true. Now
+        uses periods from `periods_by_day[day]` when available and falls
+        back to the global `periods` list. Slots that don't exist for
+        this teacher are skipped.
+        """
         key = ("tod", teacher, day)
         if key in self._cache:
             return self._cache[key]
 
-        # We need OR over all periods. Since periods aren't known here generically,
-        # we use a simple approximation: just check if any slot exists for this teacher+day.
-        # The actual period-by-period check is done in compile_expr when needed.
-        # For efficiency we expose this at the atom level.
+        periods = self.periods_by_day.get(day) or self.periods
+        teacher_assignment_ids = self.by_teacher.get(teacher, [])
+        lits = [
+            self.slots[(aid, day, p)]
+            for aid in teacher_assignment_ids
+            for p in periods
+            if (aid, day, p) in self.slots
+        ]
         b = self.model.NewBoolVar(f"tod_{teacher}_{day}")
-        # We'll handle this properly in compile_expr using exists over periods.
-        # For now, mark as always-true placeholder (will be refined by the compiler).
-        self.model.Add(b == 1)
+        if lits:
+            self.model.AddMaxEquality(b, lits)
+        else:
+            self.model.Add(b == 0)
         self._cache[key] = b
         return b
 

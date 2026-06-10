@@ -3,13 +3,10 @@
 // debug bundles so reproductions stay traceable across refactors.
 
 export const PROMPT_VERSIONS = {
-  translator: '4.0.0',
-  planner: '3.0.0',
-  coder: '3.3.0',
-  repair: '3.1.0',
+  translator: '4.1.0',
 } as const;
 
-export const SOLVER_TEMPLATE_VERSION = '1.5.0';
+export const SOLVER_TEMPLATE_VERSION = '1.6.0';
 
 export const CONSTRAINT_REGISTRY_VERSION = '1.5.0';
 

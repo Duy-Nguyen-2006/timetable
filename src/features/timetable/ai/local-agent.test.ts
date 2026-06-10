@@ -42,7 +42,7 @@ test('runLocalAgent dùng deterministic fast path khi có confirmed specs eligib
       chatCalls += 1;
       return Response.json({ ok: true, content: '{}', usage: { total_tokens: 1 } });
     }
-    if (url.endsWith('/api/ai/python-execute')) {
+    if (url.endsWith('/api/solver/execute')) {
       return Response.json({
         ok: true,
         result: {

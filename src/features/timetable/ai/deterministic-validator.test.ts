@@ -469,4 +469,83 @@ describe('validator edge cases', () => {
     );
     assert.equal(passReport.violations.length, 0);
   });
+
+  // =========================================================================
+  // FIX.md: subject_max_consecutive với "mọi môn" / missing subject
+  // =========================================================================
+
+  it('subject_max_consecutive with __all__ subject catches Văn streak', () => {
+    // 4 Văn liên tiếp, max=2 → 1 violation phải được phát hiện
+    const allSubjectSpec = spec('van_all', 'subject_max_consecutive', {
+      subject: '__all__',
+      max: 2,
+    }, 'soft');
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Văn', 'Dung'),
+        entry('6A', 'mon', 2, 'Văn', 'Dung'),
+        entry('6A', 'mon', 3, 'Văn', 'Dung'),
+        entry('6A', 'mon', 4, 'Văn', 'Dung'),
+      ],
+      [allSubjectSpec]
+    );
+    assert.equal(report.softViolations.length, 1);
+    assert.match(report.softViolations[0].message, /Văn/);
+    assert.match(report.softViolations[0].message, /tối đa 2/);
+  });
+
+  it('subject_max_consecutive honors maxConsecutive key', () => {
+    const specA = spec('van_max', 'subject_max_consecutive', {
+      subject: 'Văn',
+      max: 2,
+    }, 'soft');
+    const specB = spec('van_maxConsec', 'subject_max_consecutive', {
+      subject: 'Văn',
+      maxConsecutive: 2,
+    }, 'soft');
+    const schedule = [
+      entry('6A', 'mon', 1, 'Văn', 'Dung'),
+      entry('6A', 'mon', 2, 'Văn', 'Dung'),
+      entry('6A', 'mon', 3, 'Văn', 'Dung'),
+    ];
+    const reportA = validateSchedule(schedule, [specA]);
+    const reportB = validateSchedule(schedule, [specB]);
+    assert.equal(reportA.softViolations.length, 1);
+    assert.equal(reportB.softViolations.length, 1);
+  });
+
+  it('subject_max_consecutive with missing max reports malformed', () => {
+    const malformed = spec('van_no_max', 'subject_max_consecutive', {
+      subject: 'Văn',
+    }, 'soft');
+    const report = validateSchedule(
+      [entry('6A', 'mon', 1, 'Văn', 'Dung')],
+      [malformed]
+    );
+    // malformed spec with no max → produce a violation so the issue surfaces.
+    assert.equal(report.softViolations.length, 1);
+    assert.match(report.softViolations[0].message, /maxConsecutive|max/i);
+  });
+
+  it('subject_max_consecutive universal separates per-subject streaks', () => {
+    // Văn có 2 liên tiếp (passes max=2), Toán có 4 liên tiếp (violates max=2)
+    const allSubjectSpec = spec('all', 'subject_max_consecutive', {
+      subject: '__all__',
+      max: 2,
+    }, 'soft');
+    const report = validateSchedule(
+      [
+        entry('6A', 'mon', 1, 'Văn', 'Dung'),
+        entry('6A', 'mon', 2, 'Văn', 'Dung'),
+        entry('6A', 'mon', 3, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 4, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 5, 'Toán', 'Sơn'),
+        entry('6A', 'mon', 6, 'Toán', 'Sơn'),
+      ],
+      [allSubjectSpec]
+    );
+    assert.equal(report.softViolations.length, 1);
+    assert.match(report.softViolations[0].message, /Toán/);
+    assert.doesNotMatch(report.softViolations[0].message, /Văn/);
+  });
 });

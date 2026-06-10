@@ -42,16 +42,18 @@ export type CapacityCheckResult = {
 };
 
 function periodCountForSession(input: AgentInputPayload, sessionId: string): number {
+  // FIX.md §10.1: do NOT silently fall back to `Math.max` of every session
+  // because that over-estimates the slot count for sessions with different
+  // lengths and produces false-feasible reports.
   const direct = input.periodCounts[sessionId];
   if (Number.isFinite(direct)) return direct;
-  const fallback = Object.values(input.periodCounts).filter((value) => Number.isFinite(value));
-  return fallback.length > 0 ? Math.max(...fallback) : 0;
+  return 0;
 }
 
 /** Compute the total number of slots available per day/session. */
 function computeAvailableSlots(input: AgentInputPayload): number {
   let total = 0;
-  for (const day of input.days) {
+  for (const _day of input.days) {
     for (const session of input.sessions) {
       total += periodCountForSession(input, session.id);
     }

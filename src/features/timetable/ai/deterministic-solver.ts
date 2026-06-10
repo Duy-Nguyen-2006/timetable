@@ -19,10 +19,11 @@ import { verifyCpSatRoundTrip } from './cp-sat-roundtrip';
 import type { ConstraintSpec, ScheduleEntry } from './constraint-spec';
 import { validateSchedule } from './deterministic-validator';
 import { compressPayload } from './input-compressor';
-import { executeGeneratedCode } from './python-bridge';
-import { injectConstraintCode, loadSolverSkeleton } from './skeleton-injector';
+import { executeSolverCode } from './python-bridge';
+import { injectEmptyCustomConstraintBlock, loadSolverSkeleton } from './skeleton-injector';
 import type { AgentInputPayload, ExecutionResult, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { buildFinalMessage, emit, resolveSolverRuntime } from './local-agent-utils';
+import { normalizeConstraintSpecsForSolving } from './constraint-spec-normalizer';
 
 export type DeterministicSolverOptions = {
   /** Specs đã xác nhận (bao gồm cả auto_base). */
@@ -91,12 +92,25 @@ export async function runDeterministicSolver(
   const compressed = compressPayload(input, deduped);
   // auto_base constraints (weekly_periods_exact tagged 'auto_base') bị skeleton
   // xử lý riêng, không đưa vào slot-level constraints.
-  const solverConstraintSpecs = deduped.filter(
+  let solverConstraintSpecs = deduped.filter(
     (spec) => !(spec.kind === 'weekly_periods_exact' && spec.tags?.includes('auto_base'))
   );
 
+  // Safety net: normalize confirmed specs one more time before sending to
+  // Python. This catches "mọi môn" / missing subject / wrong maxConsecutive
+  // key that survived the parse → confirm → gate pipeline.
+  const normalized = normalizeConstraintSpecsForSolving(input, solverConstraintSpecs);
+  if (normalized.issues.length > 0) {
+    const msg = `Specs không hợp lệ trước khi xếp lịch: ${normalized.issues
+      .map((i) => i.message)
+      .join('; ')}`;
+    emit(config, { type: 'error', message: msg, fatal: true });
+    return { success: false, error: msg };
+  }
+  solverConstraintSpecs = normalized.specs;
+
   const skeleton = await loadSolverSkeleton();
-  const injected = injectConstraintCode(skeleton, '');
+  const injected = injectEmptyCustomConstraintBlock(skeleton);
   if (!injected.injected) {
     const msg = 'Solver skeleton marker not found.';
     emit(config, { type: 'error', message: msg, fatal: true });
@@ -113,12 +127,12 @@ export async function runDeterministicSolver(
     ...(input.previousSchedule ? { warmStartSchedule: input.previousSchedule } : {}),
   };
 
-  const execResult = await executeGeneratedCode(injected.solverCode, executePayload, {
+  const execResult = await executeSolverCode(injected.solverCode, executePayload, {
     timeoutMs,
     solverWorkers: runtime.workers,
     // Section 14.8: pass seed for solver determinism (same input → same output)
     solverSeed: runtime.seed,
-  } as Parameters<typeof executeGeneratedCode>[2]);
+  } as Parameters<typeof executeSolverCode>[2]);
   emit(config, { type: 'execution_result', attempt: 1, result: execResult });
   if (!execResult.ok || !execResult.resultData) {
     const msg = execResult.errorDigest || 'Solver execution failed.';
@@ -166,6 +180,7 @@ export async function runDeterministicSolver(
   }
 
   const solverStatus = mapSolverStatus(execResult.status);
+  const softCount = report.softViolations.length;
   const finalResult: LocalAgentFinalResult = {
     ...execResult.resultData,
     schedule: scheduleWithAssignmentIds,
@@ -174,11 +189,23 @@ export async function runDeterministicSolver(
     message:
       execResult.status === 'timeout_with_solution'
         ? 'Hết thời gian nhưng đã tìm được lịch hợp lệ.'
-        : buildFinalMessage(execResult.status),
+        : softCount > 0
+          ? `Đã xếp lịch thành công nhưng còn ${softCount} vi phạm ràng buộc ưu tiên.`
+          : buildFinalMessage(execResult.status),
     deterministicReport: report,
     checkerReport: report,
-    violations: [],
-    diagnostics: ['Deterministic fast-path: no AI planner/coder/repair used.'],
+    softViolations: report.softViolations,
+    softViolationCount: softCount,
+    hardViolations: report.hardViolations,
+    // FIX.md §4: surface soft violations into the top-level `violations`
+    // list so the UI can warn even when the solve itself succeeded.
+    violations: [...report.hardViolations, ...report.softViolations],
+    diagnostics: [
+      'Deterministic fast-path: no AI planner/coder/repair used.',
+      ...(softCount > 0
+        ? [`Còn ${softCount} vi phạm ràng buộc ưu tiên. Nếu muốn cấm tuyệt đối, hãy đổi thành "Bắt buộc".`]
+        : []),
+    ],
     executionErrors: [],
     validationErrors: [],
     iisConstraintIds: [],

@@ -1,5 +1,6 @@
 import json
 import os as _os
+import time as _time_module
 from ortools.sat.python import cp_model
 
 # Bump SOLVER_TEMPLATE_VERSION when the skeleton adds/removes/changes hard
@@ -242,29 +243,61 @@ def build_custom_constraints(model, slots, data):
     def _add_subject_max_consecutive(spec, soft_terms_ref=None):
         params = spec.get("params", {})
         subject = params.get("subject")
-        max_consecutive = int(params.get("maxConsecutive", 1) or 1)
+        # FIX.md P0: support universal subject ("mọi môn" / `__all__` / missing)
+        # by expanding per real subject. No-op for a sentinel must surface as
+        # `unsupported_soft_kinds` so the run is debuggable instead of silent.
+        try:
+            max_consecutive = int(params.get("maxConsecutive", params.get("max", 1)) or 1)
+        except (TypeError, ValueError):
+            max_consecutive = 1
         if max_consecutive <= 0:
             return
         target_classes = set(params.get("classes") or data["classes"])
         window_length = max_consecutive + 1
+        all_subjects = subject in (
+            "", "__all__", "all", "all_subjects", "all subjects",
+            "mọi môn", "moi mon", "tất cả môn", "tat ca mon",
+        ) or subject is None
+
+        def _subjects_for_class(c):
+            if all_subjects:
+                return sorted({a["subject"] for a in assignments if a["class"] == c})
+            return [str(subject or "").strip()]
+
+        added_terms = 0
+        noop_targets = []
         for c in target_classes:
-            asgs = [a for a in assignments if a["class"] == c and a["subject"] == subject]
-            if not asgs:
+            subjects_in_class = _subjects_for_class(c)
+            if not subjects_in_class or (len(subjects_in_class) == 1 and not subjects_in_class[0]):
+                noop_targets.append({"class": c, "subject": str(subject or "")})
                 continue
-            for d in days:
-                day_periods = _periods_for(d)
-                for i in range(0, max(0, len(day_periods) - window_length + 1)):
-                    window = day_periods[i:i + window_length]
-                    if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
-                        continue
-                    window_slot_vars = _slot_vars(_slot_var(a, d, p) for a in asgs for p in window)
-                    if soft_terms_ref is None:
-                        model.Add(sum(window_slot_vars) <= max_consecutive)
-                    else:
-                        over = model.NewBoolVar(f"soft_consec_{c}_{subject}_{d}_{window[0]}")
-                        model.Add(sum(window_slot_vars) >= window_length).OnlyEnforceIf(over)
-                        model.Add(sum(window_slot_vars) <= window_length - 1).OnlyEnforceIf(over.Not())
-                        soft_terms_ref.append((_soft_weight(spec), over))
+            for current_subject in subjects_in_class:
+                asgs = [a for a in assignments if a["class"] == c and a["subject"] == current_subject]
+                if not asgs:
+                    noop_targets.append({"class": c, "subject": current_subject})
+                    continue
+                for d in days:
+                    day_periods = _periods_for(d)
+                    for i in range(0, max(0, len(day_periods) - window_length + 1)):
+                        window = day_periods[i:i + window_length]
+                        if any(window[k + 1] != window[k] + 1 for k in range(len(window) - 1)):
+                            continue
+                        window_slot_vars = _slot_vars(_slot_var(a, d, p) for a in asgs for p in window)
+                        if soft_terms_ref is None:
+                            model.Add(sum(window_slot_vars) <= max_consecutive)
+                        else:
+                            over = model.NewBoolVar(f"soft_consec_{c}_{current_subject}_{d}_{window[0]}")
+                            model.Add(sum(window_slot_vars) >= window_length).OnlyEnforceIf(over)
+                            model.Add(sum(window_slot_vars) <= window_length - 1).OnlyEnforceIf(over.Not())
+                            soft_terms_ref.append((_soft_weight(spec), over))
+                        added_terms += 1
+        if added_terms == 0 and soft_terms_ref is not None and noop_targets:
+            unsupported_soft_kinds.append({
+                "id": spec.get("id"),
+                "kind": "subject_max_consecutive",
+                "reason": f"no subjects matched for subject={subject!r} classes={[c for c in target_classes]}",
+                "noop_targets": noop_targets,
+            })
 
     def _add_soft_constraint(spec):
         kind = spec.get("kind")
@@ -1142,10 +1175,26 @@ def build_custom_constraints(model, slots, data):
             period = int(params.get("period", 1))
             target_days = params.get("days") or days
             asgs = [a for a in assignments if a["teacher"] == teacher and a["class"] == cls]
+            # FIX.md §9.2: only require the homeroom teacher to be at first
+            # period on days where they ACTUALLY teach the homeroom class.
+            # The old version forced GVCN to teach tiết 1 every day (including
+            # days they don't teach the class at all), which over-constrains.
             for d in target_days:
-                pinned = _slot_vars(_slot_var(a, d, period) for a in asgs if period in _periods_for(d))
-                if pinned:
-                    model.Add(sum(pinned) >= 1)
+                day_periods = _periods_for(d)
+                if period not in day_periods:
+                    continue
+                day_vars = _slot_vars(
+                    _slot_var(a, d, p) for a in asgs for p in day_periods
+                )
+                if not day_vars:
+                    continue
+                first_vars = _slot_vars(_slot_var(a, d, period) for a in asgs)
+                if not first_vars:
+                    continue
+                has_day = model.NewBoolVar(f"thr_has_{teacher}_{cls}_{d}")
+                model.Add(sum(day_vars) >= 1).OnlyEnforceIf(has_day)
+                model.Add(sum(day_vars) == 0).OnlyEnforceIf(has_day.Not())
+                model.Add(sum(first_vars) >= 1).OnlyEnforceIf(has_day)
 
         elif kind == "subject_not_last_period":
             subject = params.get("subject")
@@ -1250,15 +1299,29 @@ def build_custom_constraints(model, slots, data):
     # and does NOT depend on LLM-generated code.
     # If the IR modules are not bundled in the executor, this block is silently skipped
     # and the legacy 25-kind native path takes over.
-    _ir_specs = [s for s in constraints if isinstance(s.get("expr"), dict)]
+
+    def _get_ir_expr(spec):
+        # FIX.md §7.1 Bug B: TS may emit IR at top-level `expr` OR nested in
+        # `params.expr`. Support both so the IR compiler doesn't silently miss
+        # constraints.
+        if isinstance(spec.get("expr"), dict):
+            return spec.get("expr")
+        params = spec.get("params") or {}
+        if isinstance(params.get("expr"), dict):
+            return params.get("expr")
+        return None
+
+    _ir_specs = [s for s in constraints if isinstance(_get_ir_expr(s), dict)]
     if _ir_specs:
         try:
-            from ir_compiler import compile_constraint, DerivedVars as _DV  # type: ignore
+            from ir_compiler import compile_constraint  # type: ignore
+            from ir_derived import DerivedVars as _DV  # type: ignore
             from ir_eval import eval_constraint as _eval_ir  # type: ignore
         except ImportError:
             try:
                 # Fallback: try the local modules if available
-                from python.ir_compiler import compile_constraint, DerivedVars as _DV  # type: ignore
+                from python.ir_compiler import compile_constraint  # type: ignore
+                from python.ir_derived import DerivedVars as _DV  # type: ignore
                 from python.ir_eval import eval_constraint as _eval_ir  # type: ignore
             except ImportError:
                 compile_constraint = None
@@ -1268,15 +1331,25 @@ def build_custom_constraints(model, slots, data):
             _ir_env = {
                 "days": days,
                 "periods": periods,
+                "periodsByDay": periods_by_day,
                 "classes": classes,
                 "teachers": list({a["teacher"] for a in assignments}),
                 "subjects": list({a["subject"] for a in assignments}),
             }
-            _dv = _DV(model, slots, assignments)
+            _dv = _DV(
+                model,
+                slots,
+                assignments,
+                periods=periods,
+                periods_by_day=periods_by_day,
+            )
             _ir_penalty = []
             for _ir_spec in _ir_specs:
                 try:
-                    compile_constraint(model, _ir_spec, _dv, _ir_env, _ir_penalty)
+                    # FIX.md §7.1 Bug B: copy `expr` to top-level for compile_constraint.
+                    _ir_spec_for_compile = dict(_ir_spec)
+                    _ir_spec_for_compile["expr"] = _get_ir_expr(_ir_spec)
+                    compile_constraint(model, _ir_spec_for_compile, _dv, _ir_env, _ir_penalty)
                 except Exception as _ir_exc:
                     # Don't crash solve on IR compile error; surface as unsupported.
                     unsupported_soft_kinds.append(_ir_spec.get("id", _ir_spec.get("kind", "ir")))
@@ -1284,11 +1357,12 @@ def build_custom_constraints(model, slots, data):
             for _w, _v in _ir_penalty:
                 soft_terms.append((int(_w), _v))
 
-    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
-    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
-    # nên để generated code tự quyết định no-op khi không có custom hard specs.
-    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard" and not isinstance(s.get("expr"), dict) and not (s.get("params", {}) or {}).get("pythonPredicate")]
-    # <<< AI_FILL_HERE >>>
+    # === AI custom_dsl injection has been removed. ===
+    # The AI planner/coder/repair pipeline was deleted; only IR `expr` and
+    # built-in 50+ kinds are accepted. The marker below is a no-op kept for
+    # template-version compatibility.
+    custom_specs = []  # empty: custom_dsl specs without `expr` get rejected at the gate.
+    # <<< CUSTOM_CONSTRAINTS_DISABLED >>>
     pass
 
     return soft_terms, unsupported_soft_kinds
@@ -1399,6 +1473,26 @@ def _verify_custom_predicates(schedule_out):
                                            "message": "Thiếu pythonPredicate"}]})
             continue
         try:
+            # FIX.md §8.4: AST-parse predicate source before exec to reject
+            # Import/ImportFrom/Exec/Eval/forbidden dunder access. This is
+            # NOT a perfect sandbox but it blocks the most obvious escape
+            # vectors and surfaces them as fail-closed errors.
+            import ast
+            try:
+                tree = ast.parse(src, mode="exec")
+            except SyntaxError as syn_exc:
+                raise ValueError(f"pythonPredicate syntax error: {syn_exc}") from syn_exc
+            _FORBIDDEN_AST = (
+                ast.Import, ast.ImportFrom, ast.Exec if hasattr(ast, "Exec") else tuple(),
+                ast.Eval if hasattr(ast, "Eval") else tuple(),
+            )
+            for node in ast.walk(tree):
+                if isinstance(node, _FORBIDDEN_AST):
+                    raise ValueError(f"pythonPredicate chứa node bị cấm: {type(node).__name__}")
+                # Reject forbidden dunder attribute access
+                if isinstance(node, ast.Attribute) and node.attr.startswith("__") and node.attr.endswith("__"):
+                    if node.attr not in ("__name__", "__qualname__"):
+                        raise ValueError(f"pythonPredicate truy cập thuộc tính dunder bị cấm: {node.attr}")
             ns = {}
             exec(src, {"__builtins__": safe_builtins}, ns)  # noqa: S102
             fn = ns.get("check")
@@ -1421,25 +1515,50 @@ def _verify_custom_predicates(schedule_out):
 
 
 def _custom_hard_failed(checks):
+    """FIX.md §8.3: fail-closed. A hard custom constraint is "failed" if EITHER
+    (a) its check ran and reported violations, OR (b) it has no check row at
+    all (predicate missing, exec error, AST rejected). Previously case (b)
+    was treated as "unchecked → ok" which is a silent correctness bug.
+    """
     hard_custom_ids = {
         spec.get("id")
         for spec in data.get("constraints", [])
         if spec.get("kind") == "custom_dsl" and spec.get("severity", "hard") == "hard"
     }
-    return any(check.get("id") in hard_custom_ids and check.get("checked") and not check.get("ok") for check in checks)
+    if not hard_custom_ids:
+        return False
+    seen_ids = {c.get("id") for c in checks}
+    # Any hard custom_id without a check row is fail-closed.
+    if hard_custom_ids - seen_ids:
+        return True
+    return any(
+        c.get("id") in hard_custom_ids and not c.get("ok")
+        for c in checks
+    )
 
 
 if best_values is not None:
     custom_checks = _verify_custom_predicates(_schedule_from_values(best_values))
     cegar_round = 0
     max_cegar_rounds = int(_os.environ.get("CUSTOM_PREDICATE_CEGAR_ROUNDS", "25") or 25)
+    # FIX.md §8.1: hard absolute deadline for the whole CEGAR loop, not
+    # per-round. Each round gets only its remaining slice of the budget.
+    _cegar_start = time.monotonic() if _time_module is None else _time_module.monotonic()
+    _cegar_deadline = _cegar_start + _max_seconds
     while _custom_hard_failed(custom_checks) and cegar_round < max_cegar_rounds:
         chosen = [var for key, var in slots.items() if best_values.get(key) == 1]
         if not chosen:
             break
         model.Add(sum(chosen) <= len(chosen) - 1)
         cegar_round += 1
-        solver.parameters.max_time_in_seconds = _max_seconds
+        # FIX.md §8.1: per-round remaining time. If we're past the deadline,
+        # stop with infeasible rather than restarting the budget.
+        _remaining = _cegar_deadline - (_time_module.monotonic() if _time_module is None else time.monotonic())
+        if _remaining <= 0:
+            result["status"] = "timeout"
+            best_values = None
+            break
+        solver.parameters.max_time_in_seconds = max(1, int(_remaining))
         status = solver.Solve(model)
         result["status"] = solver.StatusName(status).lower()
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1449,6 +1568,12 @@ if best_values is not None:
         custom_checks = _verify_custom_predicates(_schedule_from_values(best_values))
     result["customCegarRounds"] = cegar_round
     result["customChecks"] = custom_checks
+    # FIX.md §8.2: after CEGAR exhaustion, do not return SUCCESS if hard
+    # custom still fails. Mark as infeasible and surface customChecks.
+    if _custom_hard_failed(result.get("customChecks") or []):
+        result["status"] = "infeasible"
+        result["customCegarExhausted"] = True
+        best_values = None
 
 if best_values is not None:
     result["schedule"] = _schedule_from_values(best_values)
@@ -1460,4 +1585,4 @@ if best_values is not None:
 else:
     with open("result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False)
-    print(f"NO_SOLUTION:{solver.StatusName(status)}")
+    print(f"NO_SOLUTION:{result.get('status', solver.StatusName(status))}")
