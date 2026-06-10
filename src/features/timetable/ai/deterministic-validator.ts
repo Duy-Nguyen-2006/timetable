@@ -1555,6 +1555,86 @@ const checkTeacherPairRequiredSameSlot: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+// Phase 0 require-family: positive atLeast constraints (count across week, not per-day).
+// "phải có ít nhất N tiết X trong tuần" — count distinct days where entity appears at period X.
+const checkTeacherRequiredPeriod: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const period = toPeriod(String(spec.params.period ?? ''));
+  const minCount = Number(spec.params.minCount ?? spec.params.count ?? 1);
+  if (!teacher || period === null || !Number.isFinite(minCount)) return [];
+
+  const teacherEntries = schedule.filter((e) => e.teacher === teacher);
+  const daysWithPeriod = new Set<string>();
+  for (const e of teacherEntries) {
+    if (toPeriod(e.period) === period) {
+      daysWithPeriod.add(e.day);
+    }
+  }
+
+  if (daysWithPeriod.size < minCount) {
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Giáo viên ${teacher} phải có ít nhất ${minCount} ngày dạy tiết ${period}, thực tế ${daysWithPeriod.size} ngày.`,
+      offendingEntries: teacherEntries,
+    }];
+  }
+  return [];
+};
+
+const checkClassRequiredPeriod: CheckFn = (spec, schedule) => {
+  const klass = String(spec.params.class ?? '');
+  const period = toPeriod(String(spec.params.period ?? ''));
+  const minCount = Number(spec.params.minCount ?? spec.params.count ?? 1);
+  if (!klass || period === null || !Number.isFinite(minCount)) return [];
+
+  const classEntries = schedule.filter((e) => e.class === klass);
+  const daysWithPeriod = new Set<string>();
+  for (const e of classEntries) {
+    if (toPeriod(e.period) === period) {
+      daysWithPeriod.add(e.day);
+    }
+  }
+
+  if (daysWithPeriod.size < minCount) {
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Lớp ${klass} phải có ít nhất ${minCount} ngày có tiết ${period}, thực tế ${daysWithPeriod.size} ngày.`,
+      offendingEntries: classEntries,
+    }];
+  }
+  return [];
+};
+
+const checkSubjectRequiredPeriod: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const period = toPeriod(String(spec.params.period ?? ''));
+  const minCount = Number(spec.params.minCount ?? spec.params.count ?? 1);
+  if (!subject || period === null || !Number.isFinite(minCount)) return [];
+
+  // Subject semantics: count distinct days where subject appears at period X across all classes.
+  // NOTE: Product decision needed for per-class vs global semantics (see Plan_v2.md #8).
+  // Current implementation: global (any class having subject at period X counts).
+  const subjectEntries = schedule.filter((e) => e.subject === subject);
+  const daysWithPeriod = new Set<string>();
+  for (const e of subjectEntries) {
+    if (toPeriod(e.period) === period) {
+      daysWithPeriod.add(e.day);
+    }
+  }
+
+  if (daysWithPeriod.size < minCount) {
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Môn ${subject} phải có ít nhất ${minCount} ngày xuất hiện ở tiết ${period}, thực tế ${daysWithPeriod.size} ngày.`,
+      offendingEntries: subjectEntries,
+    }];
+  }
+  return [];
+};
+
 const checkSubjectNotLastPeriod: CheckFn = (spec, schedule) => {
   const subject = String(spec.params.subject ?? '');
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -1830,6 +1910,10 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_required_slot: checkTeacherRequiredSlot,
   teacher_pair_required_same_day: checkTeacherPairRequiredSameDay,
   teacher_pair_required_same_slot: checkTeacherPairRequiredSameSlot,
+  // M1.2 (Plan_v2.md): require-family period kinds (Phase 0.2)
+  teacher_required_period: checkTeacherRequiredPeriod,
+  class_required_period: checkClassRequiredPeriod,
+  subject_required_period: checkSubjectRequiredPeriod,
 };
 
 export function validateSchedule(

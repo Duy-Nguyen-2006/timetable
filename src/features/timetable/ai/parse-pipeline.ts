@@ -23,7 +23,7 @@ import { backTranslateBatch, type BackTranslationCheck } from './back-translatio
 import { logRetrievalMiss } from './synonym-miss-log';
 import type { AgentInputPayload, AIProviderConfig } from './types';
 import type { ConstraintSpec, ConstraintKind } from './constraint-spec';
-import type { BuiltInConstraintScope } from './constraint-registry';
+import { BUILT_IN_CONSTRAINT_KINDS, type BuiltInConstraintScope } from './constraint-registry';
 import { invokeAnalyzeChat } from './analyze-constraint-service';
 import { parseIRFirstWithGuard } from './ir-first-parser';
 import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
@@ -78,37 +78,8 @@ const SLOT_FILL_RESPONSE_SCHEMA = {
   required: ['decision', 'kind', 'confidence'],
 } as const;
 
-const BUILT_IN_KINDS = new Set<string>([
-  'teacher_block_day', 'teacher_block_period', 'teacher_block_slot',
-  'teacher_max_per_day', 'teacher_max_consecutive', 'teacher_max_working_days',
-  'teacher_min_per_day', 'teacher_no_gaps', 'teacher_allowed_days',
-  'teacher_allowed_periods', 'teacher_min_working_days', 'teacher_max_gaps',
-  'teacher_min_consecutive', 'teacher_balanced_load', 'teacher_max_subjects_per_day',
-  'teacher_max_consecutive_days', 'teacher_min_off_days', 'teacher_preferred_periods',
-  'teacher_max_classes_per_day', 'teacher_pair_not_same_slot', 'teacher_pair_not_same_day',
-  'teacher_homeroom_first_period',
-  'subject_pin_period', 'subject_preferred_periods', 'subject_not_last_period',
-  'subject_consecutive', 'subject_max_consecutive', 'subject_allowed_days',
-  'subject_min_gap_days', 'subject_daily_max_periods', 'subject_block_period',
-  'subject_block_days', 'subject_not_consecutive', 'subject_min_days',
-  'subject_spread_evenly', 'subject_order_before', 'subject_not_after_subject',
-  'class_block_day', 'class_block_period', 'class_block_slot', 'class_max_per_day',
-  'class_min_per_day', 'class_no_gaps', 'class_no_double_subject_day',
-  'class_subjects_not_same_day', 'class_fixed_period', 'class_allowed_days',
-  'class_allowed_periods', 'class_max_consecutive', 'class_max_subjects_per_day',
-  'class_balanced_load', 'class_subjects_same_day', 'class_min_working_days',
-  'class_max_heavy_subjects_per_day', 'class_max_heavy_subjects_per_session',
-  'class_first_period_required',
-  'subject_flag_ceremony_slot', 'global_teacher_utilization_balance',
-  'assignment_pin_slot', 'assignment_block_slot', 'assignment_allowed_slots',
-  'assignment_spread_days', 'weekly_periods_exact', 'assignment_consecutive',
-  'assignment_max_per_day', 'assignment_same_day', 'assignment_not_same_day',
-  'if_then', 'pair_not_same_slot', 'pair_same_slot', 'mutual_exclusion',
-  'session_limit', 'subject_group', 'subject_group_daily_limit',
-  'subject_session_max_periods',
-  'teacher_required_day', 'teacher_required_slot',
-  'teacher_pair_required_same_day', 'teacher_pair_required_same_slot',
-]);
+// M1.1: Use centralized BUILT_IN_CONSTRAINT_KINDS from registry instead of hardcoded list
+// This prevents drift when new kinds are added to the registry
 
 function extractJson(content: string): unknown {
   if (!content) return null;
@@ -196,7 +167,7 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
     const kind = String(slotFillJson.kind ?? '');
     const params = (slotFillJson.params ?? {}) as Record<string, unknown>;
     confidence = (slotFillJson.confidence as 'high' | 'medium' | 'low') ?? 'medium';
-    if (decision === 'suggest_built_in' && BUILT_IN_KINDS.has(kind)) {
+    if (decision === 'suggest_built_in' && BUILT_IN_CONSTRAINT_KINDS.has(kind as any)) {
       specs.push({
         id: `slot_${Date.now()}_0`,
         original: rawText,

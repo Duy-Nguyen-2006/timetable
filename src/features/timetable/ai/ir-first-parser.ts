@@ -34,6 +34,7 @@ import { findDisambiguationMatch } from './disambiguation-table';
 import { evaluateNegativeGuard } from './negative-guard';
 import type { ConstraintSpec } from './constraint-spec';
 import type { ConstraintResolverHints } from './constraint-retriever';
+import { analyzeSemanticDirection } from './semantic-direction';
 
 export type IRFirstParseResult =
   | { kind: 'ir'; ir: ConstraintIR; spec: ConstraintSpec }
@@ -110,10 +111,9 @@ function tryParseRequireTeacher(
   teacher: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  // Must contain a require marker.
-  const disambig = findDisambiguationMatch(rawText);
-  const d001 = disambig.find((m) => m.row.id === 'D001');
-  if (!d001 || d001.direction !== 'positive') return null;
+  // Use semantic direction analyzer instead of disambiguation table
+  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  if (semanticAnalysis.direction !== 'require') return null;
 
   // Must be a teacher-scope sentence.
   if (hints.inferredScope && hints.inferredScope !== 'teacher') return null;
@@ -146,9 +146,8 @@ function tryParseRequireClass(
   klass: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const disambig = findDisambiguationMatch(rawText);
-  const d010 = disambig.find((m) => m.row.id === 'D010');
-  if (!d010 || d010.direction !== 'positive') return null;
+  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  if (semanticAnalysis.direction !== 'require') return null;
   if (hints.inferredScope && hints.inferredScope !== 'class') return null;
   const period = extractPeriod(rawText, normalized);
   if (period === null) return null;
@@ -175,9 +174,8 @@ function tryParseRequireSubject(
   subject: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const disambig = findDisambiguationMatch(rawText);
-  const d020 = disambig.find((m) => m.row.id === 'D020');
-  if (!d020 || d020.direction !== 'positive') return null;
+  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  if (semanticAnalysis.direction !== 'require') return null;
   if (hints.inferredScope && hints.inferredScope !== 'subject') return null;
   const period = extractPeriod(rawText, normalized);
   if (period === null) return null;
@@ -210,9 +208,8 @@ function tryParseBlockTeacher(
   teacher: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const disambig = findDisambiguationMatch(rawText);
-  const d001 = disambig.find((m) => m.row.id === 'D001');
-  if (!d001 || d001.direction !== 'negative') return null;
+  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  if (semanticAnalysis.direction !== 'block') return null;
   if (hints.inferredScope && hints.inferredScope !== 'teacher') return null;
   const period = extractPeriod(rawText, normalized);
   if (period === null) return null;
@@ -239,9 +236,8 @@ function tryParseOnlyTeacher(
   teacher: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const disambig = findDisambiguationMatch(rawText);
-  const d004 = disambig.find((m) => m.row.id === 'D004');
-  if (!d004 || d004.direction !== 'positive') return null;
+  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  if (semanticAnalysis.direction !== 'only') return null;
   if (hints.inferredScope && hints.inferredScope !== 'teacher') return null;
   // Allowed: "chỉ dạy tiết 4" or "chỉ dạy các tiết 2, 3, 4"
   const periods = extractPeriods(normalized);

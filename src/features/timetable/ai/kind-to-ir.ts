@@ -44,7 +44,7 @@ function teachesBody(teacher: string): BoolExpr {
 
 /**
  * Convert a single ConstraintSpec to ConstraintIR. Returns null if the kind
- * is not in KNOWN_ENCODABLE_KINDS or is custom_dsl (which already carries
+ * is not in SOLVER_ENCODABLE_KINDS or is custom_dsl (which already carries
  * an expr in spec.params.expr).
  */
 export function specToIR(spec: ConstraintSpec): ConstraintIR | null {

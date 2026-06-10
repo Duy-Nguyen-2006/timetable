@@ -144,3 +144,160 @@ test('suggestBuiltInConstraint maps class period block', () => {
   assert.equal(suggestion.kind, 'class_block_period');
   assert.deepEqual(suggestion.paramsDraft, { class: '6A', period: 5 });
 });
+
+// ==================== M2: REQUIRE-FAMILY TESTS ====================
+// These tests prove "phải có" → require, NOT block
+// and "không dạy" → block, NOT require
+
+test('M2: teacher require period - "phải có" maps to teacher_required_period', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy phải có tiết 4',
+    teachers: ['Thúy', 'Hạnh'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_required_period');
+  assert.equal(suggestion.scope, 'teacher');
+  assert.ok(suggestion.confidence >= 0.95, `Expected confidence >= 0.95, got ${suggestion.confidence}`);
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', period: 4, minCount: 1 });
+  assert.equal(suggestion.missingParams.length, 0);
+});
+
+test('M2: teacher require period - "cần có" maps to teacher_required_period', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy cần có tiết 4',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_required_period');
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', period: 4, minCount: 1 });
+});
+
+test('M2: teacher require period - "ít nhất" extracts minCount', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Thúy phải có ít nhất 2 tiết 4 trong tuần',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_required_period');
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', period: 4, minCount: 2 });
+});
+
+test('M2: teacher require period - "bắt buộc" maps to teacher_required_period', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Bắt buộc cô Thúy có tiết 4',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_required_period');
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', period: 4, minCount: 1 });
+});
+
+test('M2: teacher require period - "phải được xếp" maps to teacher_required_period', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy phải được xếp ít nhất một tiết 4',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_required_period');
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', period: 4, minCount: 1 });
+});
+
+test('M2: class require period - "phải có" maps to class_required_period', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Lớp 6A phải có tiết 1',
+    teachers: ['Sơn'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'class_required_period');
+  assert.equal(suggestion.scope, 'class');
+  assert.ok(suggestion.confidence >= 0.95);
+  assert.deepEqual(suggestion.paramsDraft, { class: '6A', period: 1, minCount: 1 });
+});
+
+test('M2: class require period - "cần có ít nhất" extracts minCount', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: '6A cần có ít nhất 2 tiết 5 trong tuần',
+    teachers: ['Sơn'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'class_required_period');
+  assert.deepEqual(suggestion.paramsDraft, { class: '6A', period: 5, minCount: 2 });
+});
+
+test('M2: NO SEMANTIC FLIP - "không dạy" still maps to teacher_block_period', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy không dạy tiết 4',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_block_period');
+  assert.notEqual(suggestion.kind, 'teacher_required_period', 'SEMANTIC FLIP: "không dạy" incorrectly mapped to require');
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', period: 4 });
+});
+
+test('M2: NO SEMANTIC FLIP - "chỉ dạy" still maps to teacher_allowed_periods, not require', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy chỉ dạy tiết 1 tiết 2 tiết 3',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.kind, 'teacher_allowed_periods');
+  assert.notEqual(suggestion.kind, 'teacher_required_period', 'SEMANTIC FLIP: "chỉ dạy" incorrectly mapped to require');
+  assert.deepEqual(suggestion.paramsDraft, { teacher: 'Thúy', periods: [1, 2, 3] });
+});
+
+test('M2: subject require period - needs class context or clarification', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Môn Toán phải có tiết 4',
+    teachers: ['Sơn'],
+  });
+
+  // Per M2 spec: subject-only requires clarification (global vs per-class semantics)
+  assert.equal(suggestion.decision, 'use_custom');
+  assert.match(suggestion.reason, /làm rõ/u);
+});
+
+test('M2: require branch runs BEFORE block - no "phải có" → block leak', () => {
+  // This is a regression test for the original bug
+  // Before M2: "phải có" could leak to block detection
+  // After M2: require branch catches it first
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy phải có tiết 4',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.kind, 'teacher_required_period');
+  assert.notEqual(suggestion.kind, 'teacher_block_period', 'BUG: require statement leaked to block branch');
+});
+
+test('M2: require defaults minCount to 1 when not specified', () => {
+  const suggestion = suggestBuiltInConstraint({
+    ...baseInput,
+    userText: 'Cô Thúy phải có tiết 4',
+    teachers: ['Thúy'],
+  });
+
+  assert.equal(suggestion.decision, 'suggest_built_in');
+  assert.equal(suggestion.paramsDraft.minCount, 1);
+});
+// ==================== END M2 TESTS ====================

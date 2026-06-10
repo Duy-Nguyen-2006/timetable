@@ -20,9 +20,9 @@ import {
   ConstraintIRSchema,
   checkHardConstraintMechanism,
   validateHardConstraints,
-  KNOWN_ENCODABLE_KINDS,
   type ConstraintIR,
 } from './constraint-ir';
+import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { ConstraintSpec } from './constraint-spec';
 
 // ─── IR Schema validation ─────────────────────────────────────────────────
@@ -211,15 +211,15 @@ test('validateHardConstraints batch check returns array of results', () => {
   assert.equal(results[2].ok, true); // soft always ok
 });
 
-test('KNOWN_ENCODABLE_KINDS has the canonical 80+ built-in kinds', () => {
+test('SOLVER_ENCODABLE_KINDS has the canonical 80+ built-in kinds', () => {
   // Spot check: a few well-known kinds
-  assert.ok(KNOWN_ENCODABLE_KINDS.has('teacher_block_day'));
-  assert.ok(KNOWN_ENCODABLE_KINDS.has('teacher_max_per_day'));
-  assert.ok(KNOWN_ENCODABLE_KINDS.has('class_block_day'));
-  assert.ok(KNOWN_ENCODABLE_KINDS.has('subject_max_consecutive'));
-  assert.ok(KNOWN_ENCODABLE_KINDS.has('if_then'));
+  assert.ok(SOLVER_ENCODABLE_KINDS.has('teacher_block_day'));
+  assert.ok(SOLVER_ENCODABLE_KINDS.has('teacher_max_per_day'));
+  assert.ok(SOLVER_ENCODABLE_KINDS.has('class_block_day'));
+  assert.ok(SOLVER_ENCODABLE_KINDS.has('subject_max_consecutive'));
+  assert.ok(SOLVER_ENCODABLE_KINDS.has('if_then'));
   // 80+ kinds
-  assert.ok(KNOWN_ENCODABLE_KINDS.size >= 75, `expected >= 75 known kinds, got ${KNOWN_ENCODABLE_KINDS.size}`);
+  assert.ok(SOLVER_ENCODABLE_KINDS.size >= 75, `expected >= 75 known kinds, got ${SOLVER_ENCODABLE_KINDS.size}`);
 });
 
 test('ConstraintIRSchema can be used directly (sanity)', () => {

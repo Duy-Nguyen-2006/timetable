@@ -5,6 +5,7 @@ import {
 import type { BuiltInConstraintKind, TimetableConstraintScope } from './timetable-constraint-contract';
 import type { NormalizedAssignment } from './types';
 import { extractDayId, extractFirstNumber, extractPeriodNumber, normalizeConstraintText } from './translator-text';
+import { analyzeSemanticDirection } from './semantic-direction';
 
 export const BUILT_IN_SUGGESTION_THRESHOLD = 0.82;
 
@@ -172,13 +173,75 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
   const day = input.days ? extractDayId(input.userText, input.days) : null;
   const period = extractPeriodNumber(input.userText);
   const periods = extractPeriodList(input.userText);
-  const mentionsBlock = /\b(khong|cam|nghi)\b/u.test(normalized) && /\bday\b/u.test(normalized);
-  const mentionsClassBlock = /\b(khong|cam|nghi)\b/u.test(normalized) && /\bhoc\b/u.test(normalized);
-  const mentionsOnly = /\bchi\b/u.test(normalized) && /\bday\b/u.test(normalized);
+
+  // Semantic direction analysis - unified across all parsers
+  const semanticAnalysis = analyzeSemanticDirection(input.userText);
+  const mentionsRequire = semanticAnalysis.direction === 'require';
+  const mentionsBlock = semanticAnalysis.direction === 'block';
+  const mentionsOnly = semanticAnalysis.direction === 'only';
+  const mentionsPrefer = semanticAnalysis.direction === 'prefer';
+
+  const mentionsClassBlock = mentionsBlock && /\bhoc\b/u.test(normalized);
+  const mentionsTeacherBlock = mentionsBlock && /\bday\b/u.test(normalized);
   const mentionsDailyMax = /\b(toi da|khong qua|khong hon)\b/u.test(normalized) && /\btiet\b/u.test(normalized) && /\bngay\b/u.test(normalized);
   const mentionsConsecutive = /\b(lien tiep|lien tuc)\b/u.test(normalized);
   const mentionsSubject = /\b(mon|subject)\b/u.test(normalized) || subjectMatches.length > 0;
   const mentionsClass = /\b(lop|class)\b/u.test(normalized) || classMatch.status === 'matched';
+
+  // Extract minCount for require-family (default 1)
+  const minCountMatch = normalized.match(/\bit nhat\s*(\d+)/u);
+  const minCount = minCountMatch ? Number(minCountMatch[1]) : 1;
+
+  // ==================== REQUIRE-FAMILY DETERMINISTIC BRANCH (M2) ====================
+  // This branch MUST run BEFORE block detection to prevent semantic flips
+  // "phải có" → teacher_required_period, NOT teacher_block_period
+  // "không dạy" → teacher_block_period, NOT require
+  // "chỉ dạy" → teacher_allowed_periods, NOT require
+
+  if (mentionsRequire && !mentionsBlock && !mentionsOnly && period) {
+    // Teacher require period
+    if (teacherMatch.status === 'matched') {
+      const definition = supportedDefinition(definitions, 'teacher_required_period');
+      if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+      return suggest(
+        definition,
+        0.96,
+        { teacher: teacherMatch.label, period, minCount },
+        'Khớp giáo viên phải có tiết cụ thể.'
+      );
+    }
+
+    // Class require period
+    if (classMatch.status === 'matched') {
+      const definition = supportedDefinition(definitions, 'class_required_period');
+      if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+      return suggest(
+        definition,
+        0.95,
+        { class: classMatch.label, period, minCount },
+        'Khớp lớp phải có tiết cụ thể.'
+      );
+    }
+
+    // Subject require period - only if subject match exists
+    // Note: Per M2 spec, subject-only requires clarification about scope
+    // We only proceed if we have a clear subject match
+    if (subjectMatch.status === 'matched') {
+      const definition = supportedDefinition(definitions, 'subject_required_period');
+      if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+      // If no class specified, user needs to clarify semantics (global vs per-class)
+      if (classMatch.status !== 'matched') {
+        return customDecision(0.7, 'Môn học cần làm rõ: toàn cục hay theo lớp?');
+      }
+      return suggest(
+        definition,
+        0.93,
+        { subject: subjectMatch.label, period, minCount },
+        'Khớp môn học phải có tiết cụ thể.'
+      );
+    }
+  }
+  // ==================== END REQUIRE-FAMILY BRANCH ====================
 
   if (subjectMatches.length > 0 && mentionsSubject && mentionsConsecutive) {
     const max = resolveBannedConsecutiveMax(input.userText);
@@ -241,47 +304,64 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
     }
   }
 
-  if (classMatch.status === 'matched' && mentionsClass && mentionsClassBlock && day && period) {
+  // ==================== BLOCK-FAMILY BRANCHES ====================
+  // These branches check !mentionsRequire to prevent semantic flips
+  // "không dạy" → block (correct)
+  // "phải có" → require (caught above, won't reach here)
+
+  if (classMatch.status === 'matched' && mentionsClass && mentionsClassBlock && day && period && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'class_block_slot');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.92, { class: classMatch.label, day, period }, 'Khớp lớp không học ngày và tiết cụ thể.');
   }
 
-  if (classMatch.status === 'matched' && mentionsClass && mentionsClassBlock && day) {
+  if (classMatch.status === 'matched' && mentionsClass && mentionsClassBlock && day && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'class_block_day');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.9, { class: classMatch.label, day }, 'Khớp lớp không học một ngày.');
   }
 
-  if (classMatch.status === 'matched' && mentionsClass && mentionsClassBlock && period) {
+  if (classMatch.status === 'matched' && mentionsClass && mentionsClassBlock && period && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'class_block_period');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.89, { class: classMatch.label, period }, 'Khớp lớp không học một tiết.');
   }
 
-  if (teacherMatch.status === 'matched' && mentionsBlock && day && period) {
+  if (teacherMatch.status === 'matched' && mentionsTeacherBlock && day && period && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'teacher_block_slot');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.94, { teacher: teacherMatch.label, day, period }, 'Khớp giáo viên không dạy ngày và tiết cụ thể.');
   }
 
-  if (teacherMatch.status === 'matched' && mentionsBlock && day) {
+  if (teacherMatch.status === 'matched' && mentionsTeacherBlock && day && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'teacher_block_day');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.92, { teacher: teacherMatch.label, day }, 'Khớp giáo viên không dạy một ngày.');
   }
 
-  if (teacherMatch.status === 'matched' && mentionsBlock && period) {
+  if (teacherMatch.status === 'matched' && mentionsTeacherBlock && period && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'teacher_block_period');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.91, { teacher: teacherMatch.label, period }, 'Khớp giáo viên không dạy một tiết.');
   }
+  // ==================== END BLOCK-FAMILY BRANCHES ====================
 
-  if (teacherMatch.status === 'matched' && mentionsOnly && day) {
+  // ==================== ONLY-FAMILY BRANCHES ====================
+  // "chỉ dạy" → allowed (correct)
+  // "phải có" → require (caught above, won't reach here)
+
+  if (teacherMatch.status === 'matched' && mentionsOnly && /\bday\b/u.test(normalized) && day && !mentionsRequire) {
     const definition = supportedDefinition(definitions, 'teacher_allowed_days');
     if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
     return suggest(definition, 0.88, { teacher: teacherMatch.label, days: [day] }, 'Khớp giáo viên chỉ dạy một số ngày.');
   }
+
+  if (teacherMatch.status === 'matched' && mentionsOnly && /\bday\b/u.test(normalized) && periods.length > 0 && !mentionsRequire) {
+    const definition = supportedDefinition(definitions, 'teacher_allowed_periods');
+    if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
+    return suggest(definition, 0.87, { teacher: teacherMatch.label, periods }, 'Khớp giáo viên chỉ dạy một số tiết.');
+  }
+  // ==================== END ONLY-FAMILY BRANCHES ====================
 
   if (teacherMatch.status === 'matched' && mentionsDailyMax) {
     const maxPerDay = extractFirstNumber(input.userText);
