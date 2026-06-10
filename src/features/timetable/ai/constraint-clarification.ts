@@ -14,6 +14,32 @@ export function buildClarificationQuestions(original: string): ConstraintClarifi
   const mentionsSession = /(buổi|buoi|sáng|sang|chiều|chieu)/u.test(raw);
   const mentionsSpread = /(dồn|don|xen\s*kẽ|xen\s*ke|không\s*chỉ|khong\s*chi)/u.test(raw);
 
+  // FIX.md §3 / PRD M1 §6: detect "không ... quá N tiết ... trong 1 buổi" pattern.
+  // User phân biệt giới hạn theo buổi (sáng/chiều) hay cả ngày — đây là ambiguity thật.
+  const mentionsLimit = /(không|khong|tối đa|toi da|quá|qua|nhiều nhất|nhieu nhat|hơn|hon)/u.test(raw);
+  const mentionsPeriodCount = /(\d+)\s*tiết/u.test(raw);
+  if (
+    mentionsLimit &&
+    mentionsPeriodCount &&
+    mentionsSession &&
+    questions.length === 0
+  ) {
+    const periodCountMatch = raw.match(/(\d+)\s*tiết/u);
+    const periodCount = periodCountMatch ? periodCountMatch[1] : '';
+    questions.push({
+      id: 'session_subject_period_limit',
+      prompt: periodCount
+        ? `Ràng buộc «tối đa ${periodCount} tiết cùng môn trong một buổi» — bạn muốn giới hạn theo buổi (sáng/chiều) hay theo cả ngày?`
+        : 'Ràng buộc nói «trong một buổi» — bạn muốn giới hạn theo buổi hay theo cả ngày?',
+      options: [
+        'Theo buổi (sáng/chiều) — mỗi buổi không quá N tiết cùng môn',
+        'Theo cả ngày — không quá N tiết cùng môn trong ngày',
+        'Cả hai — buổi là giới hạn trên, ngày là giới hạn cứng',
+        'Khác (dùng «Sửa cách hiểu» để mô tả thêm)',
+      ],
+    });
+  }
+
   if (mentionsHeavy && mentionsSession && mentionsSpread) {
     questions.push({
       id: 'heavy_same_session_scope',

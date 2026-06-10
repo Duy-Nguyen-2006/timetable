@@ -21,6 +21,7 @@ type ConstraintDraftCardProps = {
   onIgnore: () => void;
   onDelete: () => void;
   onAiAnalyze?: () => void;
+  onClarificationAnswer?: (questionId: string, optionIndex: number) => void;
   isNew?: boolean;
   isReparsing?: boolean;
   highlight?: boolean;
@@ -35,6 +36,7 @@ export function ConstraintDraftCard({
   onIgnore,
   onDelete,
   onAiAnalyze,
+  onClarificationAnswer,
   isReparsing,
   highlight,
 }: ConstraintDraftCardProps) {
@@ -153,6 +155,37 @@ export function ConstraintDraftCard({
                 ))}
             </ul>
           )}
+          {/* FIX.md §3 / PRD M1: render clarification questions as clickable options
+              (was: only checked .length to disable confirm button — users saw nothing). */}
+          {!isReparsing && draft.clarificationQuestions && draft.clarificationQuestions.length > 0 ? (
+            <div
+              data-testid="clarification-questions"
+              className="mt-2 space-y-2"
+            >
+              {draft.clarificationQuestions.map((q) => (
+                <div
+                  key={q.id}
+                  className="rounded border border-sky-500/30 bg-sky-500/[0.06] p-2 text-xs text-sky-100"
+                >
+                  <p className="font-medium text-sky-200">{q.prompt}</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {q.options.map((opt, i) => (
+                      <li key={`${q.id}-${i}`}>
+                        <button
+                          type="button"
+                          onClick={() => onClarificationAnswer?.(q.id, i)}
+                          data-testid={`clarification-option-${q.id}-${i}`}
+                          className="w-full rounded border border-white/10 bg-black/20 px-2 py-1 text-left text-white/80 hover:bg-white/5 hover:border-white/20"
+                        >
+                          {opt}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : !isNew ? (
         <p className="mt-2 text-xs text-white/35">Chưa có bản phân tích — bấm «AI phân tích» nếu cần.</p>

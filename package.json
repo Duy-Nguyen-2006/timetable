@@ -23,6 +23,7 @@
     "pipeline:smoke": "tsx scripts/pipeline_smoke_test.ts",
     "executor:check": "node scripts/post-build.mjs",
     "check:parity": "tsx scripts/check_constraint_parity.ts --strict",
+    "check:strings": "bash scripts/check-user-facing-strings.sh",
     "lint": "eslint .",
     "sonar:scan": "bash scripts/sonar-scan-local.sh",
     "build:executor": "node scripts/build_executor.mjs",

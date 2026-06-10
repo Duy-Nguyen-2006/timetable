@@ -1,5 +1,6 @@
 import type { ConstraintSpec } from './constraint-spec';
 import type { ParsedConstraintDraft } from './constraint-review-types';
+import { buildClarificationQuestions } from './constraint-clarification';
 import { formatPeriodList, resolveDayLabel, severityPhrase } from './constraint-humanizer-labels';
 
 function paramStr(value: unknown): string {
@@ -264,6 +265,82 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
       }).join('; ') || 'chưa phân tích được vế thì';
       return `Nếu ${condText} thì ${thenDesc}${soft(spec)}.`;
     }
+    // --- Assignment-scoped kinds (added in M1 to fix debug-string leak) ---
+    case 'assignment_pin_slot':
+      return `${prefix}Phân công ${paramStr(p.assignmentId)} cố định vào ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
+    case 'assignment_block_slot':
+      return `${prefix}Phân công ${paramStr(p.assignmentId)} không xếp vào ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
+    case 'assignment_allowed_slots': {
+      const slots = Array.isArray(p.slots) ? p.slots : [];
+      return `${prefix}Phân công ${paramStr(p.assignmentId)} chỉ được xếp vào ${slots.length} ô cho phép${soft(spec)}.`;
+    }
+    case 'assignment_spread_days':
+      return `${prefix}Phân công ${paramStr(p.assignmentId)} phải trải qua ít nhất ${paramStr(p.minDays)} ngày${soft(spec)}.`;
+    case 'weekly_periods_exact':
+      return `${prefix}Phân công ${paramStr(p.assignmentId)}: đúng ${paramStr(p.count)} tiết mỗi tuần${soft(spec)}.`;
+    case 'assignment_consecutive':
+      return `${prefix}Phân công ${paramStr(p.assignmentId)}: dạy cụm ${paramStr(p.length)} tiết liên tiếp${soft(spec)}.`;
+    case 'assignment_max_per_day':
+      return `${prefix}Phân công ${paramStr(p.assignmentId)}: tối đa ${paramStr(p.max)} tiết mỗi ngày${soft(spec)}.`;
+    case 'assignment_same_day': {
+      const ids = Array.isArray(p.assignmentIds) ? p.assignmentIds.join(', ') : paramStr(p.assignmentIds);
+      return `${prefix}Các phân công (${ids}) phải cùng ngày${soft(spec)}.`;
+    }
+    case 'assignment_not_same_day': {
+      const ids = Array.isArray(p.assignmentIds) ? p.assignmentIds.join(', ') : paramStr(p.assignmentIds);
+      return `${prefix}Các phân công (${ids}) không cùng ngày${soft(spec)}.`;
+    }
+
+    // --- Pair / mutual exclusion (added in M1) ---
+    case 'pair_same_slot': {
+      const ids = Array.isArray(p.assignmentIds) ? p.assignmentIds.join(', ') : paramStr(p.assignmentIds);
+      return `${prefix}Hai phân công (${ids}) phải cùng tiết${soft(spec)}.`;
+    }
+    case 'mutual_exclusion': {
+      const ids = Array.isArray(p.assignmentIds) ? p.assignmentIds.join(', ') : paramStr(p.assignmentIds);
+      return `${prefix}Trong nhóm (${ids}), không có 2 phân công nào trùng tiết${soft(spec)}.`;
+    }
+
+    // --- Class-scoped kinds (added in M1) ---
+    case 'class_allowed_periods':
+      return `${prefix}Lớp ${paramStr(p.class)} chỉ học các tiết ${paramStr(p.periods)}${soft(spec)}.`;
+    case 'class_fixed_period':
+      return `${prefix}Lớp ${paramStr(p.class)} cố định học ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
+    case 'class_min_working_days':
+      return `${prefix}Lớp ${paramStr(p.class)} học ít nhất ${paramStr(p.minDays)} ngày/tuần${soft(spec)}.`;
+    case 'class_no_double_subject_day':
+      return `${prefix}Lớp ${paramStr(p.class)} không học 2 tiết ${paramStr(p.subject)} cùng ngày${soft(spec)}.`;
+    case 'class_subjects_same_day': {
+      const subs = Array.isArray(p.subjects) ? p.subjects.join(', ') : paramStr(p.subjects);
+      return `${prefix}Lớp ${paramStr(p.class)}: các môn (${subs}) cùng ngày${soft(spec)}.`;
+    }
+
+    // --- Subject group / session limits (added in M1) ---
+    case 'subject_group': {
+      const subs = Array.isArray(p.subjects) ? p.subjects.join(', ') : paramStr(p.subjects);
+      return `${prefix}Nhóm môn: (${subs})${soft(spec)}.`;
+    }
+    case 'subject_group_daily_limit': {
+      const subs = Array.isArray(p.subjects) ? p.subjects.join(', ') : paramStr(p.subjects);
+      return `${prefix}Nhóm môn (${subs}): mỗi ngày tối đa ${paramStr(p.max)} tiết${soft(spec)}.`;
+    }
+    case 'subject_session_max_periods':
+      return `${prefix}Môn ${paramStr(p.subject)} buổi ${paramStr(p.session)}: tối đa ${paramStr(p.max)} tiết${soft(spec)}.`;
+
+    // --- THEN positive atoms (added in M1; usually appear inside if_then.then) ---
+    case 'teacher_required_day':
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} phải dạy ${dayInText(p.day)}${soft(spec)}.`;
+    case 'teacher_required_slot':
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} phải dạy ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
+    case 'teacher_pair_required_same_day': {
+      const teachers = Array.isArray(p.teachers) ? p.teachers.join(' và ') : paramStr(p.teachers);
+      return `${prefix}${teachers} cùng dạy ${dayInText(p.day)}${soft(spec)}.`;
+    }
+    case 'teacher_pair_required_same_slot': {
+      const teachers = Array.isArray(p.teachers) ? p.teachers.join(' và ') : paramStr(p.teachers);
+      return `${prefix}${teachers} cùng dạy ${dayInText(p.day)}, tiết ${paramStr(p.period)}${soft(spec)}.`;
+    }
+
     case 'custom_dsl': {
       // If LLM emitted IR form (expr present) or has explain text, the constraint
       // IS understood and encoded — show a friendly description, not "needs review".
@@ -273,10 +350,29 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
           : spec.original;
         return `${prefix}${explain}${soft(spec)}.`;
       }
-      return `Ràng buộc đặc biệt (cần kiểm tra lại): «${spec.original}»${soft(spec)}.`;
+      // Fall through to clarification (handled in default below) when no expr/explain.
+      const questions = buildClarificationQuestions(spec.original ?? '');
+      const prompt = questions[0]?.prompt
+        ?? 'Bạn có thể diễn đạt rõ hơn ý này được không?';
+      if (typeof console !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        console.warn('[humanizer:custom_dsl] No expr/explain, falling back to clarification');
+      }
+      return `${prefix}${prompt} (về: «${spec.original}»)${soft(spec)}.`;
     }
-    default:
-      return `${prefix}Ràng buộc «${spec.original}» — chưa có mô tả tiếng Việt chi tiết; dùng «Sửa cách hiểu» hoặc «Chọn mẫu»${soft(spec)}.`;
+    default: {
+      // FIX.md §3 / PRD M1: unrecognized kind must NEVER leak a debug-style message
+      // to the user. Always ask a clarification question in plain Vietnamese.
+      const questions = buildClarificationQuestions(spec.original ?? '');
+      const prompt = questions[0]?.prompt
+        ?? 'Bạn có thể diễn đạt rõ hơn ý này được không?';
+      if (typeof console !== 'undefined' && process.env.NODE_ENV !== 'production') {
+        console.warn(
+          '[humanizer:default] Unhandled kind, falling back to clarification:',
+          spec.kind,
+        );
+      }
+      return `${prefix}${prompt} (về: «${spec.original}»)${soft(spec)}.`;
+    }
   }
 }
 
