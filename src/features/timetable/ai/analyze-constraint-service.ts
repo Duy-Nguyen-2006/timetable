@@ -35,6 +35,7 @@ import type { BuiltInConstraintScope } from './constraint-registry';
 import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
 import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 import { evaluateNegativeGuardForSpecs } from './negative-guard';
+import { analyzeSemanticDirection } from './semantic-direction';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -413,12 +414,13 @@ function buildResolverHints(
       .map((d) => (normalized.includes(d.id) || normalized.includes(d.label.toLowerCase()) ? d.id : null))
       .filter(Boolean) as string[],
     inferredScope,
-    mentionsBlock: /\b(khong|cam|nghi)\b/iu.test(normalized) && /dạy|hoc|u/iu.test(normalized),
+    // M3.2: Use shared semantic-direction analyzer instead of duplicated regex
+    mentionsBlock: analyzeSemanticDirection(rawText).matched.block.length > 0,
     mentionsMax: /tối\s*đa|tối\s*da|quá|không.*quá|khong.*qua/iu.test(normalized),
     mentionsMin: /ít\s*nhất|tối\s*thiểu/iu.test(normalized),
     mentionsConsecutive: /liên\s*tiếp|liên\s*tục/iu.test(normalized),
-    mentionsOnly: /chi\b|chỉ\b/iu.test(normalized) && /dạy|u/iu.test(normalized),
-    mentionsPreferred: /ưu\s*tiên|thích|nên/iu.test(normalized),
+    mentionsOnly: analyzeSemanticDirection(rawText).matched.only.length > 0,
+    mentionsPreferred: analyzeSemanticDirection(rawText).matched.prefer.length > 0,
     mentionsIfThen: /nếu.*thì|neu.*thi/iu.test(normalized),
   };
 }
