@@ -27,6 +27,7 @@ import { BUILT_IN_CONSTRAINT_KINDS, type BuiltInConstraintScope } from './constr
 import { invokeAnalyzeChat } from './analyze-constraint-service';
 import { parseIRFirstWithGuard } from './ir-first-parser';
 import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
+import { getParserMode, isIRFirstAuthoritative } from './parser-mode';
 
 export type ParsePipelineInput = {
   rawText: string;
@@ -226,12 +227,26 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   });
   diagnostics.push({ stage: 'done', message: `shadow=${divergence.divergence}` });
 
+  // M8: When parser mode is 'ir_first', use the IR-first result as the
+  // authoritative output. Otherwise, use the legacy slot-fill result.
+  // In 'shadow' mode, we still return legacy but log divergence.
+  let finalSpecs = specs;
+  let finalStatus: 'mapped_builtin' | 'custom_dsl' | 'needs_clarification' | 'unsupported' =
+    specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin') : 'needs_clarification';
+  const parserMode = getParserMode();
+
+  if (parserMode === 'ir_first' && irFirstResult.kind === 'ir') {
+    finalSpecs = [irFirstResult.spec];
+    finalStatus = irFirstResult.spec.kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin';
+    diagnostics.push({ stage: 'done', message: `mode=ir_first authoritative` });
+  }
+
   return {
-    status: specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin') : 'needs_clarification',
+    status: finalStatus,
     hints,
     candidates,
     ambiguityGate,
-    specs,
+    specs: finalSpecs,
     normalizedText,
     backTranslation,
     confidence,
