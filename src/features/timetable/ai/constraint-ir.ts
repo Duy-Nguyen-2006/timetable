@@ -200,6 +200,44 @@ const BoolExprSchema: z.ZodType<BoolExpr> = z.lazy(() =>
         body: BoolExprSchema,
       }),
     }),
+    // Phase 1.1: ordering / gap operators. "Với mỗi ngày có 2 tiết trở lên,
+    // khoảng cách giữa tiết A và tiết B tối thiểu N" -> gap; "tiết A trước tiết B"
+    // -> before; "tiết A sau tiết B" -> after. All three are universal over
+    // the in-domain (typically days).
+    z.object({
+      gap: z.object({
+        var: z.string(),
+        in: DomainSchema,
+        min: z.number().int().min(1),
+        body: BoolExprSchema,
+      }),
+    }),
+    z.object({
+      before: z.object({
+        var: z.string(),
+        in: DomainSchema,
+        first: BoolExprSchema,
+        second: BoolExprSchema,
+      }),
+    }),
+    z.object({
+      after: z.object({
+        var: z.string(),
+        in: DomainSchema,
+        first: BoolExprSchema,
+        second: BoolExprSchema,
+      }),
+    }),
+    // Phase 1.1: session (buổi sáng/chiều) atom. Used in constraints like
+    // "Môn Toán phải có ít nhất 2 tiết buổi sáng". Maps to AgentInput.sessions.
+    z.object({
+      session: z.object({
+        teacher: z.string().optional(),
+        class: z.string().optional(),
+        subject: z.string().optional(),
+        session: z.string(),
+      }),
+    }),
   ])
 );
 
@@ -228,7 +266,12 @@ export type Atom =
   | { classSubjectAt: { class: string; subject: string; day: string; period: string | number } }
   | { classBusy: { class: string; day: string; period: string | number } }
   | { assigned: { assignment: string; day: string; period: string | number } }
-  | { const: boolean };
+  | { const: boolean }
+  // Phase 1.1: session atom. presence/absence of (teacher|class|subject) in
+  // a session on a given day. The (teacher|class|subject) field is optional
+  // (e.g. "buổi sáng có tiết chào cờ" = session {session: 'morning'} with no
+  // subject/teacher).
+  | { session: { teacher?: string; class?: string; subject?: string; session: string } };
 
 export type IntExpr =
   | number
@@ -248,7 +291,11 @@ export type BoolExpr = Atom
   | { atMost: { k: number; var: string; in: Domain; body: BoolExpr } }
   | { exactly: { k: number; var: string; in: Domain; body: BoolExpr } }
   | { compare: { op: '<=' | '<' | '==' | '!=' | '>=' | '>'; lhs: IntExpr; rhs: IntExpr } }
-  | { consecutive: { var: string; in: Domain; length: number; body: BoolExpr } };
+  | { consecutive: { var: string; in: Domain; length: number; body: BoolExpr } }
+  // Phase 1.1: gap, before, after.
+  | { gap: { var: string; in: Domain; min: number; body: BoolExpr } }
+  | { before: { var: string; in: Domain; first: BoolExpr; second: BoolExpr } }
+  | { after: { var: string; in: Domain; first: BoolExpr; second: BoolExpr } };
 
 export type ConstraintIR = {
   id: string;
