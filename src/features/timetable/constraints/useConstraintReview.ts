@@ -137,13 +137,16 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
 
   /**
    * AI-only re-parse after user rejects rule/built-in interpretation (no rule fallback).
+   * Phase 0.4: accepts an optional userFeedback (correction text) which takes
+   * priority over the raw input in the LLM prompt.
    */
   const rejectAndReparse = useCallback(
     async (
       rawConstraint: { id: string; text: string; type: 'required' | 'preferred'; weight?: number },
       currentDraft: ParsedConstraintDraft,
       agentInput: AgentInputPayload,
-      provider: AIProviderConfig
+      provider: AIProviderConfig,
+      options?: { userFeedback?: string }
     ): Promise<ParsedConstraintDraft | null> => {
       const attempts = currentDraft.reparseCount ?? 0;
       if (attempts >= MAX_REPARSE_ATTEMPTS) {
@@ -205,6 +208,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
               source: a.source,
               confidence: a.confidence,
             })),
+            ...(options?.userFeedback?.trim() ? { userFeedback: options.userFeedback.trim() } : {}),
             context,
           },
           provider,

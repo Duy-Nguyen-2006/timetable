@@ -370,6 +370,10 @@ export const KNOWN_ENCODABLE_KINDS = new Set([
   'subject_group',
   'subject_group_daily_limit',
   'subject_session_max_periods',
+  // Phase 0 require-family (atLeast semantics). Compiler via macros.add_at_least_period.
+  'teacher_required_period',
+  'class_required_period',
+  'subject_required_period',
 ] as const);
 
 export type KnownEncodableKind =

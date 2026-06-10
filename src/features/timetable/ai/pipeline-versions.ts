@@ -11,10 +11,17 @@ export const PROMPT_VERSIONS = {
 
 export const SOLVER_TEMPLATE_VERSION = '1.5.0';
 
-export const CONSTRAINT_REGISTRY_VERSION = '1.5.0';
+export const CONSTRAINT_REGISTRY_VERSION = '1.6.0';
 
-/** IR schema version. Bump when grammar/atoms/quantifiers change. */
-export const IR_SCHEMA_VERSION = '1.0.0';
+/**
+ * IR schema version. Bump when grammar/atoms/quantifiers change.
+ * Phase 0: 1.0.0 → 1.1.0 — added require-family kinds (teacher_required_period,
+ * class_required_period, subject_required_period) with atLeast semantics.
+ * Bumping this invalidates any IR-shape dependent cache and triggers a
+ * re-derivation in `buildAgentInputWithConfirmedSpecs` for previously
+ * confirmed specs that lack the new kinds' `expr` envelope.
+ */
+export const IR_SCHEMA_VERSION = '1.1.0';
 
 export type PromptStage = keyof typeof PROMPT_VERSIONS;
 

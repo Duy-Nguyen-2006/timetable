@@ -9,6 +9,15 @@
  *   4. Asks clarification questions if information is missing
  *
  * Architecture: AI-first, built-in as optimization, semantic/custom as fallback.
+ *
+ * Phase 0 hardening:
+ *   - The deterministic fallback is ONLY used when the LLM call fails at the
+ *     infrastructure layer (HTTP/timeout). It is NEVER used to override an
+ *     LLM `needs_clarification` decision.
+ *   - Every fallback result is capped at confidence `medium` and flagged
+ *     `requiresConfirmation: true`. The user MUST confirm before solve.
+ *   - The negative-guard runs after every parser and demotes silent-flip
+ *     mismatches to `medium` + confirmation.
  */
 
 import { z } from 'zod';
@@ -25,6 +34,7 @@ import { SOLVER_ENCODABLE_KIND_LIST, BUILT_IN_CONSTRAINT_DEFINITIONS, getConstra
 import type { BuiltInConstraintScope } from './constraint-registry';
 import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
 import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
+import { evaluateNegativeGuardForSpecs } from './negative-guard';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +54,15 @@ export type AnalyzeConstraintResult = {
   semantic?: SemanticConstraint;
   /** Confidence level */
   confidence: 'high' | 'medium' | 'low';
+  /**
+   * Phase 0 invariant (B1.4): this flag, when true, FORCES the UI to
+   * require explicit user confirmation before the spec can enter the
+   * solver. It is set when the spec came from the deterministic fallback
+   * (rule parser) or when the negative-guard detected a semantic flip.
+   */
+  requiresConfirmation: boolean;
+  /** Why the guard downgraded (human-readable). Empty when guard is ok. */
+  guardReasons: string[];
   /** Clarification questions if status is needs_clarification */
   clarificationQuestions: string[];
   /** Assumptions made by AI */
@@ -345,6 +364,8 @@ function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
     normalizedText: 'AI chưa đủ thông tin để hiểu ràng buộc này một cách chắc chắn.',
     specs: [],
     confidence: 'low',
+    requiresConfirmation: true,
+    guardReasons: [],
     clarificationQuestions: [
       `Mình chưa rõ điều kiện trong câu “${rawText}”. “Hiếu và Thúy dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
       '“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định Hiếu/Thúy không dạy tiết 4?',
@@ -496,6 +517,8 @@ export async function analyzeConstraint(
         normalizedText: rawText,
         specs: [],
         confidence: 'low',
+        requiresConfirmation: true,
+        guardReasons: [],
         clarificationQuestions: ['AI không trả về nội dung. Vui lòng thử lại.'],
         assumptions: [],
         unresolvedQuestions: ['AI không trả về nội dung.'],
@@ -517,25 +540,60 @@ export async function analyzeConstraint(
       weight: constraintType === 'preferred' ? weight : undefined,
     }));
 
-    // Fallback safety net: nếu LLM không map được built-in mà deterministic parser
-    // tìm ra built-in hợp lệ, dùng kết quả deterministic thay vì để user kẹt.
+    // Run negative-guard over the LLM-emitted specs FIRST. This catches silent
+    // semantic flips (require→block, block→allowed) regardless of confidence.
+    const guardResult = evaluateNegativeGuardForSpecs(specs, rawText);
+
+    // Phase 0.1: deterministic fallback is ONLY permitted when the LLM call
+    // actually FAILED (we are in the catch block). Here, the LLM returned a
+    // parsed response, so we MUST NOT silently override a needs_clarification
+    // or low-confidence LLM answer with the rule parser's guess. The previous
+    // behaviour ("auto-map with confidence='high' if rule parser found a kind")
+    // was the root cause of bug "Thủy phải có tiết 4" being silently inverted.
     let resolvedStatus: AnalyzeConstraintStatus = validated.status;
     let resolvedSpecs = specs;
     let resolvedConfidence: 'high' | 'medium' | 'low' = validated.confidence;
     let resolvedNormalizedText = validated.normalizedText;
-    if (specs.length === 0 || validated.status !== 'mapped_builtin' || subjectCoverageMissing(rawText, specs, agentInput).length > 0) {
-      const deterministic = mergedDeterministicFallbackSpecs(rawText, constraintType, weight, agentInput);
-      if (deterministic.length > 0) {
-        resolvedStatus = 'mapped_builtin';
-        resolvedSpecs = deterministic;
-        resolvedConfidence = 'high';
-        resolvedNormalizedText = deterministic.map((s) => humanizeConstraintSpec(s)).join('\n');
+    // Phase 0 invariant (B1.4): needs_clarification, unsupported, and
+    // semantic_only ALWAYS require user confirmation (the user must
+    // respond to clarification / review the humanized semantic text /
+    // see the unsupported message). mapped_builtin defaults to false
+    // and the guard can override. Confidence is for routing only,
+    // never for skipping confirmation.
+    let resolvedRequiresConfirmation =
+      resolvedStatus === 'needs_clarification' ||
+      resolvedStatus === 'unsupported' ||
+      resolvedStatus === 'semantic_only';
+    const guardReasons: string[] = [];
+
+    // Apply guard demotions: any demoted spec caps confidence at `medium` and
+    // forces confirmation. Hard reasons (e.g. conflicting markers) force
+    // needs_clarification outright.
+    if (guardResult.hardReasons.length > 0) {
+      resolvedStatus = 'needs_clarification';
+      resolvedConfidence = 'low';
+      resolvedSpecs = [];
+      resolvedRequiresConfirmation = true;
+      guardReasons.push(...guardResult.hardReasons);
+    } else if (guardResult.anyDemote) {
+      resolvedConfidence =
+        resolvedConfidence === 'high' ? 'medium' : resolvedConfidence;
+      resolvedRequiresConfirmation = true;
+      for (const decision of guardResult.decisions) {
+        if (decision.kind === 'demote_to_medium_with_confirmation') {
+          guardReasons.push(decision.reason);
+        }
       }
     }
 
-    if (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText)) {
+    if (
+      resolvedStatus !== 'needs_clarification' &&
+      (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText))
+    ) {
       return {
         ...clarifyAmbiguousIfThen(rawText),
+        requiresConfirmation: true,
+        guardReasons,
         rawResponse: content,
         usageTokens: response.usage?.total_tokens,
       };
@@ -547,6 +605,8 @@ export async function analyzeConstraint(
       specs: resolvedSpecs,
       semantic: validated.semantic as SemanticConstraint | undefined,
       confidence: resolvedConfidence,
+      requiresConfirmation: resolvedRequiresConfirmation,
+      guardReasons,
       clarificationQuestions: validated.clarificationQuestions ?? [],
       assumptions: validated.assumptions ?? [],
       unresolvedQuestions: validated.unresolvedQuestions ?? [],
@@ -555,18 +615,54 @@ export async function analyzeConstraint(
     };
   } catch (error) {
     console.error('Analyze constraint failed:', error);
-    // Catch-path safety net: nếu LLM nổ nhưng deterministic parser vẫn ra
-    // built-in hợp lệ, ưu tiên trả kết quả deterministic thay vì báo lỗi.
+    // Phase 0.1: the LLM call threw an error. We MAY consult the deterministic
+    // parser as a last-resort recovery (so the user is not blocked by transient
+    // network/HTTP issues). However, every fallback spec is hard-capped at
+    // confidence `medium` and REQUIRES explicit user confirmation. This is the
+    // ONLY place where the rule parser may produce an auto-mapped result.
     const deterministic = mergedDeterministicFallbackSpecs(rawText, constraintType, weight, agentInput);
     if (deterministic.length > 0) {
+      // Run the negative-guard on fallback specs too — the rule parser is
+      // exactly where silent flips originate.
+      const guardResult = evaluateNegativeGuardForSpecs(deterministic, rawText);
+      const guardReasons: string[] = [];
+      let requiresConfirmation = true;
+      let confidence: 'high' | 'medium' | 'low' = 'medium';
+      if (guardResult.hardReasons.length > 0) {
+        guardReasons.push(...guardResult.hardReasons);
+        return {
+          status: 'needs_clarification',
+          normalizedText: deterministic.map((s) => humanizeConstraintSpec(s)).join('\n'),
+          specs: [],
+          confidence: 'low',
+          requiresConfirmation: true,
+          guardReasons,
+          clarificationQuestions: guardResult.hardReasons,
+          assumptions: [
+            `AI phân tích lỗi nhưng rule parser tìm được kind; guard phát hiện xung đột ngữ nghĩa. Lỗi gốc: ${
+              error instanceof Error ? error.message : 'unknown'
+            }`,
+          ],
+          unresolvedQuestions: [],
+        };
+      }
+      if (guardResult.anyDemote) {
+        for (const decision of guardResult.decisions) {
+          if (decision.kind === 'demote_to_medium_with_confirmation') {
+            guardReasons.push(decision.reason);
+          }
+        }
+      }
       return {
         status: 'mapped_builtin',
         normalizedText: deterministic.map((s) => humanizeConstraintSpec(s)).join('\n'),
         specs: deterministic,
-        confidence: 'high',
+        confidence,
+        requiresConfirmation,
+        guardReasons,
         clarificationQuestions: [],
         assumptions: [
-          `AI phân tích lỗi nhưng rule parser nội bộ tìm được built-in hợp lệ. Lỗi gốc: ${
+          `AI phân tích lỗi; rule parser tìm được built-in nhưng BẮT BUỘC xác nhận lại. Lỗi gốc: ${
             error instanceof Error ? error.message : 'unknown'
           }`,
         ],
@@ -578,6 +674,8 @@ export async function analyzeConstraint(
       normalizedText: rawText,
       specs: [],
       confidence: 'low',
+      requiresConfirmation: true,
+      guardReasons: [],
       clarificationQuestions: [
         error instanceof Error ? error.message : 'Lỗi khi phân tích ràng buộc.',
       ],

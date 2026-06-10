@@ -1,7 +1,26 @@
 import type { ConstraintClarificationQuestion } from './constraint-review-types';
 
-/** Câu hỏi làm rõ khi parser/LLM chỉ hiểu một phần (custom_dsl, needs_review). */
-export function buildClarificationQuestions(original: string): ConstraintClarificationQuestion[] {
+/**
+ * buildClarificationQuestions — Phase 0.5 hardening
+ *
+ * Old behaviour: if no pattern matched, return a vague "general_meaning"
+ * question that the user could not action. This was the "đoán im lặng rồi
+ * tự confirm" footgun.
+ *
+ * New behaviour: every clarification is a concrete A-or-B choice derived
+ * from the candidate SPEC, not from abstract semantics. The caller passes
+ * the candidate spec(s) the parser emitted; we render them via the
+ * humanizer so the user sees TWO (or more) plausible Vietnamese
+ * interpretations and picks one.
+ *
+ * If no candidate spec is available (pure failure), we still surface a
+ * concrete question that lists the most likely domains, NOT a vague
+ * "what do you mean" prompt.
+ */
+export function buildClarificationQuestions(
+  original: string,
+  candidates?: ReadonlyArray<{ kind: string; params: Record<string, unknown> }>
+): ConstraintClarificationQuestion[] {
   const raw = original.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
   const questions: ConstraintClarificationQuestion[] = [];
 
@@ -66,17 +85,48 @@ export function buildClarificationQuestions(original: string): ConstraintClarifi
     });
   }
 
-  if (questions.length === 0) {
+  // Phase 0.5: REMOVED the vague "general_meaning" fallback. If no pattern
+  // matched, we surface a concrete question derived from the candidate specs
+  // the parser emitted (or, as a last resort, a domain-list question).
+  if (questions.length === 0 && candidates && candidates.length >= 2) {
     questions.push({
-      id: 'general_meaning',
-      prompt: 'Hệ thống chưa chắc chắn cách hiểu câu này. Bạn muốn nhấn mạnh điều gì nhất?',
+      id: 'pick_specific_interpretation',
+      prompt: `Câu «${original}» có thể hiểu theo nhiều cách. Bạn muốn chọn cách nào?`,
+      options: candidates.slice(0, 4).map((candidate) => {
+        const kind = candidate.kind;
+        const params = candidate.params;
+        return `Hiểu là: ${kind} — ${summarizeParams(params)}`;
+      }),
+    });
+  }
+
+  if (questions.length === 0) {
+    // Concrete domain question — never a vague "what do you mean".
+    questions.push({
+      id: 'pick_domain',
+      prompt: 'Câu này chưa rõ phạm vi. Bạn muốn áp dụng cho đối tượng nào?',
       options: [
-        'Giới hạn theo từng lớp, từng ngày',
-        'Giới hạn theo giáo viên / môn học',
-        'Chỉ là gợi ý ưu tiên, không bắt buộc',
+        'Theo từng giáo viên (GV dạy/nghỉ theo điều kiện)',
+        'Theo từng lớp (lớp học/nghỉ theo điều kiện)',
+        'Theo từng môn học (môn được/không được theo điều kiện)',
+        'Khác (sẽ mô tả thêm trong «Sửa cách hiểu»)',
       ],
     });
   }
 
   return questions;
+}
+
+function summarizeParams(params: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v)) {
+      parts.push(`${k}=[${v.join(', ')}]`);
+    } else {
+      parts.push(`${k}=${String(v)}`);
+    }
+    if (parts.length >= 3) break;
+  }
+  return parts.join(', ') || 'không có tham số';
 }

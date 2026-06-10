@@ -79,6 +79,11 @@ export type ConstraintKind =
   | 'teacher_required_slot'
   | 'teacher_pair_required_same_day'
   | 'teacher_pair_required_same_slot'
+  // Phase 0 require-family: positive at-least constraints (must have ≥N of X).
+  // Distinct from *_allowed_*/block_* (which constrain TO or OUT OF a set).
+  | 'teacher_required_period'
+  | 'class_required_period'
+  | 'subject_required_period'
   | 'custom_dsl';
 
 export type ConditionExpr =

@@ -187,6 +187,19 @@ export function humanizeConstraintSpec(spec: ConstraintSpec): string {
       return `${prefix}Giáo viên ${paramStr(p.teacher)} chỉ dạy vào ${dayListInText(p.days)}${soft(spec)}.`;
     case 'teacher_allowed_periods':
       return `${prefix}Giáo viên ${paramStr(p.teacher)} chỉ dạy các tiết ${paramStr(p.periods)}${soft(spec)}.`;
+    case 'teacher_required_period': {
+      // Phase 0 require-family: positive atLeast ("phải có ít nhất").
+      const minCount = p.minCount ?? p.count ?? 1;
+      return `${prefix}Giáo viên ${paramStr(p.teacher)} phải có ít nhất ${paramStr(minCount)} tiết ${paramStr(p.period)} trong tuần${soft(spec)}.`;
+    }
+    case 'class_required_period': {
+      const minCount = p.minCount ?? p.count ?? 1;
+      return `${prefix}Lớp ${paramStr(p.class)} phải có ít nhất ${paramStr(minCount)} tiết ${paramStr(p.period)} trong tuần${soft(spec)}.`;
+    }
+    case 'subject_required_period': {
+      const minCount = p.minCount ?? p.count ?? 1;
+      return `${prefix}Môn ${paramStr(p.subject)} phải có ít nhất ${paramStr(minCount)} tiết ${paramStr(p.period)} trong tuần${soft(spec)}.`;
+    }
     case 'teacher_max_classes_per_day':
       return `${prefix}Giáo viên ${paramStr(p.teacher || 'mọi GV')} dạy tối đa ${paramStr(p.maxClasses)} lớp mỗi ngày${soft(spec)}.`;
     case 'teacher_max_subjects_per_day':

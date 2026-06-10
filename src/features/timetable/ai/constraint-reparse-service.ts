@@ -60,6 +60,14 @@ export type ReparseRejectedConstraintRequest = {
     source: 'built_in' | 'semantic';
     confidence: 'high' | 'medium' | 'low';
   }>;
+  /**
+   * Phase 0.4: explicit user feedback when they reject a draft. When present,
+   * the prompt must treat this as the AUTHORITATIVE intent — the user is
+   * correcting the parser, and re-parsing must align with this correction.
+   * Typical use: the user types "không đúng, phải có ít nhất 1 tiết 4" after
+   * the parser suggested `teacher_allowed_periods` for "Thủy phải có tiết 4".
+   */
+  userFeedback?: string;
   context: {
     teachers: string[];
     classes: string[];
@@ -87,7 +95,7 @@ const BUILTIN_KIND_HINTS = [
 ].join('\n');
 
 function buildReparsePrompt(request: ReparseRejectedConstraintRequest): string {
-  const { rawConstraint, rejectedDraft, previousAttempts, context } = request;
+  const { rawConstraint, rejectedDraft, previousAttempts, context, userFeedback } = request;
 
   const teacherList = [...new Set(context.teachers)].join(', ') || '(chưa có giáo viên)';
   const classList = [...new Set(context.classes)].join(', ') || '(chưa có lớp)';
@@ -107,14 +115,29 @@ function buildReparsePrompt(request: ReparseRejectedConstraintRequest): string {
 
   const encodableList = [...SOLVER_ENCODABLE_KINDS].slice(0, 40).join(', ');
 
+  // Phase 0.4: user feedback, when present, takes priority over the raw text
+  // and over previous attempts. The user is explicitly correcting the parser.
+  const feedbackSection = userFeedback?.trim()
+    ? `## User correction (HIGHEST PRIORITY — user is correcting the parser)
+"${userFeedback.trim()}"
+
+Treat the correction as authoritative: re-parse the RAW INPUT in light of the
+user's intent as expressed here. Do NOT repeat any previous interpretation.`
+    : '';
+
   return `You are a Vietnamese school timetable constraint normalizer.
 
 ## Critical context
 The user clicked "AI phân tích" — rule/heuristic interpretation was WRONG or suspect.
 Do NOT repeat the rejected interpretation. Do NOT use rule/regex fallback logic.
 
+${feedbackSection}
+
 ## Two-step goal
 1. Try to map to built-in specs (if_then, teacher_block_day, subject_max_consecutive, ...).
+   For "phải có / cần có / ít nhất" sentences, the correct positive at-least kind is
+   one of: teacher_required_period, class_required_period, subject_required_period
+   (params: teacher|class|subject, period, minCount=1 by default).
 2. If built-in is impossible, return custom_dsl with params.expr (JSON IR) AND params.normalizedText:
    canonical Vietnamese using "Giáo viên {name}" labels, e.g.
    "Nếu Giáo viên A và Giáo viên B dạy Thứ 2 thì Giáo viên C không dạy Thứ 3."
@@ -144,7 +167,9 @@ Encodable kinds include: ${encodableList}, ...
 2. Use custom_dsl only when built-in cannot express the rule; then include params.expr (solver IR) and normalizedText.
 3. "tránh"/"né"/"đi muộn" + teacher + periods → teacher_block_period (required) or teacher_preferred_periods (preferred); one spec per period.
 4. "Cô X"/"Thầy Y" → teacher label from Teachers list.
-5. displayText: clear Vietnamese for user approval.
+5. "phải có"/"cần có"/"ít nhất" + teacher/class/subject + period (without negation) →
+   *_required_period (NOT teacher_block_period and NOT teacher_allowed_periods).
+6. displayText: clear Vietnamese for user approval.
 
 ## JSON response
 { "status": "candidate"|"unsupported"|"needs_retry", "displayText": "...", "candidate": { "source": "built_in", "confidence": "high"|"medium"|"low", "specs": [...], "assumptions": [], "unresolvedQuestions": [] } }

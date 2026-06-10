@@ -107,6 +107,10 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'teacher_required_slot', label: 'Teacher required slot', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'day', 'period'] },
   { kind: 'teacher_pair_required_same_day', label: 'Teacher pair required same day', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'day'] },
   { kind: 'teacher_pair_required_same_slot', label: 'Teacher pair required same slot', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'day', 'period'] },
+  // Phase 0 require-family: positive at-least constraints.
+  { kind: 'teacher_required_period', label: 'Teacher required period', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'period', 'minCount'] },
+  { kind: 'class_required_period', label: 'Class required period', group: 'class', hasChecker: true, requiredParams: ['class', 'period', 'minCount'] },
+  { kind: 'subject_required_period', label: 'Subject required period', group: 'subject', hasChecker: true, requiredParams: ['subject', 'period', 'minCount'] },
   { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: [] },
 ];
 
@@ -118,6 +122,9 @@ const LABEL_VI_BY_KIND: Partial<Record<ConstraintKind, string>> = {
   teacher_block_slot: 'Giáo viên không dạy slot',
   teacher_max_per_day: 'Giáo viên dạy tối đa N tiết mỗi ngày',
   teacher_allowed_days: 'Giáo viên chỉ dạy một số ngày',
+  teacher_required_period: 'Giáo viên phải có ít nhất N tiết trong tuần',
+  class_required_period: 'Lớp phải có ít nhất N tiết trong tuần',
+  subject_required_period: 'Môn phải có ít nhất N tiết trong tuần',
   pair_not_same_slot: 'Hai phân công không trùng tiết',
   pair_same_slot: 'Hai phân công cùng tiết',
   mutual_exclusion: 'Nhóm phân công không trùng slot',
@@ -130,6 +137,9 @@ const EXAMPLE_VI_BY_KIND: Partial<Record<ConstraintKind, string>> = {
   teacher_block_slot: 'Giáo viên Sơn không dạy Thứ 2 tiết 1.',
   teacher_max_per_day: 'Giáo viên Sơn dạy tối đa 4 tiết mỗi ngày.',
   teacher_allowed_days: 'Giáo viên Sơn chỉ dạy Thứ 3 và Thứ 5.',
+  teacher_required_period: 'Giáo viên Thủy phải có ít nhất 1 tiết 4 trong tuần.',
+  class_required_period: 'Lớp 6A phải có ít nhất 2 tiết Toán trong tuần.',
+  subject_required_period: 'Môn Toán phải có ít nhất 3 tiết trong tuần.',
   pair_not_same_slot: 'Toán 6A và Văn 6A không được trùng tiết.',
   pair_same_slot: 'Sinh hoạt 6A và Sinh hoạt 6B phải cùng tiết.',
   mutual_exclusion: 'Trong nhóm phân công này, không được có 2 phân công trùng slot.',
@@ -240,6 +250,10 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
   'teacher_required_slot',
   'teacher_pair_required_same_day',
   'teacher_pair_required_same_slot',
+  // Phase 0 require-family: atLeast semantics (positive; must have ≥N of X).
+  'teacher_required_period',
+  'class_required_period',
+  'subject_required_period',
 ] as const satisfies readonly ConstraintKind[];
 
 export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);
