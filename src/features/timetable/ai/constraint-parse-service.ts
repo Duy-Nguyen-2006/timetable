@@ -5,7 +5,7 @@ import type { ConstraintSpec } from './constraint-spec';
 import { __translatorInternal, runTranslatorTurn } from './translator';
 import { buildDraftFromSpecs } from './constraint-draft-validator';
 import { humanizeDraft } from './constraint-humanizer';
-import type { ParsedConstraintDraft, RawConstraintInput } from './constraint-review-types';
+import type { ParsedConstraintDraft, ConstraintParseIssue, RawConstraintInput } from './constraint-review-types';
 import { inferRuleParseConfidence } from './rule-parse-confidence';
 import {
   normalizeConstraintSpecsForSolving,
@@ -15,8 +15,8 @@ import {
 /** Convert normalization issues into parse issues the draft validator understands. */
 function normalizationIssuesToParseIssues(
   issues: SpecNormalizationIssue[]
-): { code: string; message: string }[] {
-  return issues.map((issue) => ({ code: issue.code, message: issue.message }));
+): ConstraintParseIssue[] {
+  return issues.map((issue) => ({ code: issue.code, message: issue.message })) as ConstraintParseIssue[];
 }
 
 function applyNormalizationOrFail(

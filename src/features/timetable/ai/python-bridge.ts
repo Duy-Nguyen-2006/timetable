@@ -32,7 +32,16 @@ export async function executeSolverCode(
   // In production this will be an IPC call to the main process
   // which actually spawns the bundled binary.
   if (typeof window !== 'undefined' && window.electron?.python?.executeCode) {
-    return window.electron.python.executeCode(code, input, timeout, options.solverWorkers, options.solverSeed);
+    // FIX.md §1: solverSeed (5th arg) — cast bypasses older preload type defs.
+    return (window.electron.python.executeCode as (
+      code: string,
+      input: unknown,
+      timeout: number,
+      workers?: number,
+      seed?: number,
+    ) => Promise<ExecutionResult>)(
+      code, input, timeout, options.solverWorkers, options.solverSeed,
+    );
   }
 
   // Web fallback: call server-side executor route.

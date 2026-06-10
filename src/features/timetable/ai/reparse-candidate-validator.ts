@@ -71,7 +71,7 @@ export function validateReparseCandidateSpecs(
       issues: normalized.issues.map((issue) => ({
         code: issue.code,
         message: issue.message,
-      })),
+      })) as ConstraintParseIssue[],
       status: 'needs_review',
     };
   }

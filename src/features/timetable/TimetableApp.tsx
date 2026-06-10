@@ -1093,7 +1093,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
                 setAgentStatus(event.message)
                 setAgentStep(event.type === 'phase' ? toProgressStep(event.phase) : 'thinking')
               }
-              const eventPhase = event.type === 'phase' ? event.phase : 'coding'
+              const eventPhase = event.type === 'phase' ? event.phase : 'idle'
               const eventTitle = 'message' in event ? (event as { message: string }).message : event.type
               pushTimelineEvent({
                 id: crypto.randomUUID(),

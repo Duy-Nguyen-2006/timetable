@@ -18,7 +18,8 @@
  * - Retriever returns top-k candidates with schema + few-shot for the LLM prompt.
  */
 
-import type { BuiltInConstraintScope, ConstraintKind } from './constraint-registry';
+import type { BuiltInConstraintScope } from './constraint-registry';
+import type { ConstraintKind } from './constraint-spec';
 import { BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
 import { normalizeConstraintText } from './translator-text';
 
@@ -83,6 +84,9 @@ export type ConstraintResolverHints = {
   mentionsConsecutive: boolean;
   mentionsOnly: boolean;
   mentionsPreferred: boolean;
+  /** FIX.md §6: ambiguous entity from Stage 1 resolver (consumed by slot-fill-prompt).
+   *  Optional because not all resolver paths populate it (e.g. no entities in input). */
+  ambiguousEntity?: { kind: 'teacher' | 'subject' | 'class'; candidates: string[] } | null;
   mentionsIfThen: boolean;
 };
 

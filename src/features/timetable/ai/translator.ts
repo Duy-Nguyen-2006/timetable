@@ -5,7 +5,16 @@ import { parseConstraint } from '@/lib/constraint-parser';
 import type { ConstraintSpec, ConditionExpr } from './constraint-spec';
 import { parseModelJson } from './parse-model-json';
 import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
-import type { AgentInputPayload, AIProviderConfig, ChatUsage, TranslatorTurnResult } from './types';
+import type { AgentInputPayload, AIProviderConfig, ChatUsage } from './types';
+
+// FIX.md §6 cleanup: TranslatorTurnResult was removed from ./types
+// (AI codegen result types deprecated). Define locally so this file's
+// function signatures stay typed; the type has minimal external surface.
+type TranslatorTurnResult = {
+  constraintSpecs: ConstraintSpec[];
+  rawResponse: string;
+  usageTokens?: number;
+};
 import { invokeChat, type ChatPayload } from './chat-client';
 import { buildTranslatorPeriods, buildTranslatorPeriodsByDay, periodsForSession } from './translator-periods';
 import { inferRuleParseConfidence } from './rule-parse-confidence';

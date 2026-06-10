@@ -23,13 +23,10 @@ export const STEP_LABELS: Record<AgentProgressStep, string> = {
 
 export function toProgressStep(phase: AgentLifecyclePhase): AgentProgressStep {
   switch (phase) {
-    case 'coding':
     case 'running':
     case 'checking':
-    case 'fixing':
       return phase
     case 'translator':
-    case 'planner':
     case 'thinking':
       return 'thinking'
     case 'idle':
