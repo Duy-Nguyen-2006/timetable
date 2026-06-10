@@ -9,7 +9,7 @@
  * AI codegen để fallback.
  */
 
-import { isSolverEncodableKind, SOLVER_ENCODABLE_KINDS } from './constraint-registry';
+import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { ConstraintSpec } from './constraint-spec';
 import { isDeterministicallyCheckedKind } from './deterministic-validator';
 
@@ -27,7 +27,8 @@ export type DeterministicEligibility =
  * Trả về:
  *   - `{ ok: true }` nếu MỌI hard constraint đều:
  *       + không phải custom_dsl, hoặc
- *       + thuộc SOLVER_ENCODABLE_KINDS, VÀ
+ *       + custom_dsl có IR expr/pythonPredicate để solver deterministic kiểm tra; VÀ
+ *       + thuộc SOLVER_ENCODABLE_KINDS; VÀ
  *       + có deterministic checker.
  *   - `{ ok: false, reason, ... }` nếu có bất kỳ hard constraint nào không
  *     đủ điều kiện trên.
@@ -40,13 +41,15 @@ export function getDeterministicEligibility(
 ): DeterministicEligibility {
   const hardSpecs = specs.filter((spec) => spec.severity === 'hard');
 
-  const hardCustomSpecs = hardSpecs.filter(
-    (spec) => {
-      if (spec.kind !== 'custom_dsl') return false;
-      const params = spec.params ?? {};
-      return !(params.expr && typeof params.expr === 'object') && typeof params.pythonPredicate !== 'string' && !spec.pythonPredicate;
-    }
-  );
+  const hardCustomSpecs = hardSpecs.filter((spec) => {
+    if (spec.kind !== 'custom_dsl') return false;
+    const params = spec.params ?? {};
+    return (
+      !(params.expr && typeof params.expr === 'object') &&
+      typeof params.pythonPredicate !== 'string' &&
+      !spec.pythonPredicate
+    );
+  });
 
   const unsupportedHardSpecs = hardSpecs.filter(
     (spec) =>
@@ -73,7 +76,7 @@ export function getDeterministicEligibility(
 
   if (hardCustomSpecs.length > 0) {
     parts.push(
-      `${hardCustomSpecs.length} ràng buộc custom_dsl hard chưa có IR expr/pythonPredicate để solver deterministic kiểm tra`
+      `${hardCustomSpecs.length} ràng buộc custom_dsl hard chưa được hỗ trợ vì chưa có IR expr/pythonPredicate để solver deterministic kiểm tra`
     );
   }
 
