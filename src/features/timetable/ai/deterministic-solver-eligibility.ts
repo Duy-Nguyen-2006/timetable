@@ -9,7 +9,7 @@
  * AI codegen để fallback.
  */
 
-import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
+import { SOLVER_ENCODABLE_KINDS, isSolverEncodableKind } from './constraint-registry';
 import type { ConstraintSpec } from './constraint-spec';
 import { isDeterministicallyCheckedKind } from './deterministic-validator';
 
