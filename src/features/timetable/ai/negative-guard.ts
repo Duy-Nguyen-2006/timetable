@@ -25,44 +25,16 @@
  *
  * The guard also returns a list of `hardReasons` so callers can short-
  * circuit to `needs_clarification` when ambiguity is unresolvable.
+ *
+ * NOTE: This module now uses semantic-direction.ts for unified marker
+ * detection across all parser paths.
  */
 
 import type { ConstraintSpec } from './constraint-spec';
+import { analyzeSemanticDirection } from './semantic-direction';
 
-export const REQUIRE_MARKERS = [
-  'phải có',
-  'phai co',
-  'cần có',
-  'can co',
-  'ít nhất',
-  'it nhat',
-  'có ít nhất',
-  'co it nhat',
-  'bắt buộc có',
-  'bat buoc co',
-  'phải được',
-  'phai duoc',
-  'nhất định phải',
-  'nhat dinh phai',
-] as const;
-
-export const BLOCK_MARKERS = [
-  'không',
-  'khong',
-  'ko ',
-  'cấm',
-  'cam',
-  'nghỉ',
-  'nghi',
-  'đừng',
-  'dung',
-  'tránh',
-  'tranh',
-  'né',
-  'ne',
-  'dừng',
-  'dung',
-] as const;
+// Re-export for backward compatibility
+export { REQUIRE_PATTERNS as REQUIRE_MARKERS, BLOCK_PATTERNS as BLOCK_MARKERS } from './semantic-direction';
 
 /** Kinds that express positive, set-restricting (only) or atLeast semantics. */
 const POSITIVE_SET_KINDS = new Set([
@@ -94,22 +66,6 @@ const NEGATIVE_SET_KINDS = new Set([
   'subject_block_days',
 ]);
 
-function normalizeForCheck(text: string): string {
-  return text
-    .normalize('NFC')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function hasAnyMarker(text: string, markers: readonly string[]): boolean {
-  const lower = ` ${text} `;
-  for (const m of markers) {
-    if (lower.includes(m)) return true;
-  }
-  return false;
-}
-
 export type GuardDecision =
   | { kind: 'ok' }
   | {
@@ -135,25 +91,33 @@ export function evaluateNegativeGuard(
   spec: ConstraintSpec,
   originalText: string
 ): GuardDecision {
-  const normalized = normalizeForCheck(originalText);
-  const hasRequire = hasAnyMarker(normalized, REQUIRE_MARKERS);
-  const hasBlock = hasAnyMarker(normalized, BLOCK_MARKERS);
+  // Use semantic-direction analyzer for unified marker detection
+  const semanticAnalysis = analyzeSemanticDirection(originalText);
+
+  // We check the raw marker lists, not just the resolved direction.
+  // Reason: contradictory text (e.g. "phải có X nhưng không dạy Y") still
+  // contains both require and block markers, and any positive-set spec
+  // produced for it must be demoted — even though the analyzer's final
+  // direction is 'contradictory'. This keeps the demote policy
+  // conservative and independent of how the contradiction is resolved.
+  const hasRequireMarker = semanticAnalysis.matched.require.length > 0;
+  const hasBlockMarker = semanticAnalysis.matched.block.length > 0;
 
   // REQUIRE marker + negative-set kind = silent misparse (e.g. "phải có tiết 4" → block_period).
-  if (hasRequire && NEGATIVE_SET_KINDS.has(spec.kind as string)) {
+  if (hasRequireMarker && NEGATIVE_SET_KINDS.has(spec.kind as string)) {
     return {
       kind: 'demote_to_medium_with_confirmation',
-      reason: `Câu chứa mỏ neo yêu cầu (phải có/ít nhất) nhưng parser ánh xạ sang kind chặn (${spec.kind}). Cần xác nhận lại.`,
+      reason: `Câu chứa mỏ neo yêu cầu (${semanticAnalysis.matched.require.join(', ')}) nhưng parser ánh xạ sang kind chặn (${spec.kind}). Cần xác nhận lại.`,
       marker: 'require',
       violatedKind: spec.kind,
     };
   }
 
   // BLOCK marker + positive-set kind = silent misparse (e.g. "không dạy tiết 4" → required_period).
-  if (hasBlock && POSITIVE_SET_KINDS.has(spec.kind as string)) {
+  if (hasBlockMarker && POSITIVE_SET_KINDS.has(spec.kind as string)) {
     return {
       kind: 'demote_to_medium_with_confirmation',
-      reason: `Câu chứa mỏ neo phủ định (không/cấm/nghỉ) nhưng parser ánh xạ sang kind dương (${spec.kind}). Cần xác nhận lại.`,
+      reason: `Câu chứa mỏ neo phủ định (${semanticAnalysis.matched.block.join(', ')}) nhưng parser ánh xạ sang kind dương (${spec.kind}). Cần xác nhận lại.`,
       marker: 'block',
       violatedKind: spec.kind,
     };
@@ -180,6 +144,7 @@ export function evaluateNegativeGuardForSpecs(
   const decisions: GuardDecision[] = [];
   const hardReasons: string[] = [];
   let anyDemote = false;
+
   for (const spec of specs) {
     const decision = evaluateNegativeGuard(spec, originalText);
     decisions.push(decision);
@@ -187,13 +152,12 @@ export function evaluateNegativeGuardForSpecs(
       anyDemote = true;
     }
   }
-  const normalized = normalizeForCheck(originalText);
-  const hasRequire = hasAnyMarker(normalized, REQUIRE_MARKERS);
-  const hasBlock = hasAnyMarker(normalized, BLOCK_MARKERS);
-  if (hasRequire && hasBlock) {
-    hardReasons.push(
-      'Câu vừa chứa mỏ neo yêu cầu vừa chứa mỏ neo phủ định — không thể tự quyết định nghĩa.'
-    );
+
+  // Use semantic-direction analyzer to detect contradictions
+  const semanticAnalysis = analyzeSemanticDirection(originalText);
+  if (semanticAnalysis.direction === 'contradictory') {
+    hardReasons.push(semanticAnalysis.explanation);
   }
+
   return { decisions, hardReasons, anyDemote };
 }
