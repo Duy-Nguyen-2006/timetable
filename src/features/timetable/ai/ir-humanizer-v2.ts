@@ -37,6 +37,13 @@ function domainToString(d: Domain): string {
   return '?';
 }
 
+function sessionLabel(sessionId: string): string {
+  const normalized = sessionId.toLowerCase();
+  if (normalized === 'morning' || normalized === 'sang' || normalized === 'sáng') return 'sáng';
+  if (normalized === 'afternoon' || normalized === 'chieu' || normalized === 'chiều') return 'chiều';
+  return sessionId;
+}
+
 function varSubstitute(expr: BoolExpr, varName: string, value: string | number): BoolExpr {
   // Substitute a quantifier binding in an inner expression. Used by the
   // canonical patterns to inline the var.
@@ -256,15 +263,19 @@ export function humanizeIRExpr(expr: BoolExpr): { text: string; unmatched: boole
     };
   }
   if (isBefore(expr)) {
+    const first = humanizeIRExpr(expr.before.first);
+    const second = humanizeIRExpr(expr.before.second);
     return {
-      text: `Với mỗi ${expr.before.var} ∈ ${domainToString(expr.before.in)}: trước/sau`,
-      unmatched: true,
+      text: `Với mỗi ${expr.before.var} ∈ ${domainToString(expr.before.in)}: ${first.text} trước ${second.text}`,
+      unmatched: first.unmatched || second.unmatched,
     };
   }
   if (isAfter(expr)) {
+    const first = humanizeIRExpr(expr.after.first);
+    const second = humanizeIRExpr(expr.after.second);
     return {
-      text: `Với mỗi ${expr.after.var} ∈ ${domainToString(expr.after.in)}: sau`,
-      unmatched: true,
+      text: `Với mỗi ${expr.after.var} ∈ ${domainToString(expr.after.in)}: ${first.text} sau ${second.text}`,
+      unmatched: first.unmatched || second.unmatched,
     };
   }
 
@@ -276,16 +287,28 @@ export function humanizeIRExpr(expr: BoolExpr): { text: string; unmatched: boole
     if (s.class) parts.push(`lớp ${s.class}`);
     if (s.subject) parts.push(`môn ${s.subject}`);
     return {
-      text: `${parts.join(', ') || 'mọi'} có mặt trong buổi ${s.session}`,
+      text: `${parts.join(', ') || 'mọi đối tượng'} có tiết trong buổi ${sessionLabel(s.session)}`,
       unmatched: false,
     };
   }
 
-  // Pattern: teaches atom
+  // Pattern: teaches/class atoms
   if (isTeachesAtom(expr)) {
     return {
-      text: `giáo viên ${expr.teaches.teacher} dạy ${expr.teaches.day} tiết ${expr.teaches.period}`,
-      unmatched: true,
+      text: `giáo viên ${expr.teaches.teacher} dạy ngày ${expr.teaches.day} tiết ${expr.teaches.period}`,
+      unmatched: false,
+    };
+  }
+  if (isClassBusyAtom(expr)) {
+    return {
+      text: `lớp ${expr.classBusy.class} có tiết ngày ${expr.classBusy.day} tiết ${expr.classBusy.period}`,
+      unmatched: false,
+    };
+  }
+  if (isClassSubjectAtAtom(expr)) {
+    return {
+      text: `lớp ${expr.classSubjectAt.class} học môn ${expr.classSubjectAt.subject} ngày ${expr.classSubjectAt.day} tiết ${expr.classSubjectAt.period}`,
+      unmatched: false,
     };
   }
   if ('const' in expr) {

@@ -20,6 +20,7 @@ implemented until tests or validation evidence exist.
 | Story | Contract | Unit | Integration | E2E | Platform | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | US-013 | IR type checker accepts valid quantifier placeholders and rejects domain mismatches | yes | yes | no | no | implemented | `npm run test:grep -- ir-type-checker`; `npm run test:grep -- kind-to-ir` |
+| US-014 | IR Humanizer V2 renders supported Phase 1.1 shapes as deterministic Vietnamese | yes | yes | no | no | implemented | `npm run test:grep -- ir-humanizer-v2` |
 
 ## Evidence Rules
 

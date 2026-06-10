@@ -20,4 +20,11 @@ The TypeScript IR type checker validates a `ConstraintIR` against `AgentInputPay
 - `classBusy` and `classSubjectAt` atoms are checked with the same day/period rules as `teaches` atoms;
 - `atLeast`, `atMost`, `exactly`, `exists`, `forall`, `count`, `consecutive`, `gap`, `before`, and `after` propagate quantifier bindings into nested expressions.
 
-This keeps kind-to-IR adapters such as `teacher_required_period` valid while rejecting mismatched placeholders like using `$$D$$` (bound to days) as a class name.
+## IR Humanizer V2
+
+The deterministic IR humanizer renders supported IR shapes to Vietnamese without calling an LLM:
+
+- `session` atoms render common session ids as Vietnamese labels (`morning` → `sáng`, `afternoon` → `chiều`);
+- `before` and `after` expressions render both sides of the relation;
+- `teaches`, `classBusy`, and `classSubjectAt` atoms are canonical supported shapes;
+- unmatched output is reserved for genuinely unsupported shapes that need a new template.

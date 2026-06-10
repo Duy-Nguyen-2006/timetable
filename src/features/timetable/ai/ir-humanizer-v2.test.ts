@@ -98,7 +98,7 @@ test('humanizeIRExpr: session atom -> buổi sáng', () => {
   const expr: BoolExpr = { session: { session: 'morning', teacher: 'Thủy' } };
   const { text } = humanizeIRExpr(expr);
   assert.match(text, /giáo viên Thủy/);
-  assert.match(text, /buổi morning/);
+  assert.match(text, /buổi sáng/);
 });
 
 test('humanizeIRExpr: gap -> khoảng cách', () => {
@@ -160,4 +160,36 @@ test('humanizeIRExpr: and / or composition', () => {
   };
   const orText = humanizeIRExpr(orExpr).text;
   assert.match(orText, /hoặc/);
+});
+
+test('humanizeIRExpr: before renders both sides instead of generic placeholder', () => {
+  const expr: BoolExpr = {
+    before: {
+      var: 'd',
+      in: 'days',
+      first: { classSubjectAt: { class: '6A', subject: 'Toán', day: '$$D$$', period: 1 } },
+      second: { classSubjectAt: { class: '6A', subject: 'Văn', day: '$$D$$', period: 2 } },
+    },
+  };
+  const { text, unmatched } = humanizeIRExpr(expr);
+  assert.equal(unmatched, false);
+  assert.match(text, /trước/);
+  assert.match(text, /môn Toán/);
+  assert.match(text, /môn Văn/);
+});
+
+test('humanizeIRExpr: after renders both sides instead of generic placeholder', () => {
+  const expr: BoolExpr = {
+    after: {
+      var: 'd',
+      in: 'days',
+      first: { teaches: { teacher: 'Thủy', day: '$$D$$', period: 4 } },
+      second: { classBusy: { class: '6A', day: '$$D$$', period: 1 } },
+    },
+  };
+  const { text, unmatched } = humanizeIRExpr(expr);
+  assert.equal(unmatched, false);
+  assert.match(text, /sau/);
+  assert.match(text, /giáo viên Thủy/);
+  assert.match(text, /lớp 6A/);
 });
