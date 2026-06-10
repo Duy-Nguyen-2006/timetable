@@ -1,4 +1,4 @@
-import type { AgentInputPayload, AIProviderConfig } from './types';
+import type { AgentInputPayload } from './types';
 import type { ConstraintSpec } from './constraint-spec';
 import type {
   ConfirmedConstraint,
@@ -7,6 +7,7 @@ import type {
 } from './constraint-review-types';
 import { humanizeDraft } from './constraint-humanizer';
 import { assertSolvableConstraintState, flattenConfirmedSpecs } from './constraint-preflight';
+import { normalizeConstraintSpecsForSolving } from './constraint-spec-normalizer';
 
 export type ConfirmedSolveRequest = {
   input: Omit<AgentInputPayload, 'constraints'>;
@@ -14,14 +15,25 @@ export type ConfirmedSolveRequest = {
 };
 
 export type SolveGateResult =
-  | { ok: true; agentInput: AgentInputPayload; preTranslatedSpecs: ConstraintSpec[]; warnings: string[] }
-  | { ok: false; status: number; error: string; messages?: string[]; warnings?: string[] };
+  | {
+      ok: true;
+      agentInput: AgentInputPayload;
+      preTranslatedSpecs: ConstraintSpec[];
+      warnings: string[];
+    }
+  | {
+      ok: false;
+      status: number;
+      error: string;
+      messages?: string[];
+      warnings?: string[];
+    };
 
 export function buildAgentInputWithConfirmedSpecs(
   base: Omit<AgentInputPayload, 'constraints'>,
   confirmed: ConfirmedConstraint[]
-): { agentInput: AgentInputPayload; preTranslatedSpecs: ConstraintSpec[] } {
-  const preTranslatedSpecs = flattenConfirmedSpecs(confirmed);
+): { agentInput: AgentInputPayload; preTranslatedSpecs: ConstraintSpec[]; issues: string[] } {
+  const flattenedSpecs = flattenConfirmedSpecs(confirmed);
   const constraints = confirmed.map((c) => {
     const raw = c.specs[0]?.original ?? c.summary;
     const severity = c.specs[0]?.severity;
@@ -33,9 +45,14 @@ export function buildAgentInputWithConfirmedSpecs(
       ...(type === 'preferred' && weight != null ? { weight } : {}),
     };
   });
+
+  const candidateInput: AgentInputPayload = { ...base, constraints };
+  const normalized = normalizeConstraintSpecsForSolving(candidateInput, flattenedSpecs);
+
   return {
-    agentInput: { ...base, constraints },
-    preTranslatedSpecs,
+    agentInput: candidateInput,
+    preTranslatedSpecs: normalized.specs,
+    issues: normalized.issues.map((issue) => issue.message),
   };
 }
 
@@ -58,10 +75,22 @@ export function validateConfirmedSolveRequest(
       warnings: preflight.warnings,
     };
   }
-  const { agentInput, preTranslatedSpecs } = buildAgentInputWithConfirmedSpecs(
+
+  const { agentInput, preTranslatedSpecs, issues } = buildAgentInputWithConfirmedSpecs(
     request.input,
     request.confirmedConstraints
   );
+
+  if (issues.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Không thể chạy solver: ràng buộc đã xác nhận có dữ liệu thiếu hoặc sai định dạng.',
+      messages: issues,
+      warnings: preflight.warnings,
+    };
+  }
+
   if (!preTranslatedSpecs.length && rawConstraints.some((r) => r.type === 'required')) {
     return {
       ok: false,
@@ -70,6 +99,7 @@ export function validateConfirmedSolveRequest(
       warnings: preflight.warnings,
     };
   }
+
   return { ok: true, agentInput, preTranslatedSpecs, warnings: preflight.warnings };
 }
 
