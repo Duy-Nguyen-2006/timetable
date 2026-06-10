@@ -184,3 +184,70 @@ test('typeCheckIR: unknown class in classSubjectAt rejects', () => {
   assert.equal(result.ok, false);
   assert.ok(result.issues.some((i) => i.code === 'unknown_class'));
 });
+
+test('typeCheckIR: kind-to-IR day placeholder is accepted when bound to days', () => {
+  const result = typeCheckIR(
+    irOf({
+      atLeast: {
+        k: 1,
+        var: 'd',
+        in: 'days',
+        body: { teaches: { teacher: 'Hiếu', day: '$$D$$', period: 4 } },
+      },
+    }),
+    input
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.issues, null, 2));
+});
+
+test('typeCheckIR: period placeholder is accepted when bound to periods', () => {
+  const result = typeCheckIR(
+    irOf({
+      forall: {
+        var: 'p',
+        in: 'periods',
+        body: { classBusy: { class: '6A', day: 'monday', period: '$$P$$' } },
+      },
+    }),
+    input
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.issues, null, 2));
+});
+
+test('typeCheckIR: class placeholder is accepted when bound to classes', () => {
+  const result = typeCheckIR(
+    irOf({
+      forall: {
+        var: 'c',
+        in: 'classes',
+        body: { classSubjectAt: { class: '$$C$$', subject: 'Toán', day: 'monday', period: 1 } },
+      },
+    }),
+    input
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.issues, null, 2));
+});
+
+test('typeCheckIR: placeholder bound to wrong domain rejects', () => {
+  const result = typeCheckIR(
+    irOf({
+      forall: {
+        var: 'd',
+        in: 'days',
+        body: { classSubjectAt: { class: '$$D$$', subject: 'Toán', day: 'monday', period: 1 } },
+      },
+    }),
+    input
+  );
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((i) => i.code === 'invalid_binding'));
+});
+
+test('typeCheckIR: classBusy period out of range rejects', () => {
+  const result = typeCheckIR(
+    irOf({ classBusy: { class: '6A', day: 'monday', period: 99 } }),
+    input
+  );
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((i) => i.code === 'period_out_of_range'));
+});

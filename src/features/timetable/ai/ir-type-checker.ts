@@ -60,6 +60,30 @@ export type IRTypeCheckResult = {
   softIssues: IRTypeCheckIssue[];
 };
 
+type BindingEnv = Map<string, Domain>;
+
+function addBinding(bindings: BindingEnv, varName: string, domain: Domain): BindingEnv {
+  const next = new Map(bindings);
+  next.set(varName.toLowerCase(), domain);
+  return next;
+}
+
+function placeholderBinding(value: string | number | undefined, bindings: BindingEnv): Domain | null {
+  if (typeof value !== 'string') return null;
+  const match = /^\$\$([A-Za-z][A-Za-z0-9_-]*)\$\$$/u.exec(value);
+  if (!match) return null;
+  return bindings.get(match[1].toLowerCase()) ?? null;
+}
+
+function bindingMatchesDomain(domain: Domain, expected: 'days' | 'periods' | 'classes' | 'teachers' | 'subjects'): boolean {
+  if (typeof domain === 'string') return domain === expected;
+  // A list/range binding is commonly used for period/day subsets. Treat it as
+  // valid for those scalar domains, but do not infer entity domains from it.
+  if ((expected === 'periods' || expected === 'days') && ('list' in domain || 'range' in domain)) return true;
+  if ('in' in domain) return bindingMatchesDomain(domain.in, expected);
+  return false;
+}
+
 function collectKnownEntities(input: AgentInputPayload): {
   teachers: Set<string>;
   classes: Set<string>;
@@ -88,10 +112,23 @@ function checkEntity(
   code: 'unknown_teacher' | 'unknown_class' | 'unknown_subject',
   path: string,
   issues: IRTypeCheckIssue[],
-  candidates: string[]
+  candidates: string[],
+  bindings: BindingEnv,
+  expectedDomain: 'teachers' | 'classes' | 'subjects'
 ): void {
   if (value === undefined) return;
   if (value === '__all__' || value === 'all') return;
+  const binding = placeholderBinding(value, bindings);
+  if (binding) {
+    if (bindingMatchesDomain(binding, expectedDomain)) return;
+    issues.push({
+      code: 'invalid_binding',
+      message: `Placeholder «${value}» không thuộc domain ${expectedDomain}.`,
+      path,
+      severity: 'hard',
+    });
+    return;
+  }
   if (!pool.has(value)) {
     issues.push({
       code,
@@ -103,11 +140,90 @@ function checkEntity(
   }
 }
 
+function checkDay(
+  value: string | number,
+  path: string,
+  issues: IRTypeCheckIssue[],
+  known: ReturnType<typeof collectKnownEntities>,
+  bindings: BindingEnv
+): boolean {
+  const binding = placeholderBinding(value, bindings);
+  if (binding) {
+    if (bindingMatchesDomain(binding, 'days')) return true;
+    issues.push({
+      code: 'invalid_binding',
+      message: `Placeholder «${value}» không thuộc domain days.`,
+      path,
+      severity: 'hard',
+    });
+    return false;
+  }
+  if (!known.days.has(String(value))) {
+    issues.push({
+      code: 'unknown_day',
+      message: `Không tìm thấy ngày «${value}».`,
+      path,
+      severity: 'hard',
+      candidates: [...known.days].slice(0, 5),
+    });
+    return false;
+  }
+  return true;
+}
+
+function checkPeriod(
+  period: string | number,
+  day: string | number,
+  path: string,
+  issues: IRTypeCheckIssue[],
+  known: ReturnType<typeof collectKnownEntities>,
+  bindings: BindingEnv
+): void {
+  const periodBinding = placeholderBinding(period, bindings);
+  if (periodBinding) {
+    if (bindingMatchesDomain(periodBinding, 'periods')) return;
+    issues.push({
+      code: 'invalid_binding',
+      message: `Placeholder «${period}» không thuộc domain periods.`,
+      path,
+      severity: 'hard',
+    });
+    return;
+  }
+
+  const periodNum = Number(period);
+  if (!Number.isInteger(periodNum) || periodNum < 1) {
+    issues.push({
+      code: 'period_out_of_range',
+      message: `Tiết không hợp lệ: ${period}`,
+      path,
+      severity: 'hard',
+    });
+    return;
+  }
+
+  // If the day itself is a binding placeholder, exact per-day validation is
+  // deferred until the binding is instantiated by the compiler/interpreter.
+  if (placeholderBinding(day, bindings)) return;
+
+  const dayPeriods = known.periodByDay[String(day)] ?? [];
+  if (dayPeriods.length > 0 && !dayPeriods.includes(periodNum)) {
+    issues.push({
+      code: 'period_out_of_range',
+      message: `Tiết ${period} ngoài phạm vi của ngày «${day}» (${dayPeriods.join(', ')}).`,
+      path,
+      severity: 'hard',
+      candidates: dayPeriods.map((p) => String(p)),
+    });
+  }
+}
+
 function checkIntExpr(
   expr: IntExpr,
   path: string,
   issues: IRTypeCheckIssue[],
-  known: ReturnType<typeof collectKnownEntities>
+  known: ReturnType<typeof collectKnownEntities>,
+  bindings: BindingEnv
 ): void {
   if (typeof expr === 'number') {
     if (!Number.isInteger(expr)) {
@@ -130,12 +246,12 @@ function checkIntExpr(
       });
     }
     checkDomain(expr.count.in, `${path}/count/in`, issues);
-    checkBoolExpr(expr.count.body, `${path}/count/body`, issues, known);
+    checkBoolExpr(expr.count.body, `${path}/count/body`, issues, known, addBinding(bindings, expr.count.var, expr.count.in));
     return;
   }
   if ('sum' in expr) {
     for (let i = 0; i < expr.sum.length; i += 1) {
-      checkIntExpr(expr.sum[i], `${path}/sum[${i}]`, issues, known);
+      checkIntExpr(expr.sum[i], `${path}/sum[${i}]`, issues, known, bindings);
     }
     return;
   }
@@ -148,7 +264,7 @@ function checkIntExpr(
         severity: 'hard',
       });
     }
-    checkIntExpr(expr.scale.of, `${path}/scale/of`, issues, known);
+    checkIntExpr(expr.scale.of, `${path}/scale/of`, issues, known, bindings);
     return;
   }
   issues.push({
@@ -206,38 +322,39 @@ function checkBoolExpr(
   expr: BoolExpr,
   path: string,
   issues: IRTypeCheckIssue[],
-  known: ReturnType<typeof collectKnownEntities>
+  known: ReturnType<typeof collectKnownEntities>,
+  bindings: BindingEnv = new Map()
 ): void {
   if ('and' in expr) {
-    expr.and.forEach((b, i) => checkBoolExpr(b, `${path}/and[${i}]`, issues, known));
+    expr.and.forEach((b, i) => checkBoolExpr(b, `${path}/and[${i}]`, issues, known, bindings));
     return;
   }
   if ('or' in expr) {
-    expr.or.forEach((b, i) => checkBoolExpr(b, `${path}/or[${i}]`, issues, known));
+    expr.or.forEach((b, i) => checkBoolExpr(b, `${path}/or[${i}]`, issues, known, bindings));
     return;
   }
   if ('not' in expr) {
-    checkBoolExpr(expr.not, `${path}/not`, issues, known);
+    checkBoolExpr(expr.not, `${path}/not`, issues, known, bindings);
     return;
   }
   if ('implies' in expr) {
-    checkBoolExpr(expr.implies[0], `${path}/implies[0]`, issues, known);
-    checkBoolExpr(expr.implies[1], `${path}/implies[1]`, issues, known);
+    checkBoolExpr(expr.implies[0], `${path}/implies[0]`, issues, known, bindings);
+    checkBoolExpr(expr.implies[1], `${path}/implies[1]`, issues, known, bindings);
     return;
   }
   if ('iff' in expr) {
-    checkBoolExpr(expr.iff[0], `${path}/iff[0]`, issues, known);
-    checkBoolExpr(expr.iff[1], `${path}/iff[1]`, issues, known);
+    checkBoolExpr(expr.iff[0], `${path}/iff[0]`, issues, known, bindings);
+    checkBoolExpr(expr.iff[1], `${path}/iff[1]`, issues, known, bindings);
     return;
   }
   if ('exists' in expr) {
     checkDomain(expr.exists.in, `${path}/exists/in`, issues);
-    checkBoolExpr(expr.exists.body, `${path}/exists/body`, issues, known);
+    checkBoolExpr(expr.exists.body, `${path}/exists/body`, issues, known, addBinding(bindings, expr.exists.var, expr.exists.in));
     return;
   }
   if ('forall' in expr) {
     checkDomain(expr.forall.in, `${path}/forall/in`, issues);
-    checkBoolExpr(expr.forall.body, `${path}/forall/body`, issues, known);
+    checkBoolExpr(expr.forall.body, `${path}/forall/body`, issues, known, addBinding(bindings, expr.forall.var, expr.forall.in));
     return;
   }
   if ('atLeast' in expr) {
@@ -250,7 +367,7 @@ function checkBoolExpr(
       });
     }
     checkDomain(expr.atLeast.in, `${path}/atLeast/in`, issues);
-    checkBoolExpr(expr.atLeast.body, `${path}/atLeast/body`, issues, known);
+    checkBoolExpr(expr.atLeast.body, `${path}/atLeast/body`, issues, known, addBinding(bindings, expr.atLeast.var, expr.atLeast.in));
     return;
   }
   if ('atMost' in expr) {
@@ -263,7 +380,7 @@ function checkBoolExpr(
       });
     }
     checkDomain(expr.atMost.in, `${path}/atMost/in`, issues);
-    checkBoolExpr(expr.atMost.body, `${path}/atMost/body`, issues, known);
+    checkBoolExpr(expr.atMost.body, `${path}/atMost/body`, issues, known, addBinding(bindings, expr.atMost.var, expr.atMost.in));
     return;
   }
   if ('exactly' in expr) {
@@ -276,12 +393,12 @@ function checkBoolExpr(
       });
     }
     checkDomain(expr.exactly.in, `${path}/exactly/in`, issues);
-    checkBoolExpr(expr.exactly.body, `${path}/exactly/body`, issues, known);
+    checkBoolExpr(expr.exactly.body, `${path}/exactly/body`, issues, known, addBinding(bindings, expr.exactly.var, expr.exactly.in));
     return;
   }
   if ('compare' in expr) {
-    checkIntExpr(expr.compare.lhs, `${path}/compare/lhs`, issues, known);
-    checkIntExpr(expr.compare.rhs, `${path}/compare/rhs`, issues, known);
+    checkIntExpr(expr.compare.lhs, `${path}/compare/lhs`, issues, known, bindings);
+    checkIntExpr(expr.compare.rhs, `${path}/compare/rhs`, issues, known, bindings);
     return;
   }
   if ('consecutive' in expr) {
@@ -294,7 +411,7 @@ function checkBoolExpr(
       });
     }
     checkDomain(expr.consecutive.in, `${path}/consecutive/in`, issues);
-    checkBoolExpr(expr.consecutive.body, `${path}/consecutive/body`, issues, known);
+    checkBoolExpr(expr.consecutive.body, `${path}/consecutive/body`, issues, known, addBinding(bindings, expr.consecutive.var, expr.consecutive.in));
     return;
   }
   // Phase 1.1: gap, before, after
@@ -308,78 +425,47 @@ function checkBoolExpr(
       });
     }
     checkDomain(expr.gap.in, `${path}/gap/in`, issues);
-    checkBoolExpr(expr.gap.body, `${path}/gap/body`, issues, known);
+    checkBoolExpr(expr.gap.body, `${path}/gap/body`, issues, known, addBinding(bindings, expr.gap.var, expr.gap.in));
     return;
   }
   if ('before' in expr) {
     checkDomain(expr.before.in, `${path}/before/in`, issues);
-    checkBoolExpr(expr.before.first, `${path}/before/first`, issues, known);
-    checkBoolExpr(expr.before.second, `${path}/before/second`, issues, known);
+    checkBoolExpr(expr.before.first, `${path}/before/first`, issues, known, addBinding(bindings, expr.before.var, expr.before.in));
+    checkBoolExpr(expr.before.second, `${path}/before/second`, issues, known, addBinding(bindings, expr.before.var, expr.before.in));
     return;
   }
   if ('after' in expr) {
     checkDomain(expr.after.in, `${path}/after/in`, issues);
-    checkBoolExpr(expr.after.first, `${path}/after/first`, issues, known);
-    checkBoolExpr(expr.after.second, `${path}/after/second`, issues, known);
+    checkBoolExpr(expr.after.first, `${path}/after/first`, issues, known, addBinding(bindings, expr.after.var, expr.after.in));
+    checkBoolExpr(expr.after.second, `${path}/after/second`, issues, known, addBinding(bindings, expr.after.var, expr.after.in));
     return;
   }
   // Atom
   if ('teaches' in expr) {
     const t = expr.teaches;
-    checkEntity(t.teacher, known.teachers, 'unknown_teacher', `${path}/teaches/teacher`, issues, [...known.teachers]);
-    if (!known.days.has(String(t.day))) {
-      issues.push({
-        code: 'unknown_day',
-        message: `Không tìm thấy ngày «${t.day}».`,
-        path: `${path}/teaches/day`,
-        severity: 'hard',
-        candidates: [...known.days].slice(0, 5),
-      });
-    }
-    const dayPeriods = known.periodByDay[String(t.day)] ?? [];
-    const periodNum = Number(t.period);
-    if (dayPeriods.length > 0 && (periodNum < 1 || periodNum > dayPeriods.length)) {
-      issues.push({
-        code: 'period_out_of_range',
-        message: `Tiết ${t.period} ngoài phạm vi của ngày «${t.day}» (1–${dayPeriods.length}).`,
-        path: `${path}/teaches/period`,
-        severity: 'hard',
-        candidates: dayPeriods.map((p) => String(p)),
-      });
-    }
+    checkEntity(t.teacher, known.teachers, 'unknown_teacher', `${path}/teaches/teacher`, issues, [...known.teachers], bindings, 'teachers');
+    checkDay(t.day, `${path}/teaches/day`, issues, known, bindings);
+    checkPeriod(t.period, t.day, `${path}/teaches/period`, issues, known, bindings);
     return;
   }
   if ('teachesOnDay' in expr) {
-    checkEntity(expr.teachesOnDay.teacher, known.teachers, 'unknown_teacher', `${path}/teachesOnDay/teacher`, issues, [...known.teachers]);
-    if (!known.days.has(String(expr.teachesOnDay.day))) {
-      issues.push({
-        code: 'unknown_day',
-        message: `Không tìm thấy ngày «${expr.teachesOnDay.day}».`,
-        path: `${path}/teachesOnDay/day`,
-        severity: 'hard',
-        candidates: [...known.days].slice(0, 5),
-      });
-    }
+    checkEntity(expr.teachesOnDay.teacher, known.teachers, 'unknown_teacher', `${path}/teachesOnDay/teacher`, issues, [...known.teachers], bindings, 'teachers');
+    checkDay(expr.teachesOnDay.day, `${path}/teachesOnDay/day`, issues, known, bindings);
     return;
   }
   if ('classSubjectAt' in expr) {
     const a = expr.classSubjectAt;
-    checkEntity(a.class, known.classes, 'unknown_class', `${path}/classSubjectAt/class`, issues, [...known.classes]);
-    checkEntity(a.subject, known.subjects, 'unknown_subject', `${path}/classSubjectAt/subject`, issues, [...known.subjects]);
-    if (!known.days.has(String(a.day))) {
-      issues.push({
-        code: 'unknown_day',
-        message: `Không tìm thấy ngày «${a.day}».`,
-        path: `${path}/classSubjectAt/day`,
-        severity: 'hard',
-        candidates: [...known.days].slice(0, 5),
-      });
-    }
+    checkEntity(a.class, known.classes, 'unknown_class', `${path}/classSubjectAt/class`, issues, [...known.classes], bindings, 'classes');
+    checkEntity(a.subject, known.subjects, 'unknown_subject', `${path}/classSubjectAt/subject`, issues, [...known.subjects], bindings, 'subjects');
+    checkDay(a.day, `${path}/classSubjectAt/day`, issues, known, bindings);
+    checkPeriod(a.period, a.day, `${path}/classSubjectAt/period`, issues, known, bindings);
     return;
   }
   if ('classBusy' in expr) {
     const a = expr.classBusy;
-    checkEntity(a.class, known.classes, 'unknown_class', `${path}/classBusy/class`, issues, [...known.classes]);
+    checkEntity(a.class, known.classes, 'unknown_class', `${path}/classBusy/class`, issues, [...known.classes], bindings, 'classes');
+    checkDay(a.day, `${path}/classBusy/day`, issues, known, bindings);
+    checkPeriod(a.period, a.day, `${path}/classBusy/period`, issues, known, bindings);
     return;
   }
   if ('assigned' in expr) {
@@ -397,13 +483,13 @@ function checkBoolExpr(
       });
     }
     if (expr.session.teacher) {
-      checkEntity(expr.session.teacher, known.teachers, 'unknown_teacher', `${path}/session/teacher`, issues, [...known.teachers]);
+      checkEntity(expr.session.teacher, known.teachers, 'unknown_teacher', `${path}/session/teacher`, issues, [...known.teachers], bindings, 'teachers');
     }
     if (expr.session.class) {
-      checkEntity(expr.session.class, known.classes, 'unknown_class', `${path}/session/class`, issues, [...known.classes]);
+      checkEntity(expr.session.class, known.classes, 'unknown_class', `${path}/session/class`, issues, [...known.classes], bindings, 'classes');
     }
     if (expr.session.subject) {
-      checkEntity(expr.session.subject, known.subjects, 'unknown_subject', `${path}/session/subject`, issues, [...known.subjects]);
+      checkEntity(expr.session.subject, known.subjects, 'unknown_subject', `${path}/session/subject`, issues, [...known.subjects], bindings, 'subjects');
     }
     return;
   }

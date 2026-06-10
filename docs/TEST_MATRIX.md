@@ -19,7 +19,7 @@ implemented until tests or validation evidence exist.
 
 | Story | Contract | Unit | Integration | E2E | Platform | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TBD | Add rows when story packets are created | no | no | no | no | planned | none |
+| US-013 | IR type checker accepts valid quantifier placeholders and rejects domain mismatches | yes | yes | no | no | implemented | `npm run test:grep -- ir-type-checker`; `npm run test:grep -- kind-to-ir` |
 
 ## Evidence Rules
 
