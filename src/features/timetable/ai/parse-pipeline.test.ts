@@ -9,6 +9,7 @@ import { buildSlotFillPrompt, SMALL_SYSTEM_PROMPT, buildSlotFillUserMessage } fr
 import { retrieveTopK, type ConstraintResolverHints } from './constraint-retriever';
 import { resolveConstraintHints } from './constraint-resolver';
 import { runParsePipeline } from './parse-pipeline';
+import { getDefaultShadowLogger, resetDefaultShadowLogger } from './shadow-mode';
 import type { AgentInputPayload, AIProviderConfig } from './types';
 
 function makeHints(overrides: Partial<ConstraintResolverHints> = {}): ConstraintResolverHints {
@@ -195,4 +196,26 @@ test('runParsePipeline handles if-then', async () => {
   // if-then → scope = global
   assert.equal(result.hints.inferredScope, 'global');
   assert.equal(result.hints.mentionsIfThen, true);
+});
+
+test('runParsePipeline logs IR-first shadow divergence without changing legacy result', async () => {
+  resetDefaultShadowLogger();
+  const result = await runParsePipeline({
+    rawText: 'Thủy phải có tiết 4',
+    agentInput: {
+      ...baseInput,
+      assignments: [
+        { id: 'a1', teacher: { id: 't1', label: 'Thủy' }, subject: { id: 's1', label: 'Toán' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 4 },
+      ],
+    },
+    config: provider,
+  });
+
+  assert.equal(result.status, 'needs_clarification');
+  const entries = getDefaultShadowLogger().getEntries();
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].new?.specs[0].kind, 'teacher_required_period');
+  assert.equal(entries[0].divergence, 'clarification_diff');
+  assert.ok(result.diagnostics.some((d) => d.message === 'shadow=clarification_diff'));
+  resetDefaultShadowLogger();
 });

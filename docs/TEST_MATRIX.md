@@ -23,6 +23,7 @@ implemented until tests or validation evidence exist.
 | US-014 | IR Humanizer V2 renders supported Phase 1.1 shapes as deterministic Vietnamese | yes | yes | no | no | implemented | `npm run test:grep -- ir-humanizer-v2` |
 | US-015 | Reparse candidates with custom IR are schema- and semantic-validated before confirmation | yes | yes | no | no | implemented | `npm run test:grep -- reparse-candidate-validator` |
 | US-016 | IR-first Tier-1 parser preserves canonical IR and legacy comparison params for common patterns | yes | yes | no | no | implemented | `npm run test:grep -- ir-first-parser` |
+| US-017 | Parse pipeline logs IR-first shadow divergence without changing legacy output | yes | yes | no | no | implemented | `npm run test:grep -- parse-pipeline` |
 
 ## Evidence Rules
 

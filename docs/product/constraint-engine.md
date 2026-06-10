@@ -29,6 +29,15 @@ The IR-first Tier-1 parser is a deterministic shadow-mode parser for common Viet
 - underspecified disambiguation matches ask for clarification instead of guessing;
 - unrelated text escalates to Tier-2 semantic parsing.
 
+## Shadow-Mode Parse Pipeline
+
+The IR-first parser runs in shadow mode inside the parse pipeline:
+
+- legacy parse output remains authoritative and user-visible;
+- IR-first output is compared with legacy output via the divergence classifier;
+- divergence is logged to the default shadow logger and added to diagnostics;
+- shadow logging must never flip parser authority before the Phase 4 rollout gate.
+
 ## Reparse IR Validation
 
 The AI reparse loop may return `custom_dsl.params.expr` as structured IR. That IR is not trusted by shape alone:

@@ -25,6 +25,8 @@ import type { AgentInputPayload, AIProviderConfig } from './types';
 import type { ConstraintSpec, ConstraintKind } from './constraint-spec';
 import type { BuiltInConstraintScope } from './constraint-registry';
 import { invokeAnalyzeChat } from './analyze-constraint-service';
+import { parseIRFirstWithGuard } from './ir-first-parser';
+import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
 
 export type ParsePipelineInput = {
   rawText: string;
@@ -231,6 +233,27 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
     message: `score=${backTranslation.score.toFixed(2)} needsConfirm=${requiresConfirmation}`,
   });
   diagnostics.push({ stage: 'done', message: `status=${specs.length > 0 ? 'mapped' : 'unmapped'}` });
+
+  const legacyStatus = specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'semantic_only' : 'mapped_builtin') : 'needs_clarification';
+  const irFirstResult = parseIRFirstWithGuard(rawText, hints);
+  const shadowNew = irFirstResult.kind === 'ir'
+    ? { specs: [irFirstResult.spec], status: 'mapped_builtin' as const }
+    : irFirstResult.kind === 'needs_clarification'
+      ? { specs: [], status: 'needs_clarification' as const }
+      : undefined;
+  const shadowLegacy = {
+    specs,
+    status: legacyStatus as 'mapped_builtin' | 'semantic_only' | 'needs_clarification' | 'unsupported',
+  };
+  const divergence = classifyDivergence(rawText, shadowLegacy, shadowNew);
+  getDefaultShadowLogger().log({
+    rawText,
+    legacy: shadowLegacy,
+    new: shadowNew,
+    divergence: divergence.divergence,
+    explanation: divergence.explanation,
+  });
+  diagnostics.push({ stage: 'done', message: `shadow=${divergence.divergence}` });
 
   return {
     status: specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin') : 'needs_clarification',
