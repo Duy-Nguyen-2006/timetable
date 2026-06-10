@@ -70,6 +70,15 @@ function extractPeriod(rawText: string, normalized: string): number | null {
   return null;
 }
 
+function extractPeriods(normalized: string): number[] {
+  const periods: number[] = [];
+  const periodMatches = normalized.matchAll(/tiet\s+(\d+)/gu);
+  for (const m of periodMatches) {
+    periods.push(Number(m[1]));
+  }
+  return periods;
+}
+
 function buildIR(args: {
   id: string;
   original: string;
@@ -235,11 +244,7 @@ function tryParseOnlyTeacher(
   if (!d004 || d004.direction !== 'positive') return null;
   if (hints.inferredScope && hints.inferredScope !== 'teacher') return null;
   // Allowed: "chỉ dạy tiết 4" or "chỉ dạy các tiết 2, 3, 4"
-  const periods: number[] = [];
-  const periodMatches = normalized.matchAll(/tiet\s+(\d+)/gu);
-  for (const m of periodMatches) {
-    periods.push(Number(m[1]));
-  }
+  const periods = extractPeriods(normalized);
   if (periods.length === 0) return null;
   return buildIR({
     id: 'ir_first_teacher_allowed_periods',
@@ -327,7 +332,7 @@ export function parseIRFirst(
     if (blockIr) return { kind: 'ir', ir: blockIr, spec: specFromIR(blockIr, 'teacher_block_period', { teacher, period: extractPeriod(rawText, normalized) ?? 0 }) };
 
     const onlyIr = tryParseOnlyTeacher(rawText, normalized, teacher, hints);
-    if (onlyIr) return { kind: 'ir', ir: onlyIr, spec: specFromIR(onlyIr, 'teacher_allowed_periods', { teacher, periods: [] }) };
+    if (onlyIr) return { kind: 'ir', ir: onlyIr, spec: specFromIR(onlyIr, 'teacher_allowed_periods', { teacher, periods: extractPeriods(normalized) }) };
 
     const maxIr = tryParseMaxPerDayTeacher(rawText, normalized, teacher, hints);
     if (maxIr) return { kind: 'ir', ir: maxIr, spec: specFromIR(maxIr, 'teacher_max_per_day', { teacher, maxPerDay: hints.extractedNumber ?? 0 }) };

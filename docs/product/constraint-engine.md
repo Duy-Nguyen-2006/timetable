@@ -20,6 +20,15 @@ The TypeScript IR type checker validates a `ConstraintIR` against `AgentInputPay
 - `classBusy` and `classSubjectAt` atoms are checked with the same day/period rules as `teaches` atoms;
 - `atLeast`, `atMost`, `exactly`, `exists`, `forall`, `count`, `consecutive`, `gap`, `before`, and `after` propagate quantifier bindings into nested expressions.
 
+## IR-First Tier-1 Parser
+
+The IR-first Tier-1 parser is a deterministic shadow-mode parser for common Vietnamese constraint patterns:
+
+- clear require phrases such as `phải có tiết 4` produce positive `atLeast` IR;
+- clear only phrases such as `chỉ dạy tiết 2 tiết 4` preserve the extracted allowed periods in the legacy comparison spec;
+- underspecified disambiguation matches ask for clarification instead of guessing;
+- unrelated text escalates to Tier-2 semantic parsing.
+
 ## Reparse IR Validation
 
 The AI reparse loop may return `custom_dsl.params.expr` as structured IR. That IR is not trusted by shape alone:
