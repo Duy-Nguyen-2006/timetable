@@ -41,7 +41,11 @@ export function getDeterministicEligibility(
   const hardSpecs = specs.filter((spec) => spec.severity === 'hard');
 
   const hardCustomSpecs = hardSpecs.filter(
-    (spec) => spec.kind === 'custom_dsl'
+    (spec) => {
+      if (spec.kind !== 'custom_dsl') return false;
+      const params = spec.params ?? {};
+      return !(params.expr && typeof params.expr === 'object') && typeof params.pythonPredicate !== 'string' && !spec.pythonPredicate;
+    }
   );
 
   const unsupportedHardSpecs = hardSpecs.filter(
@@ -69,7 +73,7 @@ export function getDeterministicEligibility(
 
   if (hardCustomSpecs.length > 0) {
     parts.push(
-      `${hardCustomSpecs.length} ràng buộc custom_dsl hard chưa được hỗ trợ ở deterministic solver`
+      `${hardCustomSpecs.length} ràng buộc custom_dsl hard chưa có IR expr/pythonPredicate để solver deterministic kiểm tra`
     );
   }
 

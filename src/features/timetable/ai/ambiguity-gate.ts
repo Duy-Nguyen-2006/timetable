@@ -60,8 +60,21 @@ export function evaluateAmbiguity(
     return { status: 'unambiguous', winner: top, runnerUp: null, delta: Number.POSITIVE_INFINITY };
   }
   if (runnerUp) {
-    // We can't compare lexical scores here without a custom hook.
-    // We treat "two teacher-scope block candidates" as ambiguous to be safe.
+    const topScore = typeof top.score === 'number' ? top.score : null;
+    const runnerScore = typeof runnerUp.score === 'number' ? runnerUp.score : null;
+    if (topScore !== null && runnerScore !== null) {
+      const delta = topScore - runnerScore;
+      if (topScore < AMBIGUITY_FLOOR || delta < AMBIGUITY_DELTA) {
+        return {
+          status: 'ambiguous',
+          options: candidates.slice(0, AMBIGUITY_TOPK_OPTIONS),
+          delta,
+          reason: `Điểm ứng viên chưa đủ tách biệt: ${top.kind}=${topScore.toFixed(2)}, ${runnerUp.kind}=${runnerScore.toFixed(2)}.`,
+        };
+      }
+      return { status: 'unambiguous', winner: top, runnerUp, delta };
+    }
+
     const sameKindFamily = isSameKindFamily(top.kind, runnerUp.kind);
     return sameKindFamily
       ? {

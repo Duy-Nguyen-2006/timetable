@@ -143,7 +143,8 @@ function extractText(payload: unknown): string {
 
 export async function invokeAnalyzeChat(
   config: AIProviderConfig,
-  messages: AnalyzeChatMessage[]
+  messages: AnalyzeChatMessage[],
+  options?: { jsonSchema?: Record<string, unknown>; schemaName?: string }
 ): Promise<{ content?: string; usage?: { total_tokens?: number } }> {
   const baseURL = normalizeBaseURL((config.baseURL || 'https://openrouter.ai/api/v1').trim());
   const model = (config.model || 'anthropic/claude-3.5-sonnet').trim();

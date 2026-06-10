@@ -27,6 +27,8 @@ import { normalizeConstraintText } from './translator-text';
 export type ConstraintRetrieverCandidate = {
   kind: ConstraintKind;
   scope: BuiltInConstraintScope;
+  /** Combined lexical/embedding score used by the ambiguity gate. */
+  score?: number;
   /** Precomputed embedding vector (384-dim). null = purely lexical kind. */
   embedding: number[] | null;
   /** Regex patterns that trigger this kind (lexical fast-path). */
@@ -1337,9 +1339,10 @@ export function retrieveTopK(
 
   // Sort by score desc, then return top-k
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, k).map(({ entry }) => ({
+  return scored.slice(0, k).map(({ entry, score }) => ({
     kind: entry.kind,
     scope: entry.scope,
+    score,
     embedding: entry.embedding,
     triggers: entry.triggers,
     synonyms: entry.synonyms,
@@ -1441,10 +1444,12 @@ export function retrieveTopKWithEmbedding(
   return scored.slice(0, k).map((c) => ({
     kind: c.entry.kind,
     scope: c.entry.scope,
+    score: c.score,
     embedding: c.entry.embedding,
     triggers: c.entry.triggers,
     synonyms: c.entry.synonyms,
     fewShots: c.entry.fewShots,
+    negativeFewShots: c.entry.negativeFewShots,
     requiredParams: c.entry.requiredParams,
   }));
 }

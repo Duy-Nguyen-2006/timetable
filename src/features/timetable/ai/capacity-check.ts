@@ -41,13 +41,19 @@ export type CapacityCheckResult = {
   };
 };
 
+function periodCountForSession(input: AgentInputPayload, sessionId: string): number {
+  const direct = input.periodCounts[sessionId];
+  if (Number.isFinite(direct)) return direct;
+  const fallback = Object.values(input.periodCounts).filter((value) => Number.isFinite(value));
+  return fallback.length > 0 ? Math.max(...fallback) : 0;
+}
+
 /** Compute the total number of slots available per day/session. */
 function computeAvailableSlots(input: AgentInputPayload): number {
   let total = 0;
   for (const day of input.days) {
     for (const session of input.sessions) {
-      const count = input.periodCounts[session.id] ?? 0;
-      total += count;
+      total += periodCountForSession(input, session.id);
     }
   }
   return total;
@@ -69,7 +75,7 @@ function computeTeacherAvailableSlots(
       blockedSlots += 1; // specific slot
     } else if (day) {
       // Block entire day
-      const daySession = input.sessions.reduce((s, sess) => s + (input.periodCounts[sess.id] ?? 0), 0);
+      const daySession = input.sessions.reduce((s, sess) => s + periodCountForSession(input, sess.id), 0);
       blockedSlots += daySession;
     } else if (period) {
       // Block a specific period across all days
@@ -93,7 +99,7 @@ function computeClassAvailableSlots(
     if (day && period) {
       blockedSlots += 1;
     } else if (day) {
-      const daySession = input.sessions.reduce((s, sess) => s + (input.periodCounts[sess.id] ?? 0), 0);
+      const daySession = input.sessions.reduce((s, sess) => s + periodCountForSession(input, sess.id), 0);
       blockedSlots += daySession;
     } else if (period) {
       blockedSlots += input.days.length;
@@ -183,7 +189,7 @@ export function runPreSolveCapacityCheck(
       }
     }
     for (const [day, blocked] of dayBlockCounts.entries()) {
-      const dailySlots = input.sessions.reduce((s, sess) => s + (input.periodCounts[sess.id] ?? 0), 0);
+      const dailySlots = input.sessions.reduce((s, sess) => s + periodCountForSession(input, sess.id), 0);
       if (blocked > dailySlots) {
         problems.push({
           severity: 'warning',
