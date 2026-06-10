@@ -13,9 +13,33 @@ import assert from 'node:assert/strict';
 import { specToIR, specsToIR } from './kind-to-ir';
 import { validateIR } from './constraint-ir';
 import type { ConstraintSpec } from './constraint-spec';
+import { typeCheckIR } from './ir-type-checker';
+import type { AgentInputPayload } from './types';
 
 function spec(kind: ConstraintSpec['kind'], params: Record<string, unknown>, id = 't1'): ConstraintSpec {
   return { id, original: 'test', severity: 'hard', kind, params };
+}
+
+const input: AgentInputPayload = {
+  days: [
+    { id: 'monday', label: 'Thứ 2' },
+    { id: 'tuesday', label: 'Thứ 3' },
+  ],
+  sessions: [{ id: 'morning', label: 'Sáng' }],
+  periodCounts: { morning: 5 },
+  deletedPeriods: {},
+  assignments: [
+    { id: 'a1', teacher: { id: 't1', label: 'Thủy' }, subject: { id: 's1', label: 'Toán' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 4 },
+    { id: 'a2', teacher: { id: 't2', label: 'Sơn' }, subject: { id: 's2', label: 'Văn' }, class: { id: 'c2', label: '6B' }, weeklyPeriods: 4 },
+  ],
+  constraints: [],
+};
+
+function assertSchemaAndTypeValid(ir: NonNullable<ReturnType<typeof specToIR>>): void {
+  const shapeIssues = validateIR(ir);
+  assert.equal(shapeIssues.length, 0, `IR has schema issues: ${JSON.stringify(shapeIssues)}`);
+  const typeResult = typeCheckIR(ir, input);
+  assert.equal(typeResult.ok, true, `IR has type issues: ${JSON.stringify(typeResult.issues, null, 2)}`);
 }
 
 test('specToIR: teacher_required_period -> atLeast with teaches body', () => {
@@ -99,4 +123,30 @@ test('specToIR: require-family IRs are schema-valid (zod)', () => {
     const issues = validateIR(ir);
     assert.equal(issues.length, 0, `${s.kind} produced invalid IR: ${JSON.stringify(issues)}`);
   }
+});
+
+test('specToIR: adapted IR is semantic-valid for known AgentInput', () => {
+  const specs: ConstraintSpec[] = [
+    spec('teacher_required_period', { teacher: 'Thủy', period: 4, minCount: 1 }, 'teacher-required'),
+    spec('class_required_period', { class: '6A', period: 1, minCount: 1 }, 'class-required'),
+    spec('subject_required_period', { subject: 'Toán', period: 1, minCount: 2 }, 'subject-required'),
+    spec('teacher_block_period', { teacher: 'Thủy', period: 4 }, 'teacher-block'),
+    spec('class_block_period', { class: '6A', period: 1 }, 'class-block'),
+    spec('teacher_max_per_day', { teacher: 'Thủy', maxPerDay: 3 }, 'teacher-max'),
+    spec('teacher_min_per_day', { teacher: 'Thủy', minPerDay: 1 }, 'teacher-min'),
+  ];
+
+  for (const s of specs) {
+    const ir = specToIR(s);
+    assert.ok(ir, `expected IR for ${s.kind}`);
+    assertSchemaAndTypeValid(ir);
+  }
+});
+
+test('specToIR: semantic type checker rejects adapted IR with unknown entity', () => {
+  const ir = specToIR(spec('teacher_required_period', { teacher: 'Ghost', period: 4, minCount: 1 }));
+  assert.ok(ir);
+  const result = typeCheckIR(ir, input);
+  assert.equal(result.ok, false);
+  assert.ok(result.issues.some((i) => i.code === 'unknown_teacher'));
 });

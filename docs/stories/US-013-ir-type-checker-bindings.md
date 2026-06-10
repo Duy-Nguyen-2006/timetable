@@ -25,6 +25,7 @@ Constraint IR semantic validation must understand quantifier placeholders emitte
 - `$$C$$` or equivalent placeholders bound by an enclosing `classes` quantifier are accepted in class fields.
 - Placeholders used in the wrong domain are rejected with an `invalid_binding` issue.
 - `classBusy` and `classSubjectAt` validate concrete day/period ranges, not only entity existence.
+- Kind-to-IR adapter outputs are checked for semantic validity against representative `AgentInputPayload` fixtures.
 - Existing Phase 0 frozen and golden constraint tests keep passing.
 
 ## Design Notes
@@ -59,9 +60,9 @@ The required `scripts/bin/harness-cli query matrix` command could not run becaus
 ## Evidence
 
 - `npm run test:grep -- ir-type-checker`: passed 17 tests.
-- `npm run test:grep -- kind-to-ir`: passed 8 tests.
-- `npm test`: passed 540 tests.
+- `npm run test:grep -- kind-to-ir`: passed 10 tests, including semantic type-checking of representative adapter outputs.
+- `npm test`: passed 544 tests.
 - `npm run build`: passed.
 - `npm run lint`: passed.
-- `npx gitnexus analyze`: repository indexed successfully (6,142 nodes, 10,210 edges, 300 flows).
-- `gitnexus_detect_changes(scope=all, repo=timetable)`: medium risk; affected flows limited to `TypeCheckIR → CheckDomain` and `TypeCheckIR → AddBinding`.
+- `npx gitnexus analyze`: repository indexed successfully (6,166 nodes, 10,241 edges, 300 flows).
+- `gitnexus_detect_changes(scope=all, repo=timetable)`: low risk for the adapter proof slice; no affected execution processes.
