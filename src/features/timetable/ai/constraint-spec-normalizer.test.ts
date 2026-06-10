@@ -6,12 +6,10 @@ import type { AgentInputPayload } from './types';
 import type { ConstraintSpec } from './constraint-spec';
 
 const input: AgentInputPayload = {
-  classes: [],
-  teachers: [],
-  subjects: [],
   days: [{ id: 'mon', label: 'Thứ 2' }],
   sessions: [],
   periodCounts: {},
+  deletedPeriods: {},
   assignments: [
     {
       id: 'a1',
