@@ -30,7 +30,7 @@ export async function executeGeneratedCode(
   // In production this will be an IPC call to the main process
   // which actually spawns the bundled binary.
   if (typeof window !== 'undefined' && window.electron?.python?.executeCode) {
-    return window.electron.python.executeCode(code, input, timeout, options.solverWorkers, options.solverSeed);
+    return window.electron.python.executeCode(code, input, timeout, options.solverWorkers);
   }
 
   // Web fallback: call server-side executor route.

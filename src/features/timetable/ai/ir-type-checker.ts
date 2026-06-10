@@ -106,7 +106,8 @@ function checkEntity(
 function checkIntExpr(
   expr: IntExpr,
   path: string,
-  issues: IRTypeCheckIssue[]
+  issues: IRTypeCheckIssue[],
+  known: ReturnType<typeof collectKnownEntities>
 ): void {
   if (typeof expr === 'number') {
     if (!Number.isInteger(expr)) {
@@ -129,12 +130,12 @@ function checkIntExpr(
       });
     }
     checkDomain(expr.count.in, `${path}/count/in`, issues);
-    checkBoolExpr(expr.count.body, `${path}/count/body`, issues);
+    checkBoolExpr(expr.count.body, `${path}/count/body`, issues, known);
     return;
   }
   if ('sum' in expr) {
     for (let i = 0; i < expr.sum.length; i += 1) {
-      checkIntExpr(expr.sum[i], `${path}/sum[${i}]`, issues);
+      checkIntExpr(expr.sum[i], `${path}/sum[${i}]`, issues, known);
     }
     return;
   }
@@ -147,7 +148,7 @@ function checkIntExpr(
         severity: 'hard',
       });
     }
-    checkIntExpr(expr.scale.of, `${path}/scale/of`, issues);
+    checkIntExpr(expr.scale.of, `${path}/scale/of`, issues, known);
     return;
   }
   issues.push({
@@ -279,8 +280,8 @@ function checkBoolExpr(
     return;
   }
   if ('compare' in expr) {
-    checkIntExpr(expr.compare.lhs, `${path}/compare/lhs`, issues);
-    checkIntExpr(expr.compare.rhs, `${path}/compare/rhs`, issues);
+    checkIntExpr(expr.compare.lhs, `${path}/compare/lhs`, issues, known);
+    checkIntExpr(expr.compare.rhs, `${path}/compare/rhs`, issues, known);
     return;
   }
   if ('consecutive' in expr) {

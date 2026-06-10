@@ -105,7 +105,7 @@ function isForallDaysCompareCount(
   forall: {
     var: string;
     in: Domain;
-    body: { compare: { op: string; lhs: { count: { var: string; in: Domain; body: BoolExpr } }; rhs: number } };
+    body: { compare: { op: '<=' | '<' | '==' | '!=' | '>=' | '>'; lhs: { count: { var: string; in: Domain; body: BoolExpr } }; rhs: number } };
   };
 } {
   if (!('forall' in e)) return false;

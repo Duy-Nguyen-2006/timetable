@@ -58,9 +58,6 @@ export function buildSlotFillUserMessage(
   if (hints.inferredScope) {
     lines.push(`- scope gợi ý: ${hints.inferredScope}`);
   }
-  if (hints.ambiguousEntity) {
-    lines.push(`- CẢNH BÁO: ${hints.ambiguousEntity.kind} bị mơ hồ giữa ${hints.ambiguousEntity.candidates.join(', ')} → trả needs_clarification.`);
-  }
   lines.push(`- keywords: ${[
     hints.mentionsBlock ? 'block' : '',
     hints.mentionsMax ? 'max' : '',
