@@ -276,6 +276,11 @@ export const BUILT_IN_CONSTRAINT_KINDS = new Set<Exclude<ConstraintKind, 'custom
   BUILT_IN_CONSTRAINT_DEFINITIONS.map((definition) => definition.kind)
 );
 
+// M1.1: Centralized built-in kind set - single source of truth
+// This prevents drift when new kinds are added to BUILT_IN_CONSTRAINT_DEFINITIONS
+// All other modules should import this instead of maintaining their own hardcoded lists
+export const BUILT_IN_KIND_SET = BUILT_IN_CONSTRAINT_KINDS;
+
 export function getConstraintMeta(kind: ConstraintKind): ConstraintMeta | undefined {
   return CONSTRAINT_REGISTRY.find((m) => m.kind === kind);
 }

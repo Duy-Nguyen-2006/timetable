@@ -21,6 +21,7 @@
 import type { BuiltInConstraintScope, ConstraintKind } from './constraint-registry';
 import { BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
 import { normalizeConstraintText } from './translator-text';
+import { analyzeSemanticDirection } from './semantic-direction';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -133,8 +134,69 @@ const CATALOG: CatalogEntry[] = [
       { text: 'Thầy Sơn không dạy tiết 1.', params: { teacher: 'Sơn', period: 1 } },
       { text: 'Cô Thúy đi muộn tiết đầu.', params: { teacher: 'Thúy', period: 1 } },
     ],
-    negativeFewShots: [],
+    negativeFewShots: [
+      { text: 'Thầy Sơn phải có tiết 1', actuallyMapsTo: 'teacher_required_period', reason: '"Phải có" là bắt buộc at-least, không phải block' },
+      { text: 'Thầy Sơn chỉ dạy tiết 1', actuallyMapsTo: 'teacher_allowed_periods', reason: '"Chỉ dạy" là allowed-only, không phải block' },
+    ],
     requiredParams: ['teacher', 'period'],
+    embedding: e(null),
+  },
+  {
+    kind: 'teacher_required_period',
+    scope: SCOPE.teacher,
+    triggers: [
+      // Core "phải có" family — must NOT match "không dạy" or "chỉ dạy".
+      /ph[ảa]i\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      /ph[ảa]i\s+d[ạa]y\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      /ph[ảa]i\s+đ[ượu][ợo]c\s+(x[ếe]p\s+)?(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      // "cần có" / "cần dạy"
+      /c[ầa]n\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      /c[ầa]n\s+d[ạa]y\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      // "ít nhất N tiết" / "tối thiểu N tiết"
+      /[íi]t\s+nh[ấa]t\s+\d+\s+ti[êe]?t\s*\d+/iu,
+      /t[ốo]i\s+thi[ểe]u\s+\d+\s+ti[êe]?t\s*\d+/iu,
+      // "bắt buộc có/dạy"
+      /b[ắa]t\s+bu[ộo]c\s+(c[óo]|d[ạa]y)\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      // Subject prefix: "thầy X phải có" / "cô X phải có"
+      /(th[ầa]y|c[ôo])\s+\S+\s+ph[ảa]i\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t\s*\d+/iu,
+      /(th[ầa]y|c[ôo])\s+\S+\s+c[ầa]n\s+c[óo]\s+ti[êe]?t/iu,
+      /(th[ầa]y|c[ôo])\s+\S+\s+b[ắa]t\s+bu[ộo]c\s+(c[óo]|d[ạa]y)\s+ti[êe]?t/iu,
+      // Generic "có tiết N" (when context is require)
+      /ph[ảa]i\s+c[óo]\s+m[ộo]t\s+ti[êe]?t\s*\d+/iu,
+      // "nhất định phải" idiom
+      /nh[ấa]t\s+đ[ịi]nh\s+ph[ảa]i\s+(c[óo]|d[ạa]y)\s+ti[êe]?t/iu,
+    ],
+    synonyms: [
+      'phải có tiết',
+      'cần có tiết',
+      'cần dạy tiết',
+      'ít nhất một tiết',
+      'bắt buộc có tiết',
+      'bắt buộc dạy tiết',
+      'phải dạy tiết',
+      'phải được xếp tiết',
+      'tối thiểu tiết',
+      'nhất định phải có tiết',
+    ],
+    fewShots: [
+      { text: 'Cô Thủy phải có tiết 4', params: { teacher: 'Thủy', period: 4, minCount: 1 } },
+      { text: 'Thầy Sơn cần có tiết 1', params: { teacher: 'Sơn', period: 1, minCount: 1 } },
+      { text: 'Cô Thủy có ít nhất 1 tiết 4 trong tuần', params: { teacher: 'Thủy', period: 4, minCount: 1 } },
+      { text: 'Bắt buộc cô Thủy có tiết 4', params: { teacher: 'Thủy', period: 4, minCount: 1 } },
+      { text: 'Cô Thủy phải được xếp ít nhất một tiết 4', params: { teacher: 'Thủy', period: 4, minCount: 1 } },
+      { text: 'Cô Hương tối thiểu 2 tiết 5 trong tuần', params: { teacher: 'Hương', period: 5, minCount: 2 } },
+    ],
+    negativeFewShots: [
+      { text: 'Cô Thủy không dạy tiết 4', actuallyMapsTo: 'teacher_block_period', reason: '"Không dạy" là block/cấm, không phải require' },
+      { text: 'Cô Thủy nghỉ tiết 4', actuallyMapsTo: 'teacher_block_period', reason: '"Nghỉ" là block, không phải at-least require' },
+      { text: 'Cô Thủy chỉ dạy tiết 4', actuallyMapsTo: 'teacher_allowed_periods', reason: '"Chỉ dạy" là allowed-only (whitelist), không phải at-least' },
+      { text: 'Cô Thủy chỉ được dạy tiết 4', actuallyMapsTo: 'teacher_allowed_periods', reason: '"Chỉ được dạy" là whitelist, không phải at-least' },
+      { text: 'Cô Thủy nên dạy tiết 4', actuallyMapsTo: 'teacher_preferred_periods', reason: '"Nên" là preference/soft, không phải hard require' },
+      { text: 'Cô Thủy ưu tiên tiết 4', actuallyMapsTo: 'teacher_preferred_periods', reason: '"Ưu tiên" là preference/soft, không phải hard require' },
+      { text: 'Cô Thủy thích dạy tiết 4', actuallyMapsTo: 'teacher_preferred_periods', reason: '"Thích" là preference/soft, không phải hard require' },
+      { text: 'Cô Thủy dạy tối đa 4 tiết mỗi ngày', actuallyMapsTo: 'teacher_max_per_day', reason: '"Tối đa" là max-per-day, không phải at-least' },
+    ],
+    requiredParams: ['teacher', 'period', 'minCount'],
     embedding: e(null),
   },
   {
@@ -253,13 +315,18 @@ const CATALOG: CatalogEntry[] = [
     scope: SCOPE.teacher,
     triggers: [
       /chỉ\s+dạy\s+(tiết|các?\s+tiết)|chỉ\s+(rảnh|được)\s+tiết/iu,
-      /ưu\s*tiên\s+(tiết|các?\s+tiết)/iu,
+      /chỉ\s+được\s+dạy\s+(tiết|các?\s+tiết)/iu,
+      /(thầy|cô)\s+\S+\s+chỉ\s+dạy\s+tiết/iu,
     ],
-    synonyms: ['chỉ dạy tiết', 'chỉ rảnh tiết', 'ưu tiên tiết'],
+    synonyms: ['chỉ dạy tiết', 'chỉ rảnh tiết', 'chỉ được dạy tiết', 'whitelist tiết'],
     fewShots: [
       { text: 'Cô Thúy chỉ dạy các tiết 2, 3, 4.', params: { teacher: 'Thúy', periods: [2, 3, 4] } },
+      { text: 'Thầy Sơn chỉ được dạy tiết 4.', params: { teacher: 'Sơn', periods: [4] } },
     ],
-    negativeFewShots: [],
+    negativeFewShots: [
+      { text: 'Cô Thúy phải có tiết 4', actuallyMapsTo: 'teacher_required_period', reason: '"Phải có" là at-least require, không phải whitelist only' },
+      { text: 'Cô Thúy không dạy tiết 4', actuallyMapsTo: 'teacher_block_period', reason: '"Không dạy" là block tiết cụ thể, không phải whitelist' },
+    ],
     requiredParams: ['teacher', 'periods'],
     embedding: e(null),
   },
@@ -676,8 +743,56 @@ const CATALOG: CatalogEntry[] = [
     fewShots: [
       { text: 'Lớp 6A không học tiết 5.', params: { class: '6A', period: 5 } },
     ],
-    negativeFewShots: [],
+    negativeFewShots: [
+      { text: 'Lớp 6A phải có tiết 1', actuallyMapsTo: 'class_required_period', reason: '"Phải có" là require at-least, không phải block' },
+    ],
     requiredParams: ['class', 'period'],
+    embedding: e(null),
+  },
+  {
+    kind: 'class_required_period',
+    scope: SCOPE.class,
+    triggers: [
+      // "lớp X phải có tiết N" / "phải học"
+      /l[ớo]p\s+\S+\s+ph[ảa]i\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      /l[ớo]p\s+\S+\s+ph[ảa]i\s+h[ọo]c\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      // "lớp X cần có tiết N" / "cần học"
+      /l[ớo]p\s+\S+\s+c[ầa]n\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t\s*\d+/iu,
+      /l[ớo]p\s+\S+\s+c[ầa]n\s+h[ọo]c\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t\s*\d+/iu,
+      // "lớp X bắt buộc có/học tiết"
+      /l[ớo]p\s+\S+\s+b[ắa]t\s+bu[ộo]c\s+(c[óo]|h[ọo]c)\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t/iu,
+      // "lớp X phải được xếp tiết"
+      /l[ớo]p\s+\S+\s+ph[ảa]i\s+đ[ượu][ợo]c\s+(x[ếe]p\s+)?ti[êe]?t\s*\d+/iu,
+      // "phải có ít nhất 1 tiết N" with class-only context
+      /\d+[A-Z]\s+ph[ảa]i\s+c[óo]\s+ti[êe]?t\s*\d+/iu,
+      // "ít nhất N tiết" with class
+      /l[ớo]p\s+\S+\s+c[óo]\s+[íi]t\s+nh[ấa]t\s+\d+\s+ti[êe]?t\s*\d+/iu,
+      /l[ớo]p\s+\S+\s+t[ốo]i\s+thi[ểe]u\s+\d+\s+ti[êe]?t\s*\d+/iu,
+    ],
+    synonyms: [
+      'lớp phải có tiết',
+      'lớp cần có tiết',
+      'lớp cần học tiết',
+      'lớp bắt buộc tiết',
+      'lớp ít nhất tiết',
+      'lớp phải học tiết',
+      'phải được xếp tiết',
+    ],
+    fewShots: [
+      { text: 'Lớp 6A phải có tiết 1', params: { class: '6A', period: 1, minCount: 1 } },
+      { text: '6A cần có ít nhất 1 tiết 5 trong tuần', params: { class: '6A', period: 5, minCount: 1 } },
+      { text: 'Lớp 6B bắt buộc học tiết 2', params: { class: '6B', period: 2, minCount: 1 } },
+      { text: '7C cần tối thiểu 2 tiết 4 trong tuần', params: { class: '7C', period: 4, minCount: 2 } },
+    ],
+    negativeFewShots: [
+      { text: 'Lớp 6A không học tiết 1', actuallyMapsTo: 'class_block_period', reason: '"Không học" là block, không phải require' },
+      { text: 'Lớp 6A nghỉ tiết 1', actuallyMapsTo: 'class_block_period', reason: '"Nghỉ" là block, không phải at-least' },
+      { text: 'Lớp 6A chỉ học tiết 1', actuallyMapsTo: 'class_allowed_periods', reason: '"Chỉ học" là allowed-only whitelist, không phải at-least' },
+      { text: 'Lớp 6A chỉ được học tiết 1', actuallyMapsTo: 'class_allowed_periods', reason: '"Chỉ được học" là whitelist, không phải at-least' },
+      { text: 'Lớp 6A nên học tiết 1', actuallyMapsTo: 'class_block_period', reason: '"Nên" là preference, không hard require; nếu không có hard encoder thì rơi về block default' },
+      { text: 'Lớp 6A học tối đa 5 tiết mỗi ngày', actuallyMapsTo: 'class_max_per_day', reason: '"Tối đa" là max-per-day, không phải at-least' },
+    ],
+    requiredParams: ['class', 'period', 'minCount'],
     embedding: e(null),
   },
   {
@@ -692,6 +807,54 @@ const CATALOG: CatalogEntry[] = [
     ],
     negativeFewShots: [],
     requiredParams: ['class', 'day', 'period'],
+    embedding: e(null),
+  },
+  {
+    kind: 'subject_required_period',
+    scope: SCOPE.subject,
+    triggers: [
+      // "Môn X phải có tiết N" / "phải dạy"
+      /m[ôo]n\s+\S+\s+ph[ảa]i\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?(1\s+)?ti[êe]?t\s*\d+/iu,
+      /m[ôo]n\s+\S+\s+ph[ảa]i\s+d[ạa]y\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t\s*\d+/iu,
+      // "Môn X cần có tiết"
+      /m[ôo]n\s+\S+\s+c[ầa]n\s+c[óo]\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t\s*\d+/iu,
+      // "Môn X bắt buộc có/dạy tiết"
+      /m[ôo]n\s+\S+\s+b[ắa]t\s+bu[ộo]c\s+(c[óo]|d[ạa]y)\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t/iu,
+      // "Môn X có ít nhất N tiết Y"
+      /m[ôo]n\s+\S+\s+c[óo]\s+[íi]t\s+nh[ấa]t\s+\d+\s+ti[êe]?t\s*\d+/iu,
+      // "Môn X tối thiểu N tiết"
+      /m[ôo]n\s+\S+\s+t[ốo]i\s+thi[ểe]u\s+\d+\s+ti[êe]?t\s*\d+/iu,
+      // "Môn X phải được xếp tiết"
+      /m[ôo]n\s+\S+\s+ph[ảa]i\s+đ[ượu][ợo]c\s+(x[ếe]p\s+)?ti[êe]?t\s*\d+/iu,
+      // Bare subject with require marker (semantic direction: require)
+      /ph[ảa]i\s+c[óo]\s+m[ôo]n\s+\S+\s+(ít\s+nh[ấa]t\s+)?ti[êe]?t/iu,
+    ],
+    synonyms: [
+      'môn phải có tiết',
+      'môn cần có tiết',
+      'môn bắt buộc có tiết',
+      'môn bắt buộc dạy tiết',
+      'môn ít nhất tiết',
+      'môn phải dạy tiết',
+      'môn tối thiểu tiết',
+      'phải có môn tiết',
+    ],
+    fewShots: [
+      // Subject + class specified (deterministic case)
+      { text: 'Môn Toán lớp 6A phải có tiết 1', params: { subject: 'Toán', class: '6A', period: 1, minCount: 1 } },
+      { text: 'Môn Văn của 6B cần có ít nhất 1 tiết 4 trong tuần', params: { subject: 'Văn', class: '6B', period: 4, minCount: 1 } },
+      { text: 'Môn Toán lớp 7A bắt buộc dạy tiết 2', params: { subject: 'Toán', class: '7A', period: 2, minCount: 1 } },
+    ],
+    negativeFewShots: [
+      // Subject-only: NOT silently mapping to subject_required_period — needs clarification
+      { text: 'Môn Toán phải có tiết 4', actuallyMapsTo: 'class_required_period', reason: 'Subject only without class → ASK CLARIFICATION: per-class hay global? Do not silently pick.' },
+      { text: 'Toán phải có tiết 4', actuallyMapsTo: 'class_required_period', reason: 'Subject only without class → ASK CLARIFICATION: per-class hay global? Do not silently pick.' },
+      { text: 'Môn Toán không xếp vào tiết 5', actuallyMapsTo: 'subject_block_period', reason: '"Không xếp" là block, không phải require' },
+      { text: 'Môn Văn chỉ dạy tiết 4', actuallyMapsTo: 'subject_pin_period', reason: '"Chỉ dạy" là pin/whitelist, không phải at-least' },
+      { text: 'Môn Văn nên dạy tiết 4', actuallyMapsTo: 'subject_preferred_periods', reason: '"Nên" là preference/soft, không phải hard require' },
+      { text: 'Môn Toán tối đa 2 tiết/ngày', actuallyMapsTo: 'subject_daily_max_periods', reason: '"Tối đa" là max-per-day, không phải at-least' },
+    ],
+    requiredParams: ['subject', 'period', 'minCount'],
     embedding: e(null),
   },
   {
@@ -797,12 +960,16 @@ const CATALOG: CatalogEntry[] = [
     scope: SCOPE.class,
     triggers: [
       /lớp\s+\S+\s+chỉ\s+học\s+(tiết|các?\s+tiết)|lớp\s+\S+\s+rảnh\s+tiết/iu,
+      /lớp\s+\S+\s+chỉ\s+được\s+học\s+tiết/iu,
     ],
-    synonyms: ['lớp chỉ học tiết', 'lớp rảnh tiết'],
+    synonyms: ['lớp chỉ học tiết', 'lớp rảnh tiết', 'lớp chỉ được học tiết'],
     fewShots: [
       { text: 'Lớp 6A chỉ học các tiết 2, 3, 4.', params: { class: '6A', periods: [2, 3, 4] } },
     ],
-    negativeFewShots: [],
+    negativeFewShots: [
+      { text: 'Lớp 6A phải có tiết 1', actuallyMapsTo: 'class_required_period', reason: '"Phải có" là require at-least, không phải whitelist only' },
+      { text: 'Lớp 6A không học tiết 1', actuallyMapsTo: 'class_block_period', reason: '"Không học" là block tiết cụ thể, không phải whitelist' },
+    ],
     requiredParams: ['class', 'periods'],
     embedding: e(null),
   },
@@ -1093,10 +1260,10 @@ const CATALOG: CatalogEntry[] = [
     kind: 'pair_not_same_slot',
     scope: SCOPE.assignment,
     triggers: [
-      /không?\s*trùng\s*tiết|trùng\s*tiết|không?\s*cùng\s*tiết/iu,
-      /toán\s+\S+\s+và\s+văn\s+\S+\s+không?\s*trùng\s*tiết/iu,
+      /kh[ôo]ng(?:\s+đ[ượu][ợo]c)?\s*tr[ùu]ng\s*ti[ếe]t|tr[ùu]ng\s*ti[ếe]t|kh[ôo]ng(?:\s+đ[ượu][ợo]c)?\s*c[ùu]ng\s*ti[ếe]t/iu,
+      /to[áa]n\s+\S+\s+v[àa]\s+v[ăa]n\s+\S+\s+kh[ôo]ng(?:\s+đ[ượu][ợo]c)?\s*tr[ùu]ng\s*ti[ếe]t/iu,
     ],
-    synonyms: ['không trùng tiết', 'trùng tiết', 'không cùng slot'],
+    synonyms: ['không trùng tiết', 'không được trùng tiết', 'trùng tiết', 'không cùng slot'],
     fewShots: [
       { text: 'Toán 6A và Văn 6A không được trùng tiết.', params: { assignmentIds: [] } },
     ],
@@ -1311,6 +1478,9 @@ export function retrieveTopK(
     ? CATALOG.filter((e) => e.scope === scope)
     : CATALOG;
 
+  // Semantic direction analysis for scoring boosts
+  const semanticAnalysis = analyzeSemanticDirection(text);
+
   // Score each candidate
   const scored = candidates.map((entry) => {
     let score = lexicalScore(text, entry);
@@ -1321,7 +1491,7 @@ export function retrieveTopK(
     }
 
     // Keyword bonus: boost kinds matching the detected keywords
-    if (hints.mentionsBlock && /(block|không?\s*dạy|không?\s*học|cấm)/iu.test(text)) {
+    if (hints.mentionsBlock && semanticAnalysis.direction === 'block') {
       if (entry.triggers.some((tr) => tr.test(text))) score += 2;
     }
     if (hints.mentionsMax && /(t[ốo]i\s*đa|không?\s*quá|giới\s*hạn)/iu.test(text)) {
@@ -1332,6 +1502,43 @@ export function retrieveTopK(
     }
     if (hints.mentionsIfThen && /(nếu|neu)[\s\S]+(thì|thi)/iu.test(text)) {
       if (entry.kind === 'if_then') score += 5;
+    }
+
+    // Semantic direction bonus: strongly favor kinds matching the detected direction.
+    // This MUST outweigh generic lexical overlap on shared tokens like 'tiết'/'dạy'/'có'
+    // so that a require direction cannot be silently flipped into a block/only kind
+    // (or vice versa) due to incidental token overlap.
+    if (semanticAnalysis.direction !== 'unknown' && semanticAnalysis.direction !== 'contradictory') {
+      if (semanticAnalysis.direction === 'require' && entry.kind.includes('required')) {
+        score += 10;
+      } else if (semanticAnalysis.direction === 'block' && entry.kind.includes('block')) {
+        score += 10;
+      } else if (semanticAnalysis.direction === 'only' && entry.kind.includes('allowed')) {
+        score += 10;
+      } else if (semanticAnalysis.direction === 'prefer' && entry.kind.includes('preferred')) {
+        score += 10;
+      }
+    }
+
+    // Anti-flip penalty: when direction is clearly detected, demote any kind that
+    // contradicts the direction. This prevents "phải có" → block/only, "không dạy" →
+    // require, and "chỉ dạy" → require/allowed_only_without_chỉ.
+    if (semanticAnalysis.direction === 'require') {
+      if (entry.kind.includes('block') || entry.kind.includes('allowed') || entry.kind.includes('preferred')) {
+        score -= 8;
+      }
+    } else if (semanticAnalysis.direction === 'block') {
+      if (entry.kind.includes('required') || entry.kind.includes('allowed') || entry.kind.includes('preferred')) {
+        score -= 8;
+      }
+    } else if (semanticAnalysis.direction === 'only') {
+      if (entry.kind.includes('required') || entry.kind.includes('block') || entry.kind.includes('preferred')) {
+        score -= 8;
+      }
+    } else if (semanticAnalysis.direction === 'prefer') {
+      if (entry.kind.includes('required') || entry.kind.includes('block') || entry.kind.includes('allowed')) {
+        score -= 8;
+      }
     }
 
     return { entry, score };

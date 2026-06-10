@@ -27,9 +27,13 @@
  *   - clarification rate
  *   - kind-mismatch rate
  *   - param-mismatch rate
+ *
+ * NOTE: This module now uses semantic-direction.ts for unified marker
+ * detection across all parser paths.
  */
 
 import type { ConstraintSpec } from './constraint-spec';
+import { analyzeSemanticDirection } from './semantic-direction';
 
 export type DivergenceCategory =
   | 'kind_mismatch'
@@ -167,13 +171,6 @@ const NEGATIVE_KINDS = new Set([
   'subject_block_days',
 ]);
 
-const REQUIRE_MARKERS = ['phải có', 'cần có', 'ít nhất', 'bắt buộc có', 'phải được'];
-
-function hasRequireMarker(text: string): boolean {
-  const lower = text.toLowerCase();
-  return REQUIRE_MARKERS.some((m) => lower.includes(m));
-}
-
 export function classifyDivergence(
   rawText: string,
   legacy: { specs: ConstraintSpec[]; status: string } | undefined,
@@ -200,13 +197,14 @@ export function classifyDivergence(
   }
 
   // Critical: silent flip. Legacy mapped a require-marker sentence to a
-  // *_block_* kind.
-  if (hasRequireMarker(rawText)) {
+  // *_block_* kind. Use semantic-direction analyzer.
+  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  if (semanticAnalysis.direction === 'require') {
     for (const spec of legacy.specs) {
       if (NEGATIVE_KINDS.has(spec.kind)) {
         return {
           divergence: 'silent_flip',
-          explanation: `Legacy mapped require-marker sentence to ${spec.kind} (a block kind).`,
+          explanation: `Legacy mapped require-marker sentence (${semanticAnalysis.matched.require.join(', ')}) to ${spec.kind} (a block kind).`,
         };
       }
     }
