@@ -4,7 +4,7 @@ import type {
   PreflightResult,
   RawConstraintInput,
 } from './constraint-review-types';
-import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
+import { capabilityBlockReason } from './constraint-capabilities';
 
 const UNRESOLVED_DRAFT: ParsedConstraintDraft['status'][] = [
   'unparsed',
@@ -123,9 +123,10 @@ export function assertSolvableConstraintState(
           `Ràng buộc bắt buộc dạng đặc biệt chưa chuyển được thành luật máy hiểu: “${spec.original.slice(0, 80)}${spec.original.length > 80 ? '…' : ''}”. Hãy chọn mẫu có sẵn hoặc sửa lại nội dung.`
         );
       }
-      if (spec.severity === 'hard' && spec.kind !== 'custom_dsl' && !SOLVER_ENCODABLE_KINDS.has(spec.kind)) {
+      const capReason = capabilityBlockReason(spec.kind, spec.severity);
+      if (capReason) {
         blockReasons.push('hard_spec_unchecked');
-        messages.push(`Ràng buộc bắt buộc chưa mã hoá được vào solver: ${spec.kind} (${spec.id}).`);
+        messages.push(`${capReason} (${spec.id})`);
       }
     }
   }

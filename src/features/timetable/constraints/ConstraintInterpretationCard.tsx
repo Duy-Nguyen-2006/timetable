@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
 
 import { humanizeConstraintSpec } from '../ai/constraint-humanizer';
+import { getConstraintCapability } from '../ai/constraint-capabilities';
 import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ParsedConstraintDraft } from '../ai/constraint-review-types';
 
@@ -105,7 +106,32 @@ export function ConstraintInterpretationCard({
                   aria-label={cand.description}
                 />
                 <div className="flex-1">
-                  <p className="text-xs text-white/80">{cand.description}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-white/80">{cand.description}</p>
+                    {(() => {
+                      if (cand.spec.kind === 'custom_dsl') return null;
+                      const cap = getConstraintCapability(cand.spec.kind);
+                      if (cap.canEncodeSolver) {
+                        return (
+                          <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20 shrink-0">
+                            Solver hỗ trợ đầy đủ
+                          </span>
+                        );
+                      }
+                      if (cap.canCheckDeterministically) {
+                        return (
+                          <span className="inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-400 ring-1 ring-inset ring-amber-500/20 shrink-0">
+                            Chỉ kiểm tra, không tối ưu
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="inline-flex items-center rounded-full bg-red-500/10 px-1.5 py-0.5 text-[9px] font-medium text-red-400 ring-1 ring-inset ring-red-500/20 shrink-0">
+                          Chưa được hỗ trợ
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <p className="mt-0.5 text-[11px] text-white/40">
                     {humanizeConstraintSpec(cand.spec)}
                   </p>

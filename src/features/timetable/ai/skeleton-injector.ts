@@ -8,10 +8,6 @@
  */
 
 const MARKER_LINE = /^[ \t]*#\s*<<<\s*AI_FILL_HERE\s*>>>\s*$/m;
-const BUILD_CUSTOM_CONSTRAINTS = /^([ \t]*)def\s+build_custom_constraints\s*\([^)]*\)\s*:\s*(.*)$/;
-const PYTHON_FENCE = /^```(?:[ \t]*(?:python|py))?[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/i;
-const PYTHON_FENCE_BLOCK = /```(?:[ \t]*(?:python|py))?[ \t]*\r?\n([\s\S]*?)\r?\n?```/i;
-const PYTHON_START_LINE = /^(?:(?:for|if|elif|else|while|try|except|finally|with|def|class|pass|raise|return|assert)\b|[A-Za-z_]\w*\s*=|[A-Za-z_]\w*\.)/;
 
 export async function loadSolverSkeleton(): Promise<string> {
   const publicResponse = await fetch('/templates/solver_skeleton.py').catch(() => null);
@@ -26,125 +22,11 @@ export async function loadSolverSkeleton(): Promise<string> {
   return routeResponse.text();
 }
 
-function normalizeLineEndings(source: string): string {
-  return source.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\t/g, '    ');
-}
-
-function trimOuterBlankLines(lines: string[]): string[] {
-  let start = 0;
-  let end = lines.length;
-  while (start < end && !lines[start].trim()) start += 1;
-  while (end > start && !lines[end - 1].trim()) end -= 1;
-  return lines.slice(start, end);
-}
-
-function dedentPythonBlock(source: string): string {
-  const lines = normalizeLineEndings(source).split('\n');
-  let minLeading = Infinity;
-  for (const line of lines) {
-    if (!line.trim().length) continue;
-    const leading = (line.match(/^[ \t]*/)?.[0] ?? '').length;
-    if (leading < minLeading) minLeading = leading;
-  }
-  if (!Number.isFinite(minLeading)) minLeading = 0;
-  return trimOuterBlankLines(lines)
-    .map((line) => (line.trim().length ? line.slice(minLeading).replace(/\s+$/, '') : ''))
-    .join('\n');
-}
-
-function stripMarkdownFence(source: string): string {
-  const trimmed = source.trim();
-  const fullFence = trimmed.match(PYTHON_FENCE);
-  if (fullFence) return fullFence[1].trim();
-
-  const fencedBlock = trimmed.match(PYTHON_FENCE_BLOCK);
-  if (fencedBlock) return fencedBlock[1].trim();
-
-  return trimmed;
-}
-
-function takeUntilTemplateReturn(lines: string[]): string[] {
-  const end = lines.findIndex((line) => /^\s*return\s+\(?\s*soft_terms\b/.test(line));
-  return end >= 0 ? lines.slice(0, end) : lines;
-}
-
-function trimExplanatoryProse(source: string): string {
-  const lines = normalizeLineEndings(source).split('\n');
-  const start = lines.findIndex((line) => {
-    const trimmed = line.trim();
-    return Boolean(trimmed) && (trimmed.startsWith('#') || PYTHON_START_LINE.test(trimmed));
-  });
-  if (start <= 0) return source;
-  return lines.slice(start).join('\n');
-}
-
-function extractMarkedRegion(source: string): string | null {
-  const lines = normalizeLineEndings(source).split('\n');
-  const markerIndex = lines.findIndex((line) => MARKER_LINE.test(line));
-  if (markerIndex < 0) return null;
-  return dedentPythonBlock(takeUntilTemplateReturn(lines.slice(markerIndex + 1)).join('\n'));
-}
-
-function extractBuildCustomConstraintsBody(source: string): string {
-  const lines = normalizeLineEndings(source).split('\n');
-  const defIndex = lines.findIndex((line) => BUILD_CUSTOM_CONSTRAINTS.test(line));
-  if (defIndex < 0) return source;
-
-  const match = lines[defIndex].match(BUILD_CUSTOM_CONSTRAINTS);
-  const baseIndent = match?.[1].length ?? 0;
-  const inlineBody = match?.[2]?.trim();
-  if (inlineBody && !inlineBody.startsWith('#')) return inlineBody;
-
-  const bodyLines: string[] = [];
-  for (const line of lines.slice(defIndex + 1)) {
-    const leading = (line.match(/^[ \t]*/)?.[0] ?? '').length;
-    if (line.trim() && leading <= baseIndent) break;
-    bodyLines.push(line);
-  }
-
-  const body = dedentPythonBlock(takeUntilTemplateReturn(bodyLines).join('\n'));
-  const bodySplit = body.split('\n');
-  const customSpecsIndex = bodySplit.findIndex((line) => /^\s*custom_specs\s*=/.test(line));
-  if (customSpecsIndex >= 0) {
-    return dedentPythonBlock(bodySplit.slice(customSpecsIndex + 1).join('\n'));
-  }
-  return body;
-}
-
-function stripFullSkeletonBoilerplate(source: string): string {
-  const marked = extractMarkedRegion(source);
-  if (marked !== null) return marked;
-
-  const lines = normalizeLineEndings(source).split('\n');
-  const looksLikeFullSkeleton =
-    lines.some((line) => /^\s*unsupported_soft_kinds\s*=\s*\[\]/.test(line)) &&
-    lines.some((line) => /^\s*for\s+spec\s+in\s+constraints\s*:/.test(line));
-  if (!looksLikeFullSkeleton) return source;
-
-  const customSpecsIndex = lines.findIndex((line) => /^\s*custom_specs\s*=/.test(line));
-  if (customSpecsIndex < 0) return source;
-  return dedentPythonBlock(takeUntilTemplateReturn(lines.slice(customSpecsIndex + 1)).join('\n'));
-}
-
-const LEAKED_SCHEMA_FIELDS = /^\s*(covered_constraint_ids|plan_summary|assumptions)\s*=/;
-
-function stripLeakedSchemaFields(source: string): string {
-  return source
-    .split('\n')
-    .filter((line) => !LEAKED_SCHEMA_FIELDS.test(line))
-    .join('\n');
-}
-
 export function normalizeConstraintCodeBody(constraintCode: string): string {
-  let normalized = normalizeLineEndings(stripMarkdownFence(constraintCode));
-  normalized = stripFullSkeletonBoilerplate(normalized);
-  normalized = extractBuildCustomConstraintsBody(normalized);
-  normalized = stripFullSkeletonBoilerplate(normalized);
-  normalized = trimExplanatoryProse(normalized);
-  normalized = stripLeakedSchemaFields(normalized);
-  normalized = dedentPythonBlock(stripMarkdownFence(normalized));
-  return normalized.trim() ? normalized : 'pass';
+  const trimmed = constraintCode.trim();
+  return trimmed ? trimmed : 'pass';
 }
+
 
 export function injectConstraintCode(
   skeleton: string,

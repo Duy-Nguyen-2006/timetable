@@ -18,7 +18,6 @@
     "test": "tsx --test \"src/**/*.test.ts\"",
     "test:electron": "node --test \"electron/tests/*.test.mjs\"",
     "test:grep": "sh -c 'tsx --test \"src/**/*$1*.test.ts\"' --",
-    "test:prompt": "tsx scripts/validate_coder_prompt_models.ts",
     "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "pipeline:smoke": "tsx scripts/pipeline_smoke_test.ts",
     "executor:check": "node scripts/post-build.mjs",

@@ -285,17 +285,17 @@ test('preflight allows when hard confirmed', () => {
 test('preflight passes confirmed hard specs that are now solver-encodable', () => {
   // After Phase 4: ALL registry kinds are solver-encodable (skeleton handles
   // them natively or macros.py expands them to IR). The preflight should NOT
-  // block a confirmed hard `subject_min_days` spec anymore.
+  // block a confirmed hard `teacher_required_period` spec anymore.
   const raw: RawConstraintInput[] = [
-    { id: 'r1', text: 'Toán rải ít nhất 2 ngày', type: 'required', createdAt: new Date().toISOString() },
+    { id: 'r1', text: 'Cô Sơn phải có tiết 4', type: 'required', createdAt: new Date().toISOString() },
   ];
   const specs: ConstraintSpec[] = [
     {
       id: 'c1',
       original: raw[0].text,
       severity: 'hard',
-      kind: 'subject_min_days',
-      params: { subject: 'Toán', minDays: 2 },
+      kind: 'teacher_required_period',
+      params: { teacher: 'Sơn', period: 4, minCount: 1 },
     },
   ];
   const confirmed: ConfirmedConstraint[] = [
@@ -305,14 +305,14 @@ test('preflight passes confirmed hard specs that are now solver-encodable', () =
       specs,
       confirmedBy: 'user',
       confirmedAt: new Date().toISOString(),
-      summary: 'unsupported hard',
-      displayText: 'unsupported hard',
+      summary: 'teacher required period',
+      displayText: 'teacher required period',
     },
   ];
 
   const result = assertSolvableConstraintState(raw, [], confirmed);
 
-  // After Phase 4 expansion, subject_min_days is encodable — no block.
+  // After Phase 4 expansion, teacher_required_period is encodable — no block.
   assert.equal(result.canSolve, true);
   assert.ok(!result.blockReasons.includes('hard_spec_unchecked'));
 });

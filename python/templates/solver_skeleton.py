@@ -6,7 +6,7 @@ from ortools.sat.python import cp_model
 # constraint encoding paths. Increment major when adding new kinds, minor for
 # bug fixes. The Node-side pipeline-versions.ts reads this through
 # sync_solver_template.mjs — keep the strings in sync.
-SOLVER_TEMPLATE_VERSION = "1.5.0"
+SOLVER_TEMPLATE_VERSION = "1.6.0"
 
 with open("input.json", encoding="utf-8") as f:
     data = json.load(f)
@@ -1227,6 +1227,49 @@ def build_custom_constraints(model, slots, data):
                     if first_slots:
                         model.Add(sum(first_slots) >= 1).OnlyEnforceIf(has_day)
 
+        # ── Require-family (Phase 0): atLeast N tiết tại 1 period trong tuần ──
+        # Vì mỗi (teacher|class, day, period) đã bị ràng buộc <= 1, nên
+        # sum slot_vars qua các ngày == số ngày entity chiếm period đó,
+        # khớp đúng semantics của deterministic-validator (đếm theo ngày).
+        elif kind == "teacher_required_period":
+            t = params.get("teacher")
+            p = int(params.get("period", -1))
+            min_count = int(params.get("minCount", params.get("count", 1)) or 1)
+            if t is None or p < 0:
+                continue
+            lits = _slot_vars(
+                _slot_var(a, d, p)
+                for a in assignments if a["teacher"] == t
+                for d in days if p in _periods_for(d)
+            )
+            model.Add(sum(lits) >= min_count)  # lits rỗng -> 0 >= N -> infeasible (fail-closed)
+
+        elif kind == "class_required_period":
+            c = params.get("class")
+            p = int(params.get("period", -1))
+            min_count = int(params.get("minCount", params.get("count", 1)) or 1)
+            if c is None or p < 0:
+                continue
+            lits = _slot_vars(
+                _slot_var(a, d, p)
+                for a in assignments if a["class"] == c
+                for d in days if p in _periods_for(d)
+            )
+            model.Add(sum(lits) >= min_count)
+
+        elif kind == "subject_required_period":
+            s = params.get("subject")
+            p = int(params.get("period", -1))
+            min_count = int(params.get("minCount", params.get("count", 1)) or 1)
+            if s is None or p < 0:
+                continue
+            lits = _slot_vars(
+                _slot_var(a, d, p)
+                for a in assignments if a["subject"] == s
+                for d in days if p in _periods_for(d)
+            )
+            model.Add(sum(lits) >= min_count)
+
         elif kind == "subject_flag_ceremony_slot":
             d = params.get("day")
             p = int(params.get("period", 1))
@@ -1250,21 +1293,28 @@ def build_custom_constraints(model, slots, data):
     # and does NOT depend on LLM-generated code.
     # If the IR modules are not bundled in the executor, this block is silently skipped
     # and the legacy 25-kind native path takes over.
-    _ir_specs = [s for s in constraints if isinstance(s.get("expr"), dict)]
+    def _expr_of(s):
+        e = s.get("expr")
+        if isinstance(e, dict):
+            return e
+        pe = (s.get("params") or {}).get("expr")
+        return pe if isinstance(pe, dict) else None
+
+    _ir_specs = [s for s in constraints if _expr_of(s) is not None]
     if _ir_specs:
         try:
-            from ir_compiler import compile_constraint, DerivedVars as _DV  # type: ignore
+            from ir_compiler import compile_expr, DerivedVars as _DV  # type: ignore
             from ir_eval import eval_constraint as _eval_ir  # type: ignore
         except ImportError:
             try:
                 # Fallback: try the local modules if available
-                from python.ir_compiler import compile_constraint, DerivedVars as _DV  # type: ignore
+                from python.ir_compiler import compile_expr, DerivedVars as _DV  # type: ignore
                 from python.ir_eval import eval_constraint as _eval_ir  # type: ignore
             except ImportError:
-                compile_constraint = None
+                compile_expr = None
                 _DV = None
                 _eval_ir = None
-        if compile_constraint is not None and _DV is not None:
+        if compile_expr is not None and _DV is not None:
             _ir_env = {
                 "days": days,
                 "periods": periods,
@@ -1274,20 +1324,36 @@ def build_custom_constraints(model, slots, data):
             }
             _dv = _DV(model, slots, assignments)
             _ir_penalty = []
-            for _ir_spec in _ir_specs:
+            
+            def _soft_weight(s):
                 try:
-                    compile_constraint(model, _ir_spec, _dv, _ir_env, _ir_penalty)
+                    return int(s.get("weight", 1) or 1)
+                except Exception:
+                    return 1
+            
+            for _ir_spec in _ir_specs:
+                _expr = _expr_of(_ir_spec)
+                _is_hard = _ir_spec.get("severity", "hard") == "hard"
+                try:
+                    _local_pen = []
+                    _root = compile_expr(model, _expr, _dv, _ir_env, _local_pen, f"ir_{_ir_spec.get('id', 'ir')}")
+                    if _is_hard:
+                        # Ép cứng: literal gốc của IR phải đúng (== 1)
+                        model.Add(_root == 1)
+                    else:
+                        _ir_penalty.extend(_local_pen or [(_soft_weight(_ir_spec), _root.Not())])
                 except Exception as _ir_exc:
-                    # Don't crash solve on IR compile error; surface as unsupported.
+                    if _is_hard:
+                        # Hard mà không encode được -> fail-closed thay vì bỏ qua
+                        raise NotImplementedError(
+                            f"Hard IR constraint không encode được: {_ir_spec.get('id')} ({_ir_exc})"
+                        )
                     unsupported_soft_kinds.append(_ir_spec.get("id", _ir_spec.get("kind", "ir")))
             # Add IR penalty terms to the global soft_terms
             for _w, _v in _ir_penalty:
                 soft_terms.append((int(_w), _v))
 
-    # === AI custom_dsl injection (chạy đúng 1 lần, ngoài vòng for spec) ===
-    # Skeleton không tự guard bằng custom_specs: coder prompt đã filter custom_dsl,
-    # nên để generated code tự quyết định no-op khi không có custom hard specs.
-    custom_specs = [s for s in constraints if s.get("kind") == "custom_dsl" and s.get("severity", "hard") == "hard" and not isinstance(s.get("expr"), dict) and not (s.get("params", {}) or {}).get("pythonPredicate")]
+    # === AI custom_dsl injection ===
     # <<< AI_FILL_HERE >>>
     pass
 
