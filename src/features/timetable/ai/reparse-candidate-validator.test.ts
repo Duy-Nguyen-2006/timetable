@@ -67,3 +67,71 @@ test('validateReparseCandidateSpecs empty specs', () => {
   const result = validateReparseCandidateSpecs(agentInput, raw, undefined);
   assert.equal(result.ok, false);
 });
+
+test('validateReparseCandidateSpecs accepts custom_dsl with valid IR expr', () => {
+  const raw = { id: 'c5', text: 'Cô Thúy phải có tiết 4', type: 'required' as const };
+  const result = validateReparseCandidateSpecs(agentInput, raw, [
+    {
+      kind: 'custom_dsl',
+      params: {
+        expr: {
+          atLeast: {
+            k: 1,
+            var: 'd',
+            in: 'days',
+            body: { teaches: { teacher: 'Thúy', day: '$$D$$', period: 4 } },
+          },
+        },
+      },
+    },
+  ]);
+  assert.equal(result.ok, true);
+});
+
+test('validateReparseCandidateSpecs rejects custom_dsl IR expr with unknown teacher', () => {
+  const raw = { id: 'c6', text: 'Cô Ghost phải có tiết 4', type: 'required' as const };
+  const result = validateReparseCandidateSpecs(agentInput, raw, [
+    {
+      kind: 'custom_dsl',
+      params: {
+        expr: {
+          atLeast: {
+            k: 1,
+            var: 'd',
+            in: 'days',
+            body: { teaches: { teacher: 'Ghost', day: '$$D$$', period: 4 } },
+          },
+        },
+      },
+    },
+  ]);
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.status, 'unsupported');
+  assert.ok(result.issues.some((i) => i.code === 'hard_unchecked'));
+  assert.match(result.issues.map((i) => i.message).join('\n'), /Ghost/);
+});
+
+test('validateReparseCandidateSpecs rejects custom_dsl IR expr with out-of-range period', () => {
+  const raw = { id: 'c7', text: 'Cô Thúy phải có tiết 9', type: 'required' as const };
+  const result = validateReparseCandidateSpecs(agentInput, raw, [
+    {
+      kind: 'custom_dsl',
+      params: {
+        expr: {
+          atLeast: {
+            k: 1,
+            var: 'd',
+            in: 'days',
+            body: { teaches: { teacher: 'Thúy', day: 'monday', period: 9 } },
+          },
+        },
+      },
+    },
+  ]);
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.status, 'unsupported');
+  assert.ok(result.issues.some((i) => i.code === 'hard_unchecked'));
+  assert.match(result.issues.map((i) => i.message).join('\n'), /Tiết 9/);
+});

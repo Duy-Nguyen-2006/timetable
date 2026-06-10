@@ -20,6 +20,14 @@ The TypeScript IR type checker validates a `ConstraintIR` against `AgentInputPay
 - `classBusy` and `classSubjectAt` atoms are checked with the same day/period rules as `teaches` atoms;
 - `atLeast`, `atMost`, `exactly`, `exists`, `forall`, `count`, `consecutive`, `gap`, `before`, and `after` propagate quantifier bindings into nested expressions.
 
+## Reparse IR Validation
+
+The AI reparse loop may return `custom_dsl.params.expr` as structured IR. That IR is not trusted by shape alone:
+
+- hard `custom_dsl` candidates without an IR expression stay unsupported;
+- reparse IR must pass schema validation and semantic type checking before becoming confirmable;
+- unknown entities, unknown days/sessions, out-of-range periods, and placeholder/domain mismatches fail closed as unsupported candidate issues.
+
 ## IR Humanizer V2
 
 The deterministic IR humanizer renders supported IR shapes to Vietnamese without calling an LLM:

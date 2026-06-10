@@ -3,6 +3,8 @@ import type { ConstraintSpec } from './constraint-spec';
 import { SOLVER_ENCODABLE_KINDS } from './constraint-registry';
 import type { ConstraintParseIssue } from './constraint-review-types';
 import { validateConstraintSpecs } from './constraint-draft-validator';
+import { validateIR, type ConstraintIR } from './constraint-ir';
+import { typeCheckIR } from './ir-type-checker';
 
 export type ReparseSpecInput = { kind: string; params: Record<string, unknown> };
 
@@ -45,6 +47,37 @@ function rejectInvalidReparseKinds(specs: ConstraintSpec[]): ConstraintParseIssu
   return issues;
 }
 
+function validateReparseIRExprs(input: AgentInputPayload, specs: ConstraintSpec[]): ConstraintParseIssue[] {
+  const issues: ConstraintParseIssue[] = [];
+  for (const spec of specs) {
+    const expr = spec.params?.expr;
+    if (expr === undefined || expr === null || expr === '') continue;
+    const ir = {
+      id: spec.id,
+      severity: spec.severity,
+      original: spec.original,
+      expr,
+    } as ConstraintIR;
+    const shapeIssues = validateIR(ir);
+    if (shapeIssues.length > 0) {
+      issues.push({
+        code: 'hard_unchecked',
+        message: `IR từ AI reparse không đúng schema: ${shapeIssues.map((i) => i.message).join('; ')}`,
+      });
+      continue;
+    }
+    const typeResult = typeCheckIR(ir, input);
+    if (!typeResult.ok) {
+      issues.push({
+        code: 'hard_unchecked',
+        message: `IR từ AI reparse không hợp lệ với dữ liệu hiện tại: ${typeResult.issues.map((i) => i.message).join('; ')}`,
+        candidates: typeResult.issues.flatMap((i) => i.candidates ?? []).slice(0, 5),
+      });
+    }
+  }
+  return issues;
+}
+
 /**
  * Validate AI reparse built-in specs after semantic normalization.
  * Does not call rule/regex fallback.
@@ -64,8 +97,9 @@ export function validateReparseCandidateSpecs(
 
   const specs = materializeSpecs(raw, specInputs);
   const kindIssues = rejectInvalidReparseKinds(specs);
-  if (kindIssues.length > 0) {
-    return { ok: false, issues: kindIssues, status: 'unsupported' };
+  const irIssues = validateReparseIRExprs(input, specs);
+  if (kindIssues.length > 0 || irIssues.length > 0) {
+    return { ok: false, issues: [...kindIssues, ...irIssues], status: 'unsupported' };
   }
 
   const validation = validateConstraintSpecs(input, specs, {
