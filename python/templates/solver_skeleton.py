@@ -1353,10 +1353,6 @@ def build_custom_constraints(model, slots, data):
             for _w, _v in _ir_penalty:
                 soft_terms.append((int(_w), _v))
 
-    # === AI custom_dsl injection ===
-    # <<< AI_FILL_HERE >>>
-    pass
-
     return soft_terms, unsupported_soft_kinds
 
 

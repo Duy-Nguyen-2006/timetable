@@ -20,7 +20,7 @@ import type { ConstraintSpec, ScheduleEntry } from './constraint-spec';
 import { validateSchedule } from './deterministic-validator';
 import { compressPayload } from './input-compressor';
 import { executeGeneratedCode } from './python-bridge';
-import { injectConstraintCode, loadSolverSkeleton } from './skeleton-injector';
+import { loadSolverSkeleton } from './skeleton-injector';
 import type { AgentInputPayload, ExecutionResult, LocalAgentConfig, LocalAgentFinalResult } from './types';
 import { buildFinalMessage, emit, resolveSolverRuntime } from './local-agent-utils';
 
@@ -96,12 +96,6 @@ export async function runDeterministicSolver(
   );
 
   const skeleton = await loadSolverSkeleton();
-  const injected = injectConstraintCode(skeleton, '');
-  if (!injected.injected) {
-    const msg = 'Solver skeleton marker not found.';
-    emit(config, { type: 'error', message: msg, fatal: true });
-    return { success: false, error: msg };
-  }
 
   const executePayload = {
     classes: compressed.classes,
@@ -113,7 +107,7 @@ export async function runDeterministicSolver(
     ...(input.previousSchedule ? { warmStartSchedule: input.previousSchedule } : {}),
   };
 
-  const execResult = await executeGeneratedCode(injected.solverCode, executePayload, {
+  const execResult = await executeGeneratedCode(skeleton, executePayload, {
     timeoutMs,
     solverWorkers: runtime.workers,
     // Section 14.8: pass seed for solver determinism (same input → same output)

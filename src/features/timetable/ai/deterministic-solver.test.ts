@@ -132,38 +132,6 @@ test('runDeterministicSolver trả lỗi khi solver execution fail', async () =>
   }
 });
 
-test('runDeterministicSolver trả lỗi khi skeleton marker không tìm thấy', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url.endsWith('/templates/solver_skeleton.py')) {
-      // Trả skeleton không có marker AI_FILL_HERE
-      return new Response('def build_custom_constraints(model):\n    pass\n');
-    }
-    return new Response('not found', { status: 404 });
-  }) as typeof fetch;
-  const specs: ConstraintSpec[] = [
-    {
-      id: 'c1',
-      original: 'test',
-      severity: 'hard',
-      kind: 'teacher_block_period',
-      params: { teacher: 'Sơn', period: 1 },
-    },
-  ];
-
-  try {
-    const result = await runDeterministicSolver(baseInput, baseConfig, { constraintSpecs: specs });
-    assert.equal(result.success, false);
-    assert.match(result.error ?? '', /skeleton marker/);
-  } finally {
-    globalThis.fetch = originalFetch;
-    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
-  }
-});
-
 test('runDeterministicSolver trả lỗi khi validator phát hiện hard violation', async () => {
   // Sơn xuất hiện ở tiết 1 — vi phạm teacher_block_period (Sơn, 1)
   const execResult: ExecutionResult = {
@@ -324,8 +292,9 @@ test('runDeterministicSolver giữ empty build_custom_constraints (không gọi 
   try {
     const result = await runDeterministicSolver(baseInput, baseConfig, { constraintSpecs: specs });
     assert.equal(result.success, true);
-    // Empty injection sẽ fill marker bằng 'pass' — không phải AI-generated code.
-    assert.match(observedCode, /pass/);
+    // Skeleton pass nguyên xi — marker `AI_FILL_HERE` còn nguyên trong code gửi tới
+    // executor, chứng tỏ không có bước fill/replace nào (injectConstraintCode đã bỏ).
+    assert.match(observedCode, /AI_FILL_HERE/);
     // Diagnostics phải thể hiện là fast-path, không phải AI codegen.
     assert.equal(result.finalResult?.diagnostics[0], 'Deterministic fast-path: no AI planner/coder/repair used.');
   } finally {
