@@ -3,6 +3,7 @@
 import { AlertCircle, Check, Circle, Info, Sparkles, Loader2 } from 'lucide-react';
 
 import { humanizeDraft } from '../ai/constraint-humanizer';
+import { getConstraintCapability } from '../ai/constraint-capabilities';
 import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
 import { constraintTypes } from '../constants';
 import type { ConstraintItem } from '../types';
@@ -64,6 +65,32 @@ export function ConstraintDraftCard({
   const isUnsupported = status === 'unsupported' || (maxAiReached && !confirmed);
   const showCompare = Boolean(draft && !confirmed && understood.trim() !== constraint.text.trim());
 
+  const primarySpec = draft?.proposedSpecs?.[0] || confirmed?.specs?.[0];
+  const capBadge = (() => {
+    if (!primarySpec) return null;
+    if (primarySpec.kind === 'custom_dsl') return null;
+    const cap = getConstraintCapability(primarySpec.kind);
+    if (cap.canEncodeSolver) {
+      return (
+        <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
+          Solver hỗ trợ đầy đủ
+        </span>
+      );
+    }
+    if (cap.canCheckDeterministically) {
+      return (
+        <span className="inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-400 ring-1 ring-inset ring-amber-500/20">
+          Chỉ kiểm tra, không tối ưu
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center rounded-full bg-red-500/10 px-1.5 py-0.5 text-[9px] font-medium text-red-400 ring-1 ring-inset ring-red-500/20">
+        Chưa được hỗ trợ
+      </span>
+    );
+  })();
+
   return (
     <div
       data-constraint-id={constraint.id}
@@ -77,18 +104,21 @@ export function ConstraintDraftCard({
           {constraintType.label}
         </span>
         {draft || confirmed ? (
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-              confirmed
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : userStatus === 'cannot_understand'
-                  ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-            }`}
-            title={statusCopy.hint}
-          >
-            {confirmed ? '✅ Đã duyệt' : `${statusCopy.icon} ${statusCopy.label}`}
-          </span>
+          <div className="flex items-center gap-2">
+            {capBadge}
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                confirmed
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  : userStatus === 'cannot_understand'
+                    ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+              }`}
+              title={statusCopy.hint}
+            >
+              {confirmed ? '✅ Đã duyệt' : `${statusCopy.icon} ${statusCopy.label}`}
+            </span>
+          </div>
         ) : null}
       </div>
 

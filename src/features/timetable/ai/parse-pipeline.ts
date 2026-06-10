@@ -207,25 +207,30 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   diagnostics.push({ stage: 'done', message: `status=${specs.length > 0 ? 'mapped' : 'unmapped'}` });
 
   const legacyStatus = specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'semantic_only' : 'mapped_builtin') : 'needs_clarification';
-  const irFirstResult = parseIRFirstWithGuard(rawText, hints);
-  const shadowNew = irFirstResult.kind === 'ir'
-    ? { specs: [irFirstResult.spec], status: 'mapped_builtin' as const }
-    : irFirstResult.kind === 'needs_clarification'
-      ? { specs: [], status: 'needs_clarification' as const }
-      : undefined;
-  const shadowLegacy = {
-    specs,
-    status: legacyStatus as 'mapped_builtin' | 'semantic_only' | 'needs_clarification' | 'unsupported',
-  };
-  const divergence = classifyDivergence(rawText, shadowLegacy, shadowNew);
-  getDefaultShadowLogger().log({
-    rawText,
-    legacy: shadowLegacy,
-    new: shadowNew,
-    divergence: divergence.divergence,
-    explanation: divergence.explanation,
-  });
-  diagnostics.push({ stage: 'done', message: `shadow=${divergence.divergence}` });
+  const parserMode = getParserMode();
+  const runIrFirst = parserMode !== 'legacy';
+  const irFirstResult = runIrFirst ? parseIRFirstWithGuard(rawText, hints) : undefined;
+
+  if (runIrFirst && irFirstResult) {
+    const shadowNew = irFirstResult.kind === 'ir'
+      ? { specs: [irFirstResult.spec], status: 'mapped_builtin' as const }
+      : irFirstResult.kind === 'needs_clarification'
+        ? { specs: [], status: 'needs_clarification' as const }
+        : undefined;
+    const shadowLegacy = {
+      specs,
+      status: legacyStatus as 'mapped_builtin' | 'semantic_only' | 'needs_clarification' | 'unsupported',
+    };
+    const divergence = classifyDivergence(rawText, shadowLegacy, shadowNew);
+    getDefaultShadowLogger().log({
+      rawText,
+      legacy: shadowLegacy,
+      new: shadowNew,
+      divergence: divergence.divergence,
+      explanation: divergence.explanation,
+    });
+    diagnostics.push({ stage: 'done', message: `shadow=${divergence.divergence}` });
+  }
 
   // M8: When parser mode is 'ir_first', use the IR-first result as the
   // authoritative output. Otherwise, use the legacy slot-fill result.
@@ -233,9 +238,8 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   let finalSpecs = specs;
   let finalStatus: 'mapped_builtin' | 'custom_dsl' | 'needs_clarification' | 'unsupported' =
     specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin') : 'needs_clarification';
-  const parserMode = getParserMode();
 
-  if (parserMode === 'ir_first' && irFirstResult.kind === 'ir') {
+  if (parserMode === 'ir_first' && irFirstResult?.kind === 'ir') {
     finalSpecs = [irFirstResult.spec];
     finalStatus = irFirstResult.spec.kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin';
     diagnostics.push({ stage: 'done', message: `mode=ir_first authoritative` });

@@ -171,6 +171,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [aiResult, setAiResult] = useState<TimetableSolveResult | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  const [blockHints, setBlockHints] = useState<string[]>([])
+  const [warnings, setWarnings] = useState<string[]>([])
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [agentStep, setAgentStep] = useState<AgentProgressStep>('idle')
   const [agentIteration, setAgentIteration] = useState(0)
@@ -996,6 +998,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   }, [])
 
     const handleGenerate = async () => {
+    setBlockHints([])
+    setWarnings([])
 
     if (activePeriodCount <= 0) {
       setAiError(NO_ACTIVE_PERIOD_MESSAGE)
@@ -1005,6 +1009,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
     if (!canProceedToSolve) {
       setAiError(solveBlockHint ?? 'Chưa thể xếp lịch: ràng buộc bắt buộc chưa xác nhận.')
+      setBlockHints(constraintSolvePreflight.messages ?? [])
+      setWarnings(constraintSolvePreflight.warnings ?? [])
       focusUnconfirmedConstraints()
       return
     }
@@ -1032,10 +1038,14 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     )
 
     if (!solveGate.ok) {
-      setAiError([solveGate.error, ...(solveGate.messages ?? [])].filter(Boolean).join('\n'))
+      setAiError(solveGate.error || 'Yêu cầu xếp lịch bị chặn do ràng buộc chưa hợp lệ.')
+      setBlockHints(solveGate.messages ?? [])
+      setWarnings(solveGate.warnings ?? [])
       focusUnconfirmedConstraints()
       return
     }
+
+    setWarnings(solveGate.warnings ?? [])
 
     setAiLoading(true)
     setAiError(null)
@@ -2148,25 +2158,47 @@ const handleDownloadExcel = useCallback(async () => {
                       <ArrowLeft size={14} strokeWidth={1.5} />
                       Quay lại
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleGenerate()}
-                      disabled={aiLoading || !aiProvider || activePeriodCount <= 0 || !canProceedToSolve}
-                      title={!canProceedToSolve ? (solveBlockHint ?? undefined) : undefined}
-                      className={`${navNextClass} ${navDisabledClass}`}
-                    >
-                      {aiLoading ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" strokeWidth={1.5} />
-                          Đang xếp lịch...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles size={14} strokeWidth={1.5} />
-                          Xếp lịch
-                        </>
+                    <div className="flex items-center gap-4 flex-wrap">
+                      {blockHints.length > 0 && (
+                        <div className="text-right max-w-md bg-red-950/40 border border-red-900/30 p-2 rounded text-xs text-red-300">
+                          <p className="font-semibold mb-1">Cần xử lý:</p>
+                          <ul className="list-disc list-inside text-left space-y-0.5">
+                            {blockHints.map((hint, idx) => (
+                              <li key={idx} className="truncate" title={hint}>{hint}</li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
-                    </button>
+                      {warnings.length > 0 && (
+                        <div className="text-right max-w-md bg-amber-950/40 border border-amber-900/30 p-2 rounded text-xs text-amber-300">
+                          <p className="font-semibold mb-1">Cảnh báo:</p>
+                          <ul className="list-disc list-inside text-left space-y-0.5">
+                            {warnings.map((warn, idx) => (
+                              <li key={idx} className="truncate" title={warn}>{warn}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleGenerate()}
+                        disabled={aiLoading || !aiProvider || activePeriodCount <= 0 || !canProceedToSolve}
+                        title={!canProceedToSolve ? (solveBlockHint ?? undefined) : undefined}
+                        className={`${navNextClass} ${navDisabledClass}`}
+                      >
+                        {aiLoading ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" strokeWidth={1.5} />
+                            Đang xếp lịch...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={14} strokeWidth={1.5} />
+                            Xếp lịch
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <header className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                     <div>

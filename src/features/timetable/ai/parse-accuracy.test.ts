@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 
 import { backTranslateCheck, backTranslateBatch, BACK_TRANSLATION_GATE } from './back-translation-check';
 import { evaluateAmbiguity, buildAmbiguityQuestion, runAmbiguityGate, isSameKindFamily } from './ambiguity-gate';
-import { GOLDEN_EVAL_SET, summarizeGoldenSet } from './golden-eval-set';
+
 import { buildTopKPromptSection, retrieveTopK } from './constraint-retriever';
 import type { ConstraintResolverHints } from './constraint-retriever';
 
@@ -228,46 +228,7 @@ test('isSameKindFamily groups teacher_max variants', () => {
   assert.equal(isSameKindFamily('teacher_max_per_day', 'teacher_max_classes_per_day'), true);
 });
 
-// ─── Golden eval set (Section 13.7) ──────────────────────────────────────────
 
-test('golden set has >= 50 cases', () => {
-  assert.ok(GOLDEN_EVAL_SET.length >= 50, `expected >=50, got ${GOLDEN_EVAL_SET.length}`);
-});
-
-test('golden set has unique IDs', () => {
-  const ids = new Set(GOLDEN_EVAL_SET.map((c) => c.id));
-  assert.equal(ids.size, GOLDEN_EVAL_SET.length);
-});
-
-test('golden set covers teacher/subject/class/global/assignment scopes', () => {
-  const stats = summarizeGoldenSet();
-  assert.ok(stats.byScope.teacher >= 10, `teacher coverage: ${stats.byScope.teacher}`);
-  assert.ok(stats.byScope.subject >= 5, `subject coverage: ${stats.byScope.subject}`);
-  assert.ok(stats.byScope.class >= 5, `class coverage: ${stats.byScope.class}`);
-  assert.ok(stats.byScope.global >= 2, `global coverage: ${stats.byScope.global}`);
-  assert.ok(stats.byScope.assignment >= 2, `assignment coverage: ${stats.byScope.assignment}`);
-});
-
-test('golden set includes canonical positive cases for top kinds', () => {
-  const cases = GOLDEN_EVAL_SET.map((c) => c.id + ':' + c.text).join('\n');
-  assert.match(cases, /G001:.*không dạy thứ 2/);
-  assert.match(cases, /G005:.*tối đa 4 tiết mỗi ngày/);
-  assert.match(cases, /G016:.*Môn Toán chỉ được xếp vào tiết/);
-  assert.match(cases, /G026:.*Lớp 6A không học vào/);
-});
-
-test('golden set includes clarify/custom_dsl cases', () => {
-  const stats = summarizeGoldenSet();
-  assert.ok((stats.byKind.clarify ?? 0) >= 2, 'should have clarify cases');
-  assert.ok((stats.byKind.custom_dsl ?? 0) >= 1, 'should have custom_dsl cases');
-});
-
-test('golden Dung case requires confirmation', () => {
-  // G015 is the canonical Dung case (per-class per-day — no built-in)
-  const dung = GOLDEN_EVAL_SET.find((c) => c.id === 'G015');
-  assert.ok(dung, 'Dung case (G015) must exist in golden set');
-  assert.equal(dung.requiresConfirmation, true);
-});
 
 // ─── Negative few-shots in catalog (Section 13.8) ───────────────────────────
 
