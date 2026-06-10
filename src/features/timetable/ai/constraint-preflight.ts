@@ -33,7 +33,11 @@ function isConstraintConfirmed(
 }
 
 function isExecutableCustomDsl(spec: { kind: string; params: Record<string, unknown>; pythonPredicate?: string }): boolean {
-  return spec.kind !== 'custom_dsl' || Boolean(spec.params.expr) || Boolean(spec.pythonPredicate?.trim());
+  // M9.1: custom_dsl MUST have a structured IR `expr` to reach the
+  // solver. `pythonPredicate` is no longer accepted from user input —
+  // dynamic Python generation is unsafe at solve-time. pythonPredicate
+  // is preserved for internal/migration fixtures only.
+  return spec.kind !== 'custom_dsl' || Boolean(spec.params.expr);
 }
 
 function fixHintForReason(reason: PreflightResult['blockReasons'][number]): string {

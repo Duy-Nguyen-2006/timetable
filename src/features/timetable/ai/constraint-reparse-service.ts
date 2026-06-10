@@ -12,6 +12,9 @@ import type { ReparseResult, SemanticCandidate } from './semantic-constraint';
 import { invokeChat, type ChatPayload } from './chat-client';
 import { parseModelJson } from './parse-model-json';
 import { validateReparseCandidateSpecs } from './reparse-candidate-validator';
+// M3.2: shared semantic-direction analyzer used for unified direction
+// detection in the reparse prompt construction.
+import { analyzeSemanticDirection } from './semantic-direction';
 
 const reparseResponseSchema = z.object({
   status: z.enum(['candidate', 'unsupported', 'needs_retry']),
