@@ -79,5 +79,23 @@ export function unconfirmedRequiredConstraintIds(
     .map((c) => c.id);
 }
 
+/**
+ * A draft is committable when:
+ * - it is supported (not `unsupported` / `unparsed`),
+ * - it carries at least one `proposedSpecs` entry, and
+ * - it has no outstanding `needs_user_clarification` issue.
+ *
+ * Centralizing this gate keeps the "Đồng ý" button consistent with the
+ * buildDraftFrom* pipeline and avoids the historical bug where clarification
+ * options without a `specDraft` could starve the button forever.
+ */
+export function isDraftCommittable(draft: ParsedConstraintDraft | undefined): boolean {
+  if (!draft) return false;
+  if (draft.status === 'unsupported' || draft.status === 'unparsed') return false;
+  if (draft.proposedSpecs.length === 0) return false;
+  if (draft.issues.some((issue) => issue.code === 'needs_user_clarification')) return false;
+  return true;
+}
+
 export const MAX_AI_ANALYSIS_ATTEMPTS = 3;
 export const MAX_AI_INPUT_PREVIEW_ATTEMPTS = 3;

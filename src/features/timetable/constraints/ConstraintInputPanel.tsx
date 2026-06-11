@@ -14,12 +14,11 @@ import {
 import { suggestBuiltInConstraint, type BuiltInSuggestion } from '../ai/built-in-suggestion';
 import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ClarificationOption } from '../ai/constraint-clarification-types';
-import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ParsedConstraintDraft } from '../ai/constraint-review-types';
 import type { AgentInputPayload } from '../ai/types';
 import type { ConstraintItem } from '../types';
 import { ClarificationSuggestionsBlock } from './ClarificationSuggestionsBlock';
-import { hasRealInterpretation } from './constraint-review-ui';
+import { hasRealInterpretation, isDraftCommittable } from './constraint-review-ui';
 import {
   CONSTRAINT_GROUP_LABELS,
   CONSTRAINT_TEMPLATES,
@@ -60,6 +59,7 @@ type ConstraintInputPanelProps = {
   onSendChatMessage?: (message: string) => void;
   chatLoading?: boolean;
   onApplyPreviewSpecDraft?: (spec: ConstraintSpec) => void;
+  onApplyPreviewClarificationChoice?: (option: ClarificationOption) => void;
   onReparsePreviewWithFeedback?: (feedback: string) => void;
   onOpenTemplatePicker?: () => void;
   onOpenManualEdit?: () => void;
@@ -114,6 +114,7 @@ export function ConstraintInputPanel({
   onSendChatMessage,
   chatLoading,
   onApplyPreviewSpecDraft,
+  onApplyPreviewClarificationChoice,
   onReparsePreviewWithFeedback,
   onOpenTemplatePicker,
   onOpenManualEdit,
@@ -320,11 +321,17 @@ export function ConstraintInputPanel({
                     reparseCount={pendingAiPreview.reparseCount}
                     constraintType={pendingAiPreview.item.type}
                     onSelectOption={(_questionId, option: ClarificationOption) => {
-                      if (option.id.startsWith('use_')) {
-                        onReparsePreviewWithFeedback?.(option.labelVi);
-                        return;
+                      if (option.id === 'none_fit') {
+                        // Free-text fallback — let the user rephrase below.
+                        return
                       }
-                      onReparsePreviewWithFeedback?.(option.labelVi);
+                      if (onApplyPreviewClarificationChoice) {
+                        // Deterministic commit: no LLM call, just build the spec.
+                        onApplyPreviewClarificationChoice(option)
+                        return
+                      }
+                      // Last-resort: no orchestrator wired, fall back to LLM reparse.
+                      onReparsePreviewWithFeedback?.(option.labelVi)
                     }}
                     onApplySpecDraft={onApplyPreviewSpecDraft}
                     onReparseWithFeedback={onReparsePreviewWithFeedback}
@@ -362,17 +369,26 @@ export function ConstraintInputPanel({
             </button>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" onClick={onAcceptAiPreview} disabled={!pendingAiPreview.draft.proposedSpecs.length || pendingAiPreview.draft.status === 'unsupported'} className="w-full rounded-md bg-[#4DB848] px-3 py-2 text-xs font-medium text-[#0a0a0a] hover:bg-[#40993C] disabled:opacity-40 disabled:cursor-not-allowed">Đồng ý</button>
+            <button
+              type="button"
+              onClick={onAcceptAiPreview}
+              disabled={!isDraftCommittable(pendingAiPreview.draft)}
+              className="w-full rounded-md bg-[#4DB848] px-3 py-2 text-xs font-medium text-[#0a0a0a] hover:bg-[#40993C] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Đồng ý
+            </button>
             <button type="button" onClick={onDismissAiPreview} className="w-full rounded-md border border-red-500/40 bg-red-500/15 px-3 py-2 text-xs font-medium text-red-200 hover:bg-red-500/25">
               Bỏ
             </button>
           </div>
-          {pendingAiPreview.reparseCount >= 2 ? (
+          {pendingAiPreview.reparseCount >= 3 ? (
+            <p className="mt-2 text-[10px] text-white/30">
+              Đã phân tích 3 lần — bấm «Đồng ý» hoặc sửa câu nhập.
+            </p>
+          ) : pendingAiPreview.reparseCount >= 2 ? (
             <p className="mt-2 text-[10px] text-white/30">
               Đã thử AI nhiều lần — ưu tiên «Tự đặt luật» hoặc «Dùng mẫu có sẵn».
             </p>
-          ) : pendingAiPreview.reparseCount >= 3 ? (
-            <p className="mt-2 text-[10px] text-white/30">Đã phân tích 3 lần — bấm «Đồng ý» hoặc sửa câu nhập.</p>
           ) : null}
         </div>
       ) : null}

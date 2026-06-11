@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import type { ParsedConstraintDraft } from '../ai/constraint-review-types';
 import {
   hasRealInterpretation,
+  isDraftCommittable,
   unconfirmedRequiredConstraintIds,
   userFriendlyReviewStatus,
 } from './constraint-review-ui';
@@ -82,4 +83,79 @@ test('unconfirmedRequiredConstraintIds lists required without confirm', () => {
     { id: 'b', type: 'preferred', text: 't2' },
   ];
   assert.deepEqual(unconfirmedRequiredConstraintIds(constraints, [], []), ['a']);
+});
+
+// ─── isDraftCommittable ──────────────────────────────────────────────
+test('isDraftCommittable is true for parsed high-confidence drafts with specs', () => {
+  const draft: ParsedConstraintDraft = {
+    id: 'd1',
+    rawConstraintId: 'r1',
+    original: 'x',
+    proposedSpecs: [{ id: 's1', original: 'x', severity: 'hard', kind: 'teacher_block_day', params: {} }],
+    status: 'parsed',
+    confidence: 'high',
+    explanation: '',
+    issues: [],
+    source: 'rule',
+  };
+  assert.equal(isDraftCommittable(draft), true);
+});
+
+test('isDraftCommittable is false for unsupported drafts', () => {
+  const draft: ParsedConstraintDraft = {
+    id: 'd1',
+    rawConstraintId: 'r1',
+    original: 'x',
+    proposedSpecs: [],
+    status: 'unsupported',
+    confidence: 'low',
+    explanation: '',
+    issues: [],
+    source: 'rule',
+  };
+  assert.equal(isDraftCommittable(draft), false);
+});
+
+test('isDraftCommittable is false when no specs are proposed (e.g. clarification pending)', () => {
+  const draft: ParsedConstraintDraft = {
+    id: 'd1',
+    rawConstraintId: 'r1',
+    original: 'nếu Hương và Sơn dạy cùng 1 ngày thì ko dạy cùng 1 tiết',
+    proposedSpecs: [],
+    status: 'needs_review',
+    confidence: 'low',
+    explanation: '',
+    issues: [{ code: 'needs_user_clarification', message: 'Cần làm rõ phạm vi' }],
+    source: 'ai_reparse',
+  };
+  assert.equal(isDraftCommittable(draft), false);
+});
+
+test('isDraftCommittable becomes true once a clarification choice builds a spec', () => {
+  // Simulates the state after the user picks the `per_class` clarification
+  // option: proposedSpecs is now non-empty, the clarification issue is gone.
+  const draft: ParsedConstraintDraft = {
+    id: 'd1',
+    rawConstraintId: 'r1',
+    original: 'nếu Hương và Sơn dạy cùng 1 ngày thì ko dạy cùng 1 tiết',
+    proposedSpecs: [
+      {
+        id: 'custom_r1_per_class',
+        original: 'nếu Hương và Sơn dạy cùng 1 ngày thì ko dạy cùng 1 tiết',
+        severity: 'hard',
+        kind: 'custom_dsl',
+        params: { scope: 'per_class', source: 'clarification_choice' },
+      },
+    ],
+    status: 'parsed',
+    confidence: 'high',
+    explanation: '',
+    issues: [],
+    source: 'ai_reparse',
+  };
+  assert.equal(isDraftCommittable(draft), true);
+});
+
+test('isDraftCommittable returns false for undefined draft', () => {
+  assert.equal(isDraftCommittable(undefined), false);
 });

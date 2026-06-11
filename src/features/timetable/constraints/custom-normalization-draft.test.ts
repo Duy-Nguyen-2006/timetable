@@ -97,6 +97,48 @@ test('buildCustomDraftFromNormalization carries clarification questions', () => 
   assert.equal(draft.clarificationQuestions?.[0]?.prompt, 'Ràng buộc này áp dụng cho lớp nào?');
 });
 
+test('buildCustomDraftFromNormalization gives custom clarification questions real options (bug fix)', () => {
+  // Previously the custom path returned `options: []`, leaving the user with
+  // no deterministic commit path. Now each clarification question must have
+  // at least one option so the orchestrator can produce a committable spec.
+  const draft = buildCustomDraftFromNormalization(
+    raw,
+    {
+      status: 'needs_clarification',
+      normalizedText: 'Câu cần làm rõ.',
+      detectedEntities: {
+        teachers: ['Hiếu', 'Hương'],
+        subjects: [],
+        classes: [],
+        assignments: [],
+        days: [],
+        periods: [],
+      },
+      confidence: 0.3,
+      needsClarification: true,
+      clarificationQuestions: ['Áp dụng cho giáo viên nào?', 'Phạm vi lớp nào?'],
+    },
+    agentInput
+  );
+
+  const questions = draft.clarificationQuestions ?? [];
+  assert.equal(questions.length, 2);
+  for (const question of questions) {
+    assert.ok(question.options.length > 0, `Question ${question.id} must have options`);
+    assert.ok(
+      question.options.some((o) => o.recommended),
+      `Question ${question.id} must have a recommended option`,
+    );
+  }
+  // `none_fit` escape option must always be present.
+  for (const question of questions) {
+    assert.ok(
+      question.options.some((o) => o.id === 'none_fit'),
+      `Question ${question.id} must include a none_fit escape option`,
+    );
+  }
+});
+
 test('severityFromConstraintType maps preferred to soft', () => {
   assert.equal(severityFromConstraintType('required'), 'hard');
   assert.equal(severityFromConstraintType('preferred'), 'soft');

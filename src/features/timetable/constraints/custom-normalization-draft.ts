@@ -6,6 +6,8 @@ import type {
 import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ParsedConstraintDraft, RawConstraintInput } from '../ai/constraint-review-types';
 import type { AgentInputPayload } from '../ai/types';
+import { buildClarificationQuestions } from '../ai/constraint-clarification';
+import type { ConstraintClarificationQuestion } from '../ai/constraint-review-types';
 
 function confidenceLabel(value: number): ParsedConstraintDraft['confidence'] {
   if (value >= 0.8) return 'high';
@@ -22,12 +24,57 @@ function statusFromNormalization(
   return 'needs_review';
 }
 
-function clarificationQuestions(result: CustomConstraintNormalizationResult) {
-  return result.clarificationQuestions.map((question, index) => ({
-    id: `custom_clarification_${index + 1}`,
-    prompt: question,
-    options: [],
-  }));
+/**
+ * Translate free-form `clarificationQuestions` strings (from the LLM) into
+ * structured `ConstraintClarificationQuestion` objects with real options.
+ *
+ * Each raw question becomes one question in the UI. We piggy-back on
+ * `buildClarificationQuestions` so the option contract (`recommended`,
+ * `specDraft`, `none_fit` escape, Vietnamese labels) stays consistent
+ * across the analyze and custom paths.
+ */
+function clarificationQuestions(
+  result: CustomConstraintNormalizationResult,
+  raw: RawConstraintInput,
+  agentInput?: AgentInputPayload
+): ConstraintClarificationQuestion[] {
+  if (result.clarificationQuestions.length === 0) return [];
+
+  // Generate a baseline set of structured questions to inherit options
+  // (per_class / whole_school / scope / soft_vs_hard, etc.) from. We then
+  // surface the model's free-form questions as a `model_clarification_*`
+  // variant so the user still sees them but with a real "Đồng ý" path.
+  const structured = buildClarificationQuestions(
+    raw.text,
+    undefined,
+    agentInput
+      ? {
+          teachers: Array.from(new Set(agentInput.assignments.map((a) => a.teacher.label))),
+          classes: Array.from(new Set(agentInput.assignments.map((a) => a.class.label))),
+          subjects: Array.from(new Set(agentInput.assignments.map((a) => a.subject.label))),
+        }
+      : undefined
+  );
+
+  return result.clarificationQuestions.map((question, index) => {
+    const modelOptions = structured.length > 0 ? structured[index % structured.length]?.options ?? [] : [];
+    return {
+      id: `custom_clarification_${index + 1}`,
+      prompt: question,
+      allowFreeText: true,
+      // Surface at least one option so the user has a deterministic
+      // «Đồng ý» path; `model_question_*` is the explicit "skip this LLM
+      // question and let the orchestrator commit" choice.
+      options: [
+        ...modelOptions,
+        {
+          id: `model_question_${index + 1}`,
+          labelVi: 'Bỏ qua câu hỏi này và dùng phần hiểu hiện tại',
+          recommended: modelOptions.length === 0,
+        },
+      ],
+    };
+  });
 }
 
 export function buildCustomDraftFromNormalization(
@@ -85,7 +132,7 @@ export function buildCustomDraftFromNormalization(
     confidence: confidenceLabel(result.confidence),
     explanation: displayText,
     issues,
-    clarificationQuestions: needsClarification ? clarificationQuestions(result) : undefined,
+    clarificationQuestions: needsClarification ? clarificationQuestions(result, raw, agentInput) : undefined,
     source: 'manual',
     displayText,
     semanticRepresentation: {

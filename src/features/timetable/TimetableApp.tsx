@@ -26,6 +26,7 @@ import ExcelJS from 'exceljs'
 import { runLocalAgent } from './ai/local-agent'
 import { humanizeConstraintSpec, humanizeDraft } from './ai/constraint-humanizer'
 import type { ConstraintSpec } from './ai/constraint-spec'
+import type { ClarificationOption } from './ai/constraint-clarification-types'
 import {
   confirmedFromDraftsAfterUserAccept,
   constraintItemsToRaw,
@@ -132,6 +133,51 @@ function userFacingAgentError(message: string): string {
     return 'Hệ thống mất quá nhiều thời gian để xếp lịch. Hãy kiểm tra lại các ràng buộc chưa được chuẩn hóa thành mẫu có sẵn, hoặc đổi hồ sơ giải sang “Sâu” trong phần cấu hình.';
   }
   return message.replace(/\bAI Agent\b/gu, 'bộ xếp lịch');
+}
+
+/**
+ * Replace a typo'd entity in the raw text with the canonical label the
+ * user picked from an `use_<kind>_<label>` clarification option. The option
+ * id only carries the canonical label (not the typo), so we fuzzy-match
+ * candidate tokens in the original text. Returns the original text unchanged
+ * if no replacement is safe to make.
+ */
+function applyEntityNearMatchChoice(rawText: string, option: ClarificationOption): string {
+  // id shape: use_<kind>_<label...> — strip the prefix and split on '_'
+  const stripped = option.id.startsWith('use_') ? option.id.slice('use_'.length) : option.id
+  const firstUnderscore = stripped.indexOf('_')
+  if (firstUnderscore === -1) return rawText
+  const canonicalLabel = stripped.slice(firstUnderscore + 1)
+  if (!canonicalLabel) return rawText
+
+  const tokens = rawText.match(/[\p{L}][\p{L}\p{N}]*/gu) ?? []
+  const candidate = tokens.find((token) => {
+    if (token === canonicalLabel) return false
+    const maxDistance = Math.max(token.length, canonicalLabel.length) <= 4 ? 1 : 2
+    return levenshteinDistance(token.toLowerCase(), canonicalLabel.toLowerCase()) <= maxDistance
+  })
+  if (!candidate) return rawText
+
+  const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return rawText.replace(new RegExp(escaped, 'gu'), canonicalLabel)
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+  const rows = Array.from({ length: a.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= b.length; i += 1) {
+    let previous = rows[0]
+    rows[0] = i
+    for (let j = 1; j <= a.length; j += 1) {
+      const temp = rows[j]
+      rows[j] =
+        b[i - 1] === a[j - 1] ? previous : Math.min(previous + 1, rows[j] + 1, rows[j - 1] + 1)
+      previous = temp
+    }
+  }
+  return rows[a.length]
 }
 
 export default function App({ onBackToLanding, quickDatasetText }: TimetableAppProps) {
@@ -999,6 +1045,50 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       pendingAiPreview.item.weight,
       conversation
     )
+  }
+
+  // Commit a clarification choice deterministically (no LLM call) so the
+  // «Đồng ý» button can be enabled after a single pick. Options that carry
+  // a `specDraft` go through `applyPreviewSpecDraft`; `none_fit` opens the
+  // free-text flow; `use_<kind>_<label>` swaps the typo'd entity in the raw
+  // text and reparses; scope/semantic options wrap a `custom_dsl` spec.
+  const applyPreviewClarificationChoice = (option: ClarificationOption) => {
+    if (!pendingAiPreview) return
+    if (option.id === 'none_fit') return
+
+    if (option.specDraft) {
+      applyPreviewSpecDraft(option.specDraft)
+      return
+    }
+
+    if (option.id.startsWith('use_')) {
+      const corrected = applyEntityNearMatchChoice(pendingAiPreview.rawText, option)
+      if (corrected && corrected !== pendingAiPreview.rawText) {
+        setPendingAiPreview({ ...pendingAiPreview, rawText: corrected })
+        handleIntakeAiAnalysis(corrected, pendingAiPreview.item.type, pendingAiPreview.item.weight)
+      }
+      return
+    }
+
+    const p = pendingAiPreview
+    const baseDisplay = p.draft.displayText?.trim() || p.rawText
+    const refinedText = `${baseDisplay} (${option.labelVi})`
+    const spec: ConstraintSpec = {
+      id: `custom_${p.item.id}_${option.id}`,
+      original: p.rawText,
+      severity: p.item.type === 'preferred' ? 'soft' : 'hard',
+      kind: 'custom_dsl',
+      params: {
+        naturalLanguage: p.rawText,
+        normalizedText: refinedText,
+        scope: option.id,
+        clarificationChoice: option.id,
+        clarificationLabel: option.labelVi,
+        source: 'clarification_choice',
+      },
+      ...(p.item.type === 'preferred' ? { weight: p.item.weight } : {}),
+    }
+    applyPreviewSpecDraft(spec)
   }
 
   const applyPreviewSpecDraft = (spec: ConstraintSpec) => {
@@ -2201,6 +2291,7 @@ const handleDownloadExcel = useCallback(async () => {
                       onSendChatMessage={sendChatMessage}
                       chatLoading={chatLoading}
                       onApplyPreviewSpecDraft={applyPreviewSpecDraft}
+                      onApplyPreviewClarificationChoice={applyPreviewClarificationChoice}
                       onReparsePreviewWithFeedback={reparsePreviewWithFeedback}
                       onOpenTemplatePicker={() => setIntakeTemplatePickerOpen(true)}
                       onOpenManualEdit={() => setIntakeManualEditOpen(true)}
