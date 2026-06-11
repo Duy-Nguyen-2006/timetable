@@ -8,8 +8,11 @@ export type SelfConsistencyResult = {
 };
 
 function normalizeForVote(response: SlotFillResponse): SlotFillResponse {
+  const condition = response.condition
+    ? Object.fromEntries(Object.entries(response.condition).sort(([a], [b]) => a.localeCompare(b))) as typeof response.condition
+    : undefined;
   return {
-    condition: response.condition,
+    condition,
     atoms: response.atoms.map((atom) => ({
       kind: atom.kind,
       params: Object.fromEntries(Object.entries(atom.params ?? {}).sort(([a], [b]) => a.localeCompare(b))),
