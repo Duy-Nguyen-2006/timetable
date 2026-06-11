@@ -9,6 +9,7 @@ import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constrain
 import { constraintTypes } from '../constants';
 import type { ConstraintItem } from '../types';
 import {
+  hasRealInterpretation,
   interpretationLine,
   MAX_AI_ANALYSIS_ATTEMPTS,
   USER_REVIEW_STATUS_COPY,
@@ -22,11 +23,18 @@ type ConstraintDraftCardProps = {
   onConfirm: () => void;
   onIgnore: () => void;
   onDelete: () => void;
-  onAiAnalyze?: () => void;
+  onAiAnalyze?: (userFeedback?: string) => void;
+  onOpenTemplatePicker?: () => void;
   isNew?: boolean;
   isReparsing?: boolean;
   highlight?: boolean;
 };
+
+const JARGON_ISSUE_PATTERN = /\b(rule\s*parser|parser|custom_dsl|spec|kind|IR|LLM)\b/iu;
+
+function isUserFacingIssue(message: string): boolean {
+  return !JARGON_ISSUE_PATTERN.test(message);
+}
 
 function ConfirmInterpretationPreview({ draft }: { draft: ParsedConstraintDraft }) {
   const card = draft.interpretationCard;
@@ -80,12 +88,14 @@ export function ConstraintDraftCard({
   onIgnore,
   onDelete,
   onAiAnalyze,
+  onOpenTemplatePicker,
   isReparsing,
   highlight,
 }: ConstraintDraftCardProps) {
   const constraintType = constraintTypes[constraint.type] ?? constraintTypes.required;
   const fallbackSummary = draft ? humanizeDraft(draft) : constraint.text;
   const understood = interpretationLine(draft, confirmed, fallbackSummary);
+  const showInterpretation = hasRealInterpretation(draft, confirmed, constraint.text);
   const userStatus = userFriendlyReviewStatus(draft, confirmed);
   const statusCopy = USER_REVIEW_STATUS_COPY[userStatus];
   const needsClarification = Boolean(
@@ -93,6 +103,13 @@ export function ConstraintDraftCard({
       draft?.issues.some((i) => i.code === 'needs_user_clarification')
   );
   const entityLossIssue = draft?.issues.find((i) => i.code === 'possible_entity_loss');
+  const visibleIssues =
+    draft?.issues.filter(
+      (issue) =>
+        isUserFacingIssue(issue.message) &&
+        (issue.code !== 'possible_entity_loss' || !entityLossIssue) &&
+        (issue.code !== 'needs_user_clarification' || !draft.clarificationQuestions?.length)
+    ) ?? [];
   const status = draft?.status ?? 'unparsed';
   const hardSpecsExecutable =
     constraint.type !== 'required' ||
@@ -218,7 +235,7 @@ export function ConstraintDraftCard({
         </div>
       ) : null}
 
-      {draft ? (
+      {draft && showInterpretation ? (
         <div
           className={`mt-2 rounded border p-2.5 text-sm ${
             hasAiAnalyzed || isReparsing
@@ -240,17 +257,79 @@ export function ConstraintDraftCard({
             )}
           </p>
           {!isReparsing ? <ConfirmInterpretationPreview draft={draft} /> : null}
-          {!isReparsing && draft.issues.length > 0 && (
+          {!isReparsing && visibleIssues.length > 0 ? (
             <ul className="mt-2 space-y-0.5 text-xs text-amber-300/80">
-              {draft.issues
-                .filter((issue) => issue.code !== 'possible_entity_loss' || !entityLossIssue)
-                .map((issue, i) => (
-                  <li key={`${issue.code}-${i}`}>• {issue.message}</li>
-                ))}
+              {visibleIssues.map((issue, i) => (
+                <li key={`${issue.code}-${i}`}>• {issue.message}</li>
+              ))}
             </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {draft && !showInterpretation && (needsClarification || isReparsing) ? (
+        <div
+          data-testid="needs-clarification-block"
+          className="mt-2 rounded border border-amber-500/30 bg-amber-500/[0.06] p-2.5 text-sm"
+        >
+          <p className="text-[10px] font-medium uppercase tracking-widest text-amber-300/70">
+            Cần bạn làm rõ
+          </p>
+          {isReparsing ? (
+            <p className="mt-1 flex items-center gap-2 leading-relaxed">
+              <Loader2 size={14} className="animate-spin text-violet-400" />
+              <span className="text-white/50">Đang AI phân tích...</span>
+            </p>
+          ) : (
+            <div className="mt-2 space-y-3">
+              {draft.clarificationQuestions?.length ? (
+                draft.clarificationQuestions.map((question, questionIndex) => (
+                  <div key={question.id ?? `clarification-${questionIndex}`}>
+                    <p className="text-xs leading-relaxed text-amber-100/90">{question.prompt}</p>
+                    {question.options.length > 0 ? (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        {question.options.map((option, optionIndex) => (
+                          <button
+                            key={`${question.id ?? questionIndex}-option-${optionIndex}`}
+                            type="button"
+                            data-testid="clarification-option"
+                            onClick={() => onAiAnalyze?.(option)}
+                            className="rounded-md border border-amber-500/25 bg-[#0a0a0a] px-2.5 py-2 text-left text-xs text-amber-100/90 hover:border-amber-400/40 hover:bg-amber-500/[0.08]"
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              ) : visibleIssues.length > 0 ? (
+                <ul className="space-y-0.5 text-xs text-amber-300/80">
+                  {visibleIssues.map((issue, i) => (
+                    <li key={`${issue.code}-${i}`}>• {issue.message}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-amber-200/80">
+                  Mình chưa chắc cách hiểu câu này. Chọn giúp cách đúng ý bạn bên dưới, hoặc dùng mẫu có sẵn.
+                </p>
+              )}
+              {onOpenTemplatePicker ? (
+                <button
+                  type="button"
+                  data-testid="use-template-button"
+                  onClick={onOpenTemplatePicker}
+                  className="mt-1 inline-flex items-center rounded-md border border-white/[0.12] bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/75 hover:bg-white/[0.08]"
+                >
+                  Dùng mẫu có sẵn
+                </button>
+              ) : null}
+            </div>
           )}
         </div>
-      ) : !isNew ? (
+      ) : null}
+
+      {!draft && !isNew ? (
         <p className="mt-2 text-xs text-white/35">Chưa có bản phân tích — bấm «AI phân tích» nếu cần.</p>
       ) : null}
 

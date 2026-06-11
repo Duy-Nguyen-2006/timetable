@@ -2111,12 +2111,13 @@ const handleDownloadExcel = useCallback(async () => {
                       }
                       onAiAnalyze={
                         aiProvider
-                          ? (constraint, draft) => {
+                          ? (constraint, draft, userFeedback) => {
                               void rejectAndReparse(
                                 { id: constraint.id, text: constraint.text, type: constraint.type, weight: constraint.weight },
                                 draft,
                                 constraintAgentInput,
-                                aiProvider
+                                aiProvider,
+                                userFeedback ? { userFeedback } : undefined
                               )
                             }
                           : undefined

@@ -51,6 +51,19 @@ export function interpretationLine(
   return fallbackSummary;
 }
 
+export function hasRealInterpretation(
+  draft: ParsedConstraintDraft | undefined,
+  confirmed: ConfirmedConstraint | undefined,
+  originalText: string
+): boolean {
+  if (confirmed?.displayText || confirmed?.summary) return true;
+  const line = (draft?.displayText ?? '').trim();
+  if (!line) return false;
+  if (line === originalText.trim()) return false;
+  if (draft?.status === 'unparsed' || draft?.status === 'unsupported') return false;
+  return true;
+}
+
 /** Raw constraint ids that block solve (required, not confirmed, not ignored). */
 export function unconfirmedRequiredConstraintIds(
   constraints: ConstraintItem[],

@@ -54,6 +54,17 @@ test('buildClarificationQuestions: candidates path -> renders candidate kinds in
   assert.match(pick!.options.join('\n'), /teacher_required_period/);
 });
 
+test('buildClarificationQuestions: if_then + một người -> at_least_one_vs_both', () => {
+  const questions = buildClarificationQuestions(
+    'Nếu Hiếu và Thúy dạy cùng ngày thì một người không được dạy tiết 4'
+  );
+  const pick = questions.find((q) => q.id === 'at_least_one_vs_both');
+  assert.ok(pick, 'expected at_least_one_vs_both question');
+  assert.equal(pick!.options.length, 3);
+  assert.match(pick!.prompt, /một người/u);
+  assert.doesNotMatch(pick!.prompt, /Nếu Hiếu và Thúy/u);
+});
+
 test('buildClarificationQuestions: no candidates + no pattern -> concrete domain question', () => {
   const questions = buildClarificationQuestions('Xếp lịch cho trường');
   assert.ok(questions.length >= 1);

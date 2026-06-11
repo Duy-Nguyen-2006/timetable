@@ -1,4 +1,5 @@
 import type { ConstraintClarificationQuestion } from './constraint-review-types';
+import { mentionsIfThenMarker } from './semantic-direction';
 
 /**
  * buildClarificationQuestions — Phase 0.5 hardening
@@ -23,6 +24,22 @@ export function buildClarificationQuestions(
 ): ConstraintClarificationQuestion[] {
   const raw = original.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
   const questions: ConstraintClarificationQuestion[] = [];
+
+  const mentionsIfThen = mentionsIfThenMarker(original);
+  const mentionsOnePerson = /(một người|mot nguoi|một trong|mot trong|1 người|1 nguoi)/u.test(raw);
+  if (mentionsIfThen && mentionsOnePerson) {
+    return [
+      {
+        id: 'at_least_one_vs_both',
+        prompt: 'Ở cụm «một người», bạn muốn áp dụng cách nào?',
+        options: [
+          'Ít nhất một trong hai người không dạy (người còn lại vẫn được)',
+          'Cả hai người đều không dạy trong trường hợp đó',
+          'Một người cụ thể (chọn ở bước sửa)',
+        ],
+      },
+    ];
+  }
 
   const mentionsHeavy =
     /môn\s*nặng|mon\s*nang|tiết\s*nặng|tiet\s*nang|môn\s*chính|mon\s*chinh/u.test(raw);
@@ -91,7 +108,7 @@ export function buildClarificationQuestions(
   if (questions.length === 0 && candidates && candidates.length >= 2) {
     questions.push({
       id: 'pick_specific_interpretation',
-      prompt: `Câu «${original}» có thể hiểu theo nhiều cách. Bạn muốn chọn cách nào?`,
+      prompt: 'Câu này có thể hiểu theo nhiều cách. Bạn muốn chọn cách nào?',
       options: candidates.slice(0, 4).map((candidate) => {
         const kind = candidate.kind;
         const params = candidate.params;

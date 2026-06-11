@@ -48,6 +48,7 @@ import { backTranslateBatch } from './back-translation-check';
 import { semanticConstraintToSpecs } from './semantic-to-spec';
 import { validateIR } from './constraint-ir';
 import type { BoolExpr } from './constraint-ir';
+import { buildClarificationQuestions } from './constraint-clarification';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -381,32 +382,29 @@ function hasTechnicalOrUnknownText(text: string): boolean {
   return /\b[a-z]+(?:_[a-z]+)+\b/u.test(text) || text.includes('điều kiện chưa xác định');
 }
 
-function clarifyAmbiguousIfThen(rawText: string, agentInput?: AgentInputPayload): AnalyzeConstraintResult {
-  const teachers = agentInput
-    ? matchKnownEntities(rawText, uniqueLabels(agentInput.assignments.map((assignment) => assignment.teacher.label)))
-    : [];
-  const classes = agentInput
-    ? matchKnownEntities(rawText, uniqueLabels(agentInput.assignments.map((assignment) => assignment.class.label)))
-    : [];
-  const teacherPair = teachers.length >= 2 ? `${teachers[0]} và ${teachers[1]}` : teachers[0] ?? 'các giáo viên được nhắc';
-  const classHint = classes[0] ?? 'lớp cụ thể';
+function clarificationPrompts(
+  rawText: string,
+  candidates?: ReadonlyArray<{ kind: string; params: Record<string, unknown> }>
+): string[] {
+  return buildClarificationQuestions(rawText, candidates).map((question) => question.prompt);
+}
+
+function clarifyAmbiguousIfThen(
+  rawText: string,
+  candidates?: ReadonlyArray<{ kind: string; params: Record<string, unknown> }>
+): AnalyzeConstraintResult {
+  const questions = buildClarificationQuestions(rawText, candidates);
 
   return {
     status: 'needs_clarification',
-    normalizedText: 'AI chưa đủ thông tin để hiểu ràng buộc này một cách chắc chắn.',
+    normalizedText: rawText,
     specs: [],
     confidence: 'low',
     requiresConfirmation: true,
     guardReasons: [],
-    clarificationQuestions: [
-      `Mình chưa rõ điều kiện trong câu “${rawText}”. “${teacherPair} dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
-      `“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định một giáo viên không dạy tiết 4?`,
-      `Ràng buộc này áp dụng cho tất cả lớp hay chỉ ${classHint}?`,
-    ],
+    clarificationQuestions: questions.map((question) => question.prompt),
     assumptions: [],
-    unresolvedQuestions: [
-      'Thiếu điều kiện/ngữ cảnh để map chắc chắn sang ràng buộc máy hiểu.',
-    ],
+    unresolvedQuestions: ['Mình chưa chắc một chi tiết trong câu — cần bạn chọn cách hiểu bên dưới.'],
   };
 }
 // ─── Stage 1: Resolver (CODE) ─────────────────────────────────────────────────
@@ -469,7 +467,8 @@ function buildSmallSystemPrompt(
 Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả status "semantic_only" kèm semantic.
 KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
 Dùng các "extracted hints" cho param; chỉ map, không tự suy số.
-Output JSON: { status, specs, semantic?, expr?, confidence, clarificationQuestions[] }
+Output JSON: { status, normalizedText, specs, semantic?, expr?, confidence, clarificationQuestions[] }
+LUÔN LUÔN trả về "normalizedText" (mọi status, kể cả needs_clarification/unsupported) — đây là câu tiếng Việt chuẩn hóa hiển thị trên GUI.
 
 ## Semantic ops (khi status = semantic_only)
 Condition ops: teacher_teaching_at_slot, teacher_not_teaching_at_slot, teacher_teaching_on_day, teacher_not_teaching_on_day, class_has_subject_at_slot, and, or, not
@@ -537,7 +536,7 @@ export async function analyzeConstraint(
       guardReasons: [],
       clarificationQuestions: [
         semanticDirection.explanation,
-        'Bạn có thể diễn đạt lại rõ hơn ý định (bắt buộc / cấm / chỉ được / ưu tiên)?',
+        ...clarificationPrompts(rawText),
       ],
       assumptions: [],
       unresolvedQuestions: ['Hướng ngữ nghĩa chưa rõ hoặc mâu thuẫn.'],
@@ -588,6 +587,16 @@ export async function analyzeConstraint(
     }
 
     const parsedJson = parseModelJson(content);
+    // Defensive: some models skip `normalizedText` (especially for
+    // `needs_clarification` / `unsupported` replies). Inject the raw text
+    // so the strict Zod schema never throws on this field.
+    if (
+      parsedJson &&
+      typeof parsedJson === 'object' &&
+      typeof (parsedJson as Record<string, unknown>).normalizedText !== 'string'
+    ) {
+      (parsedJson as Record<string, unknown>).normalizedText = rawText;
+    }
     const validated = analyzeResponseSchema.parse(parsedJson);
 
     // Build specs from LLM response
@@ -689,7 +698,11 @@ export async function analyzeConstraint(
       resolvedSpecs = [];
       resolvedConfidence = 'low';
       resolvedClarificationQuestions = [
-        'Hệ thống hiểu ý bạn nhưng chưa chuyển được thành luật máy thực thi. Hãy chọn mẫu có sẵn hoặc viết lại câu rõ hơn (nêu rõ giáo viên, ngày, tiết).',
+        'Mình hiểu ý bạn nhưng cần bạn xác nhận một chi tiết để áp dụng chính xác. Chọn cách hiểu bên dưới hoặc dùng mẫu có sẵn.',
+        ...clarificationPrompts(
+          rawText,
+          specs.map((spec) => ({ kind: spec.kind, params: spec.params }))
+        ),
         ...(validated.clarificationQuestions ?? []),
       ];
     }
@@ -731,7 +744,10 @@ export async function analyzeConstraint(
       (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText))
     ) {
       return {
-        ...clarifyAmbiguousIfThen(rawText, agentInput),
+        ...clarifyAmbiguousIfThen(
+          rawText,
+          resolvedSpecs.map((spec) => ({ kind: spec.kind, params: spec.params }))
+        ),
         requiresConfirmation: true,
         guardReasons,
         rawResponse: content,
@@ -770,7 +786,11 @@ export async function analyzeConstraint(
         requiresConfirmation: true,
         guardReasons: [],
         clarificationQuestions: [
-          'Rule parser chưa hiểu ràng buộc bắt buộc này — bạn có thể diễn đạt lại rõ hơn hoặc chọn mẫu có sẵn?',
+          'Mình chưa chắc cách hiểu câu này. Chọn giúp cách đúng ý bạn bên dưới, hoặc dùng mẫu có sẵn.',
+          ...clarificationPrompts(
+            rawText,
+            deterministic.map((spec) => ({ kind: spec.kind, params: spec.params }))
+          ),
         ],
         assumptions: [
           `AI phân tích lỗi và rule parser chỉ trả custom_dsl cho ràng buộc hard. Lỗi gốc: ${

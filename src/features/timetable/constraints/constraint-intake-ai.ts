@@ -8,6 +8,7 @@ import {
   severityFromConstraintType,
 } from './custom-normalization-draft';
 import type { CustomConstraintNormalizationResult } from '../ai/custom-normalization-service';
+import { buildClarificationQuestions } from '../ai/constraint-clarification';
 import { buildSpecsFromAnalyzeResult, type AnalyzeConstraintResult } from '../ai/analyze-constraint-service';
 import type { AgentInputPayload } from '../ai/types';
 
@@ -131,6 +132,10 @@ export function buildDraftFromAnalyzeResult(
 
   // needs_clarification: AI needs more info
   if (result.status === 'needs_clarification') {
+    const structuredQuestions = buildClarificationQuestions(
+      raw.text,
+      specs.map((spec) => ({ kind: spec.kind, params: spec.params }))
+    );
     const customNorm: CustomConstraintNormalizationResult = {
       status: 'needs_clarification',
       normalizedText: result.normalizedText,
@@ -144,10 +149,13 @@ export function buildDraftFromAnalyzeResult(
       },
       confidence: 0.35,
       needsClarification: true,
-      clarificationQuestions: result.clarificationQuestions,
+      clarificationQuestions: structuredQuestions.map((question) => question.prompt),
     };
+    const built = buildCustomDraftFromNormalization(raw, customNorm, agentInput);
     return {
-      ...buildCustomDraftFromNormalization(raw, customNorm, agentInput),
+      ...built,
+      clarificationQuestions: structuredQuestions,
+      issues: built.issues.filter((issue) => issue.code !== 'needs_user_clarification'),
       reparseCount,
       source: 'ai_reparse',
       displayText: result.normalizedText,

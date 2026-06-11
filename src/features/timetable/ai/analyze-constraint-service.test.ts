@@ -77,8 +77,9 @@ test('analyzeConstraint converts ambiguous technical if_then response into Vietn
 
     assert.equal(result.status, 'needs_clarification');
     assert.deepEqual(result.specs, []);
-    assert.ok(result.clarificationQuestions.length >= 2);
-    assert.match(result.clarificationQuestions.join('\n'), /cùng bất kỳ ngày nào|ngày cụ thể/u);
+    assert.ok(result.clarificationQuestions.length >= 1);
+    assert.match(result.clarificationQuestions.join('\n'), /một người/u);
+    assert.doesNotMatch(result.clarificationQuestions.join('\n'), /Rule parser|diễn đạt lại rõ hơn/u);
     assert.doesNotMatch(result.normalizedText, /teacher_block_period|điều kiện chưa xác định/u);
     assert.equal(result.requiresConfirmation, true);
   } finally {

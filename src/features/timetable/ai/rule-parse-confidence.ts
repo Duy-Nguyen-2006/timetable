@@ -76,7 +76,7 @@ export function inferRuleParseConfidence(
     return {
       specs: [],
       confidence: 'low',
-      issues: [{ code: 'low_confidence', message: 'Rule parser không tạo được spec.' }],
+      issues: [{ code: 'low_confidence', message: 'Mình chưa chắc cách hiểu câu này.' }],
     };
   }
 
@@ -92,7 +92,7 @@ export function inferRuleParseConfidence(
     return {
       specs,
       confidence: 'low',
-      issues: [{ code: 'low_confidence', message: 'Rule parser chưa hiểu ràng buộc bắt buộc.' }],
+      issues: [{ code: 'low_confidence', message: 'Cần bạn xác nhận thêm để áp dụng.' }],
     };
   }
 
@@ -100,7 +100,7 @@ export function inferRuleParseConfidence(
     return {
       specs,
       confidence: 'low',
-      issues: [{ code: 'low_confidence', message: 'Rule parser chỉ hiểu một phần (custom_dsl).' }],
+      issues: [{ code: 'low_confidence', message: 'Mình hiểu một phần — cần bạn xác nhận thêm.' }],
     };
   }
 
@@ -127,7 +127,12 @@ export function inferRuleParseConfidence(
     return {
       specs,
       confidence: 'low',
-      issues: [{ code: 'unknown_entity', message: 'Rule parser khớp giáo viên/lớp/môn không có trong dữ liệu.' }],
+      issues: [
+        {
+          code: 'unknown_entity',
+          message: 'Có tên giáo viên/lớp/môn chưa có trong dữ liệu. Kiểm tra lại giúp mình nhé.',
+        },
+      ],
     };
   }
 

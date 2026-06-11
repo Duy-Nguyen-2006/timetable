@@ -28,7 +28,7 @@ type ConstraintReviewPanelProps = {
   onDeleteConstraint: (id: string) => void;
   onSaveDraft: (updated: ParsedConstraintDraft) => void;
   onApplyTemplate: (constraint: ConstraintItem, templateId: ConstraintFormTemplateId) => void;
-  onAiAnalyze?: (constraint: ConstraintItem, draft: ParsedConstraintDraft) => void;
+  onAiAnalyze?: (constraint: ConstraintItem, draft: ParsedConstraintDraft, userFeedback?: string) => void;
   highlightConstraintIds?: Set<string>;
 };
 
@@ -112,9 +112,10 @@ export function ConstraintReviewPanel({
               onDelete={() => onDeleteConstraint(constraint.id)}
               onAiAnalyze={
                 onAiAnalyze && draftByRaw.get(constraint.id)
-                  ? () => onAiAnalyze(constraint, draftByRaw.get(constraint.id)!)
+                  ? (userFeedback) => onAiAnalyze(constraint, draftByRaw.get(constraint.id)!, userFeedback)
                   : undefined
               }
+              onOpenTemplatePicker={() => setTemplateForId(constraint.id)}
               isReparsing={reparseLoading === constraint.id}
               highlight={highlightConstraintIds?.has(constraint.id)}
             />
