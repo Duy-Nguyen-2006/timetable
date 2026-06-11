@@ -91,6 +91,30 @@ test('M7.1: capabilityBlockReason returns null for fully-capable hard kind', () 
   assert.equal(reason, null);
 });
 
+test('M7.1: capabilityBlockReason returns null for solver-encodable kinds without TS IR adapter', () => {
+  for (const kind of ['if_then', 'subject_max_consecutive'] as const) {
+    const reason = capabilityBlockReason(kind, 'hard', {
+      original: kind === 'if_then'
+        ? 'Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1'
+        : 'Môn Văn không được 3 tiết liên tiếp',
+    });
+    assert.equal(reason, null, `${kind} should not be blocked at preflight`);
+    const cap = getConstraintCapability(kind);
+    assert.equal(cap.canEncodeSolver, true, `${kind} should be solver-encodable`);
+    assert.equal(cap.canCheckDeterministically, true, `${kind} should be checkable`);
+  }
+});
+
+test('M7.1: capabilityBlockReason uses original text instead of internal kind labels', () => {
+  const reason = capabilityBlockReason('fake_kind' as any, 'hard', {
+    original: 'Môn Văn không được 3 tiết liên tiếp',
+  });
+  assert.ok(reason);
+  assert.match(reason, /Môn Văn không được 3 tiết liên tiếp/);
+  assert.doesNotMatch(reason, /fake_kind/);
+  assert.doesNotMatch(reason, /IR/);
+});
+
 test('M7.1: capabilityBlockReason returns null for soft kind without encoder', () => {
   // Soft + missing encoder = warning, not block
   const reason = capabilityBlockReason('teacher_block_period', 'soft');

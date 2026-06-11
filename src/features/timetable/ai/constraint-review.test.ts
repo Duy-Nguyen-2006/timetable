@@ -317,6 +317,68 @@ test('preflight passes confirmed hard specs that are now solver-encodable', () =
   assert.ok(!result.blockReasons.includes('hard_spec_unchecked'));
 });
 
+test('preflight passes confirmed if_then and subject_max_consecutive (bug.md regression)', () => {
+  const raw: RawConstraintInput[] = [
+    {
+      id: 'r1',
+      text: 'Nếu Sơn dạy thứ 2 tiết 2 thì Dung không dạy thứ 3 tiết 1',
+      type: 'required',
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'r2',
+      text: 'Môn Văn không được 3 tiết liên tiếp',
+      type: 'required',
+      createdAt: new Date().toISOString(),
+    },
+  ];
+  const specs: ConstraintSpec[] = [
+    {
+      id: 'ai_spec_0',
+      original: raw[0].text,
+      severity: 'hard',
+      kind: 'if_then',
+      params: {
+        if: { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'monday', period: 2 },
+        then: [{ kind: 'teacher_block_slot', params: { teacher: 'Dung', day: 'tuesday', period: 1 } }],
+      },
+    },
+    {
+      id: 'spec_van_max_consecutive',
+      original: raw[1].text,
+      severity: 'hard',
+      kind: 'subject_max_consecutive',
+      params: { subject: 'Văn', max: 2 },
+    },
+  ];
+  const confirmed: ConfirmedConstraint[] = [
+    {
+      id: 'conf1',
+      rawConstraintId: 'r1',
+      specs: [specs[0]],
+      confirmedBy: 'user',
+      confirmedAt: new Date().toISOString(),
+      summary: raw[0].text,
+      displayText: raw[0].text,
+    },
+    {
+      id: 'conf2',
+      rawConstraintId: 'r2',
+      specs: [specs[1]],
+      confirmedBy: 'user',
+      confirmedAt: new Date().toISOString(),
+      summary: raw[1].text,
+      displayText: raw[1].text,
+    },
+  ];
+
+  const result = assertSolvableConstraintState(raw, [], confirmed);
+
+  assert.equal(result.canSolve, true, JSON.stringify(result.messages));
+  assert.ok(!result.blockReasons.includes('hard_spec_unchecked'));
+  assert.ok(!result.messages.some((m) => /IR máy hiểu|if_then|subject_max_consecutive|ai_spec_0/.test(m)));
+});
+
 test('humanizeDraft empty specs', () => {
   const draft = buildDraftFromSpecs(
     'd1',

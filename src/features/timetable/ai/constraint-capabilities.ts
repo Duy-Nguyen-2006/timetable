@@ -9,12 +9,10 @@
  *   5. deterministic checker / verifier (deterministic-validator)
  *
  * This module is the single source of truth for "what works for what kind".
- * The solver gate reads from this map to fail closed for any kind missing
- * a capability.
- *
- * If any capability is false, the solver gate MUST block that hard
- * constraint from reaching the solver. The same goes for soft kinds if
- * `softSolverBlocked` is true.
+ * The user-facing solver gate blocks only when parse, solver encode, or
+ * deterministic check is missing. `canConvertToIR` is tracked for internal
+ * audit (TS↔Python parity) and must NOT block confirmed built-in specs that
+ * the Python solver already encodes via macros.py / solver_skeleton.py.
  */
 
 import type { ConstraintKind } from './constraint-spec';
@@ -94,8 +92,8 @@ export function getConstraintCapability(kind: ConstraintKind): ConstraintCapabil
         subjects: ['S'],
         session: 'morning',
         maxPeriods: 3,
-        if: { kind: 'teacher_block_day', params: { teacher: 'T', day: 'monday' } },
-        then: { kind: 'teacher_block_period', params: { teacher: 'T', period: 1 } },
+        if: { op: 'teacher_teaches_at_slot', teacher: 'T', day: 'monday', period: 1 },
+        then: [{ kind: 'teacher_block_slot', params: { teacher: 'T', day: 'tuesday', period: 1 } }],
       },
     };
     const ir = specToIR(probeSpec);
@@ -119,28 +117,36 @@ export function getConstraintCapability(kind: ConstraintKind): ConstraintCapabil
   };
 }
 
+function constraintLabelForMessage(original?: string): string {
+  const trimmed = original?.trim();
+  if (!trimmed) return 'Ràng buộc này';
+  const preview = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+  return `«${preview}»`;
+}
+
 // ─── Solver-gate pre-flight check ──────────────────────────────────────
 
 /**
  * Check if a hard constraint spec can reach the solver. Returns null if
- * all capabilities are satisfied, or a Vietnamese error message if any
- * capability is missing.
+ * solve-time capabilities are satisfied, or a Vietnamese error message if
+ * parse/encode/check is missing. IR adapter coverage is audited separately.
  */
 export function capabilityBlockReason(
   kind: ConstraintKind,
-  severity: 'hard' | 'soft' | 'info'
+  severity: 'hard' | 'soft' | 'info',
+  options?: { original?: string }
 ): string | null {
   if (kind === 'custom_dsl') return null; // custom_dsl is handled separately
   const cap = getConstraintCapability(kind);
+  const label = constraintLabelForMessage(options?.original);
   if (severity !== 'hard' && !cap.canEncodeSolver) {
     // Soft with no encoder is a warning, not a block
     return null;
   }
   if (severity === 'hard') {
-    if (!cap.canParse) return `Ràng buộc loại «${kind}» chưa được đăng ký trong hệ thống.`;
-    if (!cap.canEncodeSolver) return `Ràng buộc bắt buộc loại «${kind}» hiện chưa được hỗ trợ khi xếp lịch.`;
-    if (!cap.canCheckDeterministically) return `Ràng buộc bắt buộc loại «${kind}» hiện chưa có bước kiểm tra xác định.`;
-    if (!cap.canConvertToIR) return `Ràng buộc bắt buộc loại «${kind}» hiện chưa chuyển được sang dạng IR máy hiểu.`;
+    if (!cap.canParse) return `${label} chưa được hệ thống nhận diện.`;
+    if (!cap.canEncodeSolver) return `${label} chưa áp dụng được khi xếp lịch.`;
+    if (!cap.canCheckDeterministically) return `${label} chưa có bước kiểm tra sau xếp lịch.`;
   }
   return null;
 }

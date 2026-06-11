@@ -52,7 +52,7 @@ function fixHintForReason(reason: PreflightResult['blockReasons'][number]): stri
     case 'hard_custom_unexecutable':
       return 'Hướng xử lý: Ràng buộc dạng custom chưa có luật máy hiểu. Hãy sửa câu thành dạng mẫu có sẵn, hoặc bỏ qua ràng buộc này.';
     case 'hard_spec_unchecked':
-      return 'Hướng xử lý: Loại ràng buộc này hiện chưa được solver hỗ trợ. Hãy sửa thành mẫu khác hoặc bỏ qua.';
+      return 'Hướng xử lý: Ràng buộc này chưa áp dụng được khi xếp lịch. Hãy chọn mẫu có sẵn, sửa lại câu, hoặc bỏ qua.';
     case 'no_confirmed_specs':
       return 'Hướng xử lý: Xác nhận ít nhất một ràng buộc bằng nút «Đúng rồi» trước khi xếp lịch.';
     default:
@@ -123,10 +123,10 @@ export function assertSolvableConstraintState(
           `Ràng buộc bắt buộc dạng đặc biệt chưa chuyển được thành luật máy hiểu: “${spec.original.slice(0, 80)}${spec.original.length > 80 ? '…' : ''}”. Hãy chọn mẫu có sẵn hoặc sửa lại nội dung.`
         );
       }
-      const capReason = capabilityBlockReason(spec.kind, spec.severity);
+      const capReason = capabilityBlockReason(spec.kind, spec.severity, { original: spec.original });
       if (capReason) {
         blockReasons.push('hard_spec_unchecked');
-        messages.push(`${capReason} (${spec.id})`);
+        messages.push(capReason);
       }
     }
   }

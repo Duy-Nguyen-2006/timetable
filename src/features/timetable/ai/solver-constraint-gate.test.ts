@@ -142,7 +142,10 @@ test('validateConfirmedSolveRequest still blocks unknown hard kinds', () => {
   const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Ràng buộc chưa hỗ trợ' }]);
   const gate = validateConfirmedSolveRequest(raw, [], { input: baseInput, confirmedConstraints: confirmed });
   assert.equal(gate.ok, false);
-  if (!gate.ok) assert.match(gate.messages?.join('\n') ?? '', /unsupported_kind/u);
+  if (!gate.ok) {
+    assert.match(gate.messages?.join('\n') ?? '', /Ràng buộc chưa hỗ trợ/);
+    assert.doesNotMatch(gate.messages?.join('\n') ?? '', /unsupported_kind/u);
+  }
 });
 
 test('buildAgentInputWithConfirmedSpecs flattens specs', () => {
