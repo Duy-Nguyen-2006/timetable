@@ -19,15 +19,21 @@ import { resolveConstraintHints, type ResolverHints } from './constraint-resolve
 import { retrieveTopK, type ConstraintRetrieverCandidate } from './constraint-retriever';
 import { evaluateAmbiguity, runAmbiguityGate, type AmbiguityGateResult } from './ambiguity-gate';
 import { buildSlotFillPrompt } from './slot-fill-prompt';
+import { segmentConstraint } from './constraint-segmenter';
+import { parseSlotFillJson, sanitizeSlotFillResponse } from './slot-fill-parser';
+import { voteSlotFillResponses } from './self-consistency';
 import { backTranslateBatch, type BackTranslationCheck } from './back-translation-check';
 import { logRetrievalMiss } from './synonym-miss-log';
 import type { AgentInputPayload, AIProviderConfig } from './types';
 import type { ConstraintSpec, ConstraintKind } from './constraint-spec';
+import type { SlotFillResponse } from './slot-fill-types';
 import { BUILT_IN_CONSTRAINT_KINDS, type BuiltInConstraintScope } from './constraint-registry';
 import { invokeAnalyzeChat } from './analyze-constraint-service';
 import { parseIRFirstWithGuard } from './ir-first-parser';
 import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
 import { getParserMode, isIRFirstAuthoritative } from './parser-mode';
+import { buildInterpretationConfirm } from './constraint-clarification-builder';
+import type { InterpretationCardDTO } from './constraint-clarification-types';
 
 export type ParsePipelineInput = {
   rawText: string;
@@ -63,42 +69,152 @@ export type ParsePipelineResult = {
   usageTokens?: number;
   /** Raw LLM response for debugging. */
   rawResponse?: string;
+  clarificationReasonCode?: 'confirm_interpretation' | 'unsupported_semantics' | 'ambiguous_entity';
+  interpretationCard?: InterpretationCardDTO;
 };
-
-const SLOT_FILL_RESPONSE_SCHEMA = {
-  type: 'object',
-  properties: {
-    decision: { type: 'string', enum: ['suggest_built_in', 'use_custom', 'needs_clarification'] },
-    kind: { type: 'string' },
-    params: { type: 'object' },
-    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-    missingParams: { type: 'array', items: { type: 'string' } },
-    explanation: { type: 'string' },
-    clarificationQuestions: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['decision', 'kind', 'confidence'],
-} as const;
 
 // M1.1: Use centralized BUILT_IN_CONSTRAINT_KINDS from registry instead of hardcoded list
 // This prevents drift when new kinds are added to the registry
 
-function extractJson(content: string): unknown {
-  if (!content) return null;
-  const trimmed = content.trim();
-  // Try to find a JSON block
-  const m = trimmed.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]);
-  } catch {
-    return null;
+function dayAliasToId(day: string | undefined, agentInput: AgentInputPayload): string | undefined {
+  if (!day) return undefined;
+  if (agentInput.days.some((item) => item.id === day)) return day;
+  const indexByThu: Record<string, number> = { thu2: 0, thu3: 1, thu4: 2, thu5: 3, thu6: 4, thu7: 5 };
+  const index = indexByThu[day];
+  return index === undefined ? day : agentInput.days[index]?.id ?? day;
+}
+
+function normalizeKeywordTypos(text: string): string {
+  return text
+    .replace(/\bkhogn\b/giu, 'khong')
+    .replace(/\bko\b|\bk\b/giu, 'khong')
+    .replace(/\bday\b/giu, 'day')
+    .replace(/\btiet\b/giu, 'tiet')
+    .replace(/\bthu\b/giu, 'thu');
+}
+
+function extractPeriod(text: string): number | undefined {
+  const normalized = normalizeKeywordTypos(text.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').replace(/đ/giu, 'd'));
+  const match = normalized.match(/\btiet\s*(\d+)\b/iu);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function extractThuAlias(text: string): string | undefined {
+  const match = normalizeKeywordTypos(text).match(/\bthu\s*(2|3|4|5|6|7)\b/iu)
+    ?? text.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').replace(/đ/giu, 'd').match(/\bthu\s*(2|3|4|5|6|7)\b/iu);
+  return match ? `thu${match[1]}` : undefined;
+}
+
+function deterministicSlotFill(
+  rawText: string,
+  agentInput: AgentInputPayload,
+  hints: ResolverHints
+): SlotFillResponse | null {
+  const segment = segmentConstraint(rawText);
+  const normalized = normalizeKeywordTypos(hints.normalizedText || rawText);
+  const repairedRaw = normalizeKeywordTypos(rawText);
+  const day = dayAliasToId(hints.extractedDays[0] ?? extractThuAlias(rawText) ?? segment.scope?.day, agentInput);
+  const period = extractPeriod(repairedRaw);
+
+  if (
+    hints.resolvedTeachers.length >= 2 &&
+    /\b(cung|same)\b/iu.test(normalized) &&
+    /\b(1\s*)?tiet\b/iu.test(normalized) &&
+    /khong\s+duoc|khong/iu.test(normalized)
+  ) {
+    return {
+      atoms: [{
+        kind: 'teacher_pair_not_same_slot',
+        params: {
+          teachers: hints.resolvedTeachers.slice(0, 2),
+          ...(day ? { scope: { day } } : {}),
+        },
+        confidence: 'high',
+        missingParams: [],
+      }],
+    };
   }
+
+  if (segment.shape === 'if_then' && segment.ifClause) {
+    const teachers = Array.from(new Set(agentInput.assignments.map((item) => item.teacher.label)));
+    const conditionTeacher = teachers.find((teacher) => segment.ifClause && new RegExp(`(?:^|\\s)${teacher}(?:\\s|$)`, 'iu').test(segment.ifClause));
+    const conditionDay = dayAliasToId(extractThuAlias(segment.ifClause), agentInput);
+    const conditionPeriod = extractPeriod(segment.ifClause);
+    const atoms = segment.atoms.map((atomText) => {
+      const normalizedAtom = normalizeKeywordTypos(atomText.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').replace(/đ/giu, 'd'));
+      const atomTeacher = teachers.find((teacher) => new RegExp(`(?:^|\\s)${teacher}(?:\\s|$)`, 'iu').test(atomText));
+      const atomDay = dayAliasToId(extractThuAlias(atomText), agentInput);
+      const atomPeriod = extractPeriod(atomText);
+      if (/khong\s+day|khong/iu.test(normalizedAtom) && atomTeacher && atomDay && atomPeriod) {
+        return { kind: 'teacher_block_slot', params: { teacher: atomTeacher, day: atomDay, period: atomPeriod }, confidence: 'high' as const, missingParams: [] };
+      }
+      if (/phai\s+day|phai/iu.test(normalizedAtom) && atomTeacher && atomDay) {
+        return { kind: 'teacher_required_day', params: { teacher: atomTeacher, day: atomDay }, confidence: 'high' as const, missingParams: [] };
+      }
+      return { kind: 'custom', params: {}, confidence: 'low' as const, missingParams: [] };
+    });
+    if (conditionTeacher && conditionDay && conditionPeriod && atoms.length > 0) {
+      return {
+        condition: {
+          op: 'teacher_teaches_at_slot',
+          teacher: conditionTeacher,
+          day: conditionDay,
+          period: conditionPeriod,
+        },
+        atoms,
+      };
+    }
+  }
+
+  if (
+    hints.resolvedTeacher &&
+    day &&
+    (/(?:khong|ko|k)\s+day/iu.test(repairedRaw) || /khong\s+day/iu.test(normalized))
+  ) {
+    return {
+      atoms: [{
+        kind: period ? 'teacher_block_slot' : 'teacher_block_day',
+        params: {
+          teacher: hints.resolvedTeacher,
+          day,
+          ...(period ? { period } : {}),
+        },
+        confidence: 'high',
+        missingParams: [],
+      }],
+    };
+  }
+
+  return null;
+}
+
+function slotFillToSpecs(rawText: string, slotFill: SlotFillResponse): ConstraintSpec[] {
+  const atoms = slotFill.atoms.map((atom, index): ConstraintSpec => ({
+    id: `slot_${Date.now()}_${index}`,
+    original: rawText,
+    severity: 'hard',
+    kind: atom.kind === 'custom' ? 'custom_dsl' : atom.kind as ConstraintKind,
+    params: atom.params,
+  }));
+  if (slotFill.condition && atoms.length > 0) {
+    return [{
+      id: `slot_${Date.now()}_if`,
+      original: rawText,
+      severity: 'hard',
+      kind: 'if_then',
+      params: { if: slotFill.condition, then: atoms },
+    }];
+  }
+  return atoms;
 }
 
 /** Run the end-to-end parse pipeline. */
 export async function runParsePipeline(input: ParsePipelineInput): Promise<ParsePipelineResult> {
   const diagnostics: Array<{ stage: ParsePipelineStage; message: string }> = [];
   const { rawText, agentInput, config, previousAttempts } = input;
+  const segment = segmentConstraint(rawText);
 
   // ── Stage 1: Resolver (code) ────────────────────────────────────────────
   const teacherLabels = Array.from(new Set(agentInput.assignments.map((a) => a.teacher.label)));
@@ -146,59 +262,46 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   // ── Stage 4: Slot-fill (LLM) ───────────────────────────────────────────
   const prompt = buildSlotFillPrompt(rawText, hints, candidates, { previousAttempts });
   let response: { content?: string; usage?: { total_tokens?: number } } = { content: '' };
-  let slotFillJson: any = null;
+  let slotFillResponse: SlotFillResponse | null = null;
+  const slotFillCalls = segment.shape === 'if_then' || segment.atoms.length > 1 ? 3 : 1;
+  const slotFillResponses: SlotFillResponse[] = [];
   try {
-    response = await invokeAnalyzeChat(config, [
-      { role: 'system', content: prompt.system },
-      { role: 'user', content: prompt.user },
-    ]);
-    slotFillJson = extractJson(response.content ?? '');
+    for (let index = 0; index < slotFillCalls; index += 1) {
+      response = await invokeAnalyzeChat(config, [
+        { role: 'system', content: prompt.system },
+        { role: 'user', content: prompt.user },
+      ]);
+      slotFillResponses.push(parseSlotFillJson(response.content));
+    }
+    const vote = voteSlotFillResponses(slotFillResponses);
+    slotFillResponse = vote.accepted ? vote.winner ?? null : null;
+    if (!vote.accepted) {
+      diagnostics.push({ stage: 'slot_fill', message: `self_consistency=diverged calls=${vote.calls}` });
+    } else {
+      diagnostics.push({ stage: 'slot_fill', message: `self_consistency=accepted calls=${vote.calls}` });
+    }
   } catch (err) {
     diagnostics.push({ stage: 'slot_fill', message: `error: ${err instanceof Error ? err.message : String(err)}` });
   }
-  diagnostics.push({ stage: 'slot_fill', message: `parsed=${slotFillJson ? 'yes' : 'no'}` });
+  if (!slotFillResponse) {
+    slotFillResponse = deterministicSlotFill(rawText, agentInput, hints);
+    if (slotFillResponse) diagnostics.push({ stage: 'slot_fill', message: 'deterministic_fallback=yes' });
+  }
+  if (slotFillResponse) slotFillResponse = sanitizeSlotFillResponse(slotFillResponse);
+  diagnostics.push({ stage: 'slot_fill', message: `parsed=${slotFillResponse ? 'yes' : 'no'}` });
 
   // Parse slot-fill response
-  const specs: ConstraintSpec[] = [];
+  const specs: ConstraintSpec[] = slotFillResponse ? slotFillToSpecs(rawText, slotFillResponse) : [];
   let normalizedText = rawText;
-  let confidence: 'high' | 'medium' | 'low' = 'medium';
-
-  if (slotFillJson && typeof slotFillJson === 'object') {
-    const decision = String(slotFillJson.decision ?? '');
-    const kind = String(slotFillJson.kind ?? '');
-    const params = (slotFillJson.params ?? {}) as Record<string, unknown>;
-    confidence = (slotFillJson.confidence as 'high' | 'medium' | 'low') ?? 'medium';
-    if (decision === 'suggest_built_in' && BUILT_IN_CONSTRAINT_KINDS.has(kind as any)) {
-      specs.push({
-        id: `slot_${Date.now()}_0`,
-        original: rawText,
-        severity: 'hard',
-        kind: kind as ConstraintKind,
-        params,
-      });
-      normalizedText = slotFillJson.explanation ?? rawText;
-    } else if (decision === 'use_custom' || kind === 'custom' || kind === 'custom_dsl') {
-      // Custom IR — must have a structured expr
-      specs.push({
-        id: `slot_${Date.now()}_0`,
-        original: rawText,
-        severity: 'hard',
-        kind: 'custom_dsl',
-        params: {
-          ...params,
-          explain: slotFillJson.explanation ?? rawText,
-        },
-      });
-      normalizedText = slotFillJson.explanation ?? rawText;
-    } else {
-      // Clarify or unrecognized
-      diagnostics.push({ stage: 'slot_fill', message: `clarify/unrecognized decision=${decision} kind=${kind}` });
-    }
-  }
+  let confidence: 'high' | 'medium' | 'low' = slotFillResponse?.atoms.every((atom) => atom.confidence === 'high' && atom.missingParams.length === 0 && atom.kind !== 'custom')
+    ? 'high'
+    : slotFillResponse ? 'low' : 'medium';
 
   // ── Stage 5: Back-translation check (code) ──────────────────────────────
   const backTranslation = backTranslateBatch(specs, rawText);
-  const requiresConfirmation = backTranslation.needsConfirmation || specs.length === 0;
+  const mustConfirmInterpretation = segment.shape === 'if_then' || segment.atoms.length > 1;
+  const hasCustom = specs.some((spec) => spec.kind === 'custom_dsl');
+  const requiresConfirmation = backTranslation.needsConfirmation || specs.length === 0 || mustConfirmInterpretation || confidence !== 'high' || hasCustom;
 
   diagnostics.push({
     stage: 'back_translation',
@@ -237,13 +340,22 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   // In 'shadow' mode, we still return legacy but log divergence.
   let finalSpecs = specs;
   let finalStatus: 'mapped_builtin' | 'custom_dsl' | 'needs_clarification' | 'unsupported' =
-    specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin') : 'needs_clarification';
+    specs.length > 0
+      ? hasCustom || confidence !== 'high'
+        ? 'needs_clarification'
+        : (specs[0].kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin')
+      : 'needs_clarification';
 
   if (parserMode === 'ir_first' && irFirstResult?.kind === 'ir') {
     finalSpecs = [irFirstResult.spec];
     finalStatus = irFirstResult.spec.kind === 'custom_dsl' ? 'custom_dsl' : 'mapped_builtin';
     diagnostics.push({ stage: 'done', message: `mode=ir_first authoritative` });
   }
+
+  const interpretationCard =
+    mustConfirmInterpretation && finalSpecs.length > 0
+      ? buildInterpretationConfirm(finalSpecs[0], hints.droppedIllustrations)
+      : undefined;
 
   return {
     status: finalStatus,
@@ -258,5 +370,7 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
     diagnostics,
     usageTokens: response.usage?.total_tokens,
     rawResponse: response.content,
+    clarificationReasonCode: mustConfirmInterpretation ? 'confirm_interpretation' : hasCustom ? 'unsupported_semantics' : undefined,
+    interpretationCard,
   };
 }

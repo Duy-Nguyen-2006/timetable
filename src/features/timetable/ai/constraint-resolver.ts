@@ -44,6 +44,9 @@ export type ResolverHints = {
   extractedNumber: number | null;
   extractedPeriods: number[];
   extractedDays: string[];
+  /** Illustration phrases stripped from trusted numeric/entity hints. */
+  droppedIllustrations: string[];
+  illustrationSpans: Array<{ start: number; end: number; text: string }>;
   /** Scope inferred from entity match. */
   inferredScope: BuiltInConstraintScope | null;
   /** Whether the text mentions specific constraint keywords. */
@@ -67,20 +70,38 @@ export type ResolverInput = {
   days?: Array<{ id: string; label: string }>;
 };
 
+function stripIllustrations(text: string): {
+  trustedText: string;
+  droppedIllustrations: string[];
+  illustrationSpans: Array<{ start: number; end: number; text: string }>;
+} {
+  const match = text.match(/\s*(?:,?\s*)(ví dụ|chẳng hạn|kiểu như|như là)\s+(.+)$/iu);
+  if (!match || match.index == null) {
+    return { trustedText: text, droppedIllustrations: [], illustrationSpans: [] };
+  }
+  const dropped = match[0].replace(/^[,\s]+/u, '').trim();
+  return {
+    trustedText: text.slice(0, match.index).trim(),
+    droppedIllustrations: [dropped],
+    illustrationSpans: [{ start: match.index, end: text.length, text: dropped }],
+  };
+}
+
 /** Run Stage 1: deterministic extraction of all hints. */
 export function resolveConstraintHints(input: ResolverInput): ResolverHints {
-  const normalized = normalizeConstraintText(input.userText);
+  const { trustedText, droppedIllustrations, illustrationSpans } = stripIllustrations(input.userText);
+  const normalized = normalizeConstraintText(trustedText);
   const teacherMatch = matchEntity(normalized, input.teachers, 'giáo viên');
   const subjectMatch = matchEntity(normalized, input.subjects, 'môn học');
   const classMatch = matchEntity(normalized, input.classes, 'lớp');
-  const subjectMatches = matchKnownEntities(input.userText, input.subjects);
-  const teacherMatches = matchKnownEntities(input.userText, input.teachers);
-  const classMatches = matchKnownEntities(input.userText, input.classes);
+  const subjectMatches = matchKnownEntities(trustedText, input.subjects);
+  const teacherMatches = matchKnownEntities(trustedText, input.teachers);
+  const classMatches = matchKnownEntities(trustedText, input.classes);
 
-  const extractedNumber = extractFirstNumber(input.userText);
+  const extractedNumber = extractFirstNumber(trustedText);
   const periods: number[] = [];
-  const day = input.days ? extractDayId(input.userText, input.days) : null;
-  const period = extractPeriodNumber(input.userText);
+  const day = input.days ? extractDayId(trustedText, input.days) : null;
+  const period = extractPeriodNumber(trustedText);
   if (period !== null) periods.push(period);
   if (day) {
     // Day is already in extractedDays
@@ -105,11 +126,12 @@ export function resolveConstraintHints(input: ResolverInput): ResolverHints {
 
   // Detect ambiguous entity
   let ambiguousEntity: ResolverHints['ambiguousEntity'] = null;
-  if (teacherMatch.status === 'ambiguous') {
+  const mentionsTeacherPair = /\b(va|cung|dong\s+thoi)\b/iu.test(normalized) && teacherMatches.length >= 2;
+  if (teacherMatch.status === 'ambiguous' && !mentionsIfThen && !mentionsTeacherPair) {
     ambiguousEntity = { kind: 'teacher', candidates: teacherMatches };
-  } else if (subjectMatch.status === 'ambiguous') {
+  } else if (subjectMatch.status === 'ambiguous' && !mentionsIfThen) {
     ambiguousEntity = { kind: 'subject', candidates: subjectMatches };
-  } else if (classMatch.status === 'ambiguous') {
+  } else if (classMatch.status === 'ambiguous' && !mentionsIfThen) {
     ambiguousEntity = { kind: 'class', candidates: classMatches };
   }
 
@@ -124,6 +146,8 @@ export function resolveConstraintHints(input: ResolverInput): ResolverHints {
     extractedNumber,
     extractedPeriods: periods,
     extractedDays: day ? [day] : [],
+    droppedIllustrations,
+    illustrationSpans,
     inferredScope,
     mentionsBlock,
     mentionsMax,

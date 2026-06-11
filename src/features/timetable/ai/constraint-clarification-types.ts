@@ -54,7 +54,16 @@ export type ClarificationQuestion = {
     | 'missing_period'
     | 'missing_scope'
     | 'unsupported_semantics'
-    | 'contradictory_markers';
+    | 'contradictory_markers'
+    | 'confirm_interpretation';
+};
+
+export type InterpretationCardDTO = {
+  scopeVi?: string;
+  ifAtomVi?: string;
+  thenAtomsVi: string[];
+  notesVi: string[];
+  editableAtomIds: string[];
 };
 
 /**
@@ -70,6 +79,7 @@ export const REASON_CODE_LABEL_VI: Record<ClarificationQuestion['reasonCode'], s
   missing_scope: 'Thiếu phạm vi',
   unsupported_semantics: 'Chưa hỗ trợ',
   contradictory_markers: 'Mâu thuẫn trong câu',
+  confirm_interpretation: 'Xác nhận cách hiểu',
 };
 
 // ─── Helpers used by the pipeline to build DTOs deterministically ─────

@@ -54,6 +54,41 @@ function hasWholePhrase(text: string, phrase: string): boolean {
   return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escapeRegExp(normalizedPhrase)}(?=$|[^\\p{L}\\p{N}_])`, 'u').test(text);
 }
 
+function levenshteinDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= b.length; i += 1) {
+    let previous = rows[0];
+    rows[0] = i;
+    for (let j = 1; j <= a.length; j += 1) {
+      const temp = rows[j];
+      rows[j] = b[i - 1] === a[j - 1]
+        ? previous
+        : Math.min(previous + 1, rows[j] + 1, rows[j - 1] + 1);
+      previous = temp;
+    }
+  }
+  return rows[a.length];
+}
+
+function fuzzyEntityMatches(text: string, labels: string[]): string[] {
+  const stopwords = new Set([
+    'thay', 'co', 'giao', 'vien', 'khong', 'ko', 'k', 'day', 'hoc', 'thu', 'tiet',
+    'vao', 'neu', 'thi', 'phai', 'duoc', 'cung', 'mot', 'lop', 'mon',
+  ]);
+  const tokens = new Set(text.split(/\s+/u).filter((token) => token.length >= 2 && !stopwords.has(token) && !/^\d+$/u.test(token)));
+  const matches = labels.filter((label) => {
+    const firstToken = normalizeConstraintText(label).split(/\s+/u)[0];
+    if (!firstToken || firstToken.length < 2) return false;
+    if (firstToken === 'mon' || firstToken === 'lop') return false;
+    for (const token of tokens) {
+      const maxDistance = Math.max(firstToken.length, token.length) <= 4 ? 1 : 2;
+      if (levenshteinDistance(token, firstToken) <= maxDistance) return true;
+    }
+    return false;
+  });
+  return [...new Set(matches)];
+}
+
 export function matchEntity(text: string, labels: string[], entityName: string): EntityMatch {
   const exactMatches = labels.filter((label) => hasWholePhrase(text, label));
   if (exactMatches.length === 1) return { status: 'matched', label: exactMatches[0] };
@@ -70,6 +105,12 @@ export function matchEntity(text: string, labels: string[], entityName: string):
   if (partialMatches.length > 1) {
     return { status: 'ambiguous', reason: `${entityName} bị mơ hồ: ${partialMatches.join(', ')}` };
   }
+
+  const fuzzyMatches = fuzzyEntityMatches(text, labels);
+  if (fuzzyMatches.length === 1) return { status: 'matched', label: fuzzyMatches[0] };
+  if (fuzzyMatches.length > 1) {
+    return { status: 'ambiguous', reason: `${entityName} bị mơ hồ: ${fuzzyMatches.join(', ')}` };
+  }
   return { status: 'missing', reason: `Không tìm thấy ${entityName}` };
 }
 
@@ -79,10 +120,13 @@ export function matchKnownEntities(text: string, labels: string[]): string[] {
   if (exactMatches.length > 0) return exactMatches;
 
   const tokens = new Set(normalized.split(/\s+/u).filter(Boolean));
-  return labels.filter((label) => {
+  const partialMatches = labels.filter((label) => {
     const firstToken = normalizeConstraintText(label).split(/\s+/u)[0];
     return Boolean(firstToken && tokens.has(firstToken));
   });
+  if (partialMatches.length > 0) return partialMatches;
+
+  return fuzzyEntityMatches(normalized, labels);
 }
 
 function supportedDefinition(
@@ -230,7 +274,7 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
       const definition = supportedDefinition(definitions, 'subject_required_period');
       if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
       // If no class specified, user needs to clarify semantics (global vs per-class)
-      if (classMatch.status !== 'matched') {
+      if (classMatch.status !== 'matched' || !/\b(lop|class)\b/u.test(normalized)) {
         return customDecision(0.7, 'Môn học cần làm rõ: toàn cục hay theo lớp?');
       }
       return suggest(

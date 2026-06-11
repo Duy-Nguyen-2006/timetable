@@ -75,6 +75,8 @@ export type ConstraintResolverHints = {
   extractedNumber: number | null;
   extractedPeriods: number[];
   extractedDays: string[];
+  droppedIllustrations?: string[];
+  illustrationSpans?: Array<{ start: number; end: number; text: string }>;
   /** Scope inferred from entity match. */
   inferredScope: BuiltInConstraintScope | null;
   /** Whether the text mentions specific constraint keywords. */
