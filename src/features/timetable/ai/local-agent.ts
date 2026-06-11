@@ -59,8 +59,8 @@ export async function runLocalAgent(
   }
 
   try {
-    emit(config, { type: 'status', message: 'Khởi tạo pipeline v2...', iteration: 0, maxIterations: 1 });
-    emit(config, { type: 'phase', phase: 'translator', message: 'Dùng confirmed specs, bỏ qua translator LLM', iteration: 0 });
+    emit(config, { type: 'status', message: 'Đang chuẩn bị dữ liệu xếp lịch...', iteration: 0, maxIterations: 1 });
+    emit(config, { type: 'phase', phase: 'translator', message: 'Đã nạp ràng buộc đã duyệt', iteration: 0 });
 
     const preTranslated = options?.preTranslatedConstraintSpecs;
     if (!preTranslated?.length) {

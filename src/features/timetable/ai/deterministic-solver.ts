@@ -125,6 +125,13 @@ export async function runDeterministicSolver(
     compressed.assignments
   );
 
+  emit(config, {
+    type: 'phase',
+    phase: 'checking',
+    message: 'Đang kiểm tra lịch sau xếp',
+    iteration: 0,
+  });
+
   const report = validateSchedule(scheduleWithAssignmentIds, deduped, {
     assignments: compressed.assignments,
   });

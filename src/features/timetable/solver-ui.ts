@@ -1,3 +1,4 @@
+import type { AIProviderConfig, SolverProfile } from './ai/types'
 import type { DeterministicValidationReport } from './ai/constraint-spec'
 import type { AgentLifecyclePhase } from './ai/types'
 import type { AgentProgressStep } from './types'
@@ -11,31 +12,69 @@ export const SOLVER_STATUS_LABELS: Record<string, string> = {
   timeout_with_solution: 'Hết giờ có lịch',
 }
 
-export const STEP_ORDER = ['thinking', 'coding', 'running', 'checking', 'fixing'] as const
+/** Deterministic solve path: chuẩn bị → xếp lịch → kiểm tra */
+export const STEP_ORDER = ['preparing', 'running', 'checking'] as const
 export const STEP_LABELS: Record<AgentProgressStep, string> = {
-  thinking: 'Suy nghĩ',
-  coding: 'Chuẩn bị luật',
-  running: 'Chạy thử',
+  preparing: 'Chuẩn bị',
+  running: 'Xếp lịch',
   checking: 'Kiểm tra',
-  fixing: 'Sửa lỗi',
   idle: 'Sẵn sàng',
+}
+
+export const SOLVER_PROFILE_LABELS: Record<SolverProfile, string> = {
+  fast: 'Nhanh',
+  balanced: 'Cân bằng',
+  deep: 'Sâu',
+}
+
+export const DEFAULT_SOLVER_CONFIG: AIProviderConfig = {
+  baseURL: '',
+  apiKey: '',
+  model: 'deterministic-solver',
+  solverProfile: 'balanced',
+  solverRuntimeMode: 'bundled',
+}
+
+export function resolveSolveConfig(aiProvider: AIProviderConfig | null): AIProviderConfig {
+  if (!aiProvider) return DEFAULT_SOLVER_CONFIG
+  return {
+    ...DEFAULT_SOLVER_CONFIG,
+    ...aiProvider,
+    solverProfile: aiProvider.solverProfile ?? DEFAULT_SOLVER_CONFIG.solverProfile,
+    solverRuntimeMode: aiProvider.solverRuntimeMode ?? DEFAULT_SOLVER_CONFIG.solverRuntimeMode,
+  }
 }
 
 export function toProgressStep(phase: AgentLifecyclePhase): AgentProgressStep {
   switch (phase) {
-    case 'coding':
     case 'running':
+    case 'coding':
+      return 'running'
     case 'checking':
     case 'fixing':
-      return phase
+      return 'checking'
     case 'translator':
     case 'planner':
     case 'thinking':
-      return 'thinking'
     case 'idle':
-      return 'idle'
+      return 'preparing'
     default:
-      return 'thinking'
+      return 'preparing'
+  }
+}
+
+export function solveProgressPercent(step: AgentProgressStep): number {
+  switch (step) {
+    case 'preparing':
+      return 20
+    case 'running':
+      return 65
+    case 'checking':
+      return 90
+    case 'idle':
+      return 100
+    default:
+      return 5
   }
 }
 

@@ -15,7 +15,7 @@ export type TimetableSolveResult = LocalAgentFinalResult
 export type SolverRequestPayload = Pick<AgentInputPayload, 'constraints'>
 
 export type { ConfirmedSolveRequest } from './ai/solver-constraint-gate'
-export type AgentProgressStep = 'thinking' | 'coding' | 'running' | 'checking' | 'fixing' | 'idle'
+export type AgentProgressStep = 'preparing' | 'running' | 'checking' | 'idle'
 
 export type CachedRun = {
   id: string

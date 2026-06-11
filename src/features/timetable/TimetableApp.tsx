@@ -72,10 +72,13 @@ import type {
 import {
   NO_ACTIVE_PERIOD_MESSAGE,
   RESULT_NOT_FOUND_MESSAGE,
+  SOLVER_PROFILE_LABELS,
   SOLVER_STATUS_LABELS,
   STEP_LABELS,
   STEP_ORDER,
   buildReportRows,
+  resolveSolveConfig,
+  solveProgressPercent,
   toProgressStep,
 } from './solver-ui'
 import { MetricCard, SelectField } from './components/TimetableFields'
@@ -179,8 +182,6 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [warnings, setWarnings] = useState<string[]>([])
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [agentStep, setAgentStep] = useState<AgentProgressStep>('idle')
-  const [agentIteration, setAgentIteration] = useState(0)
-  const [agentMaxIterations, setAgentMaxIterations] = useState(5)
   const [agentElapsed, setAgentElapsed] = useState(0)
   const [agentTimeline, setAgentTimeline] = useState<AgentLifecycleEvent[]>([])
   const agentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -198,6 +199,7 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
   const [aiProvider, setAiProvider] = useState<AIProviderConfig | null>(null)
+  const solveConfig = useMemo(() => resolveSolveConfig(aiProvider), [aiProvider])
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [isFirstRun, setIsFirstRun] = useState(false)
   const [solverRuntimeNotice, setSolverRuntimeNotice] = useState<string | null>(null)
@@ -1127,22 +1129,20 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
     setAiError(null)
     setAiResult(null)
     setShowTechnicalErrors(false)
-    setAgentStatus('Đang khởi tạo...')
-    setAgentStep('thinking')
-      setAgentIteration(0)
-      setAgentMaxIterations(6)
-      setAgentElapsed(0)
-      setAgentTimeline([
-        {
-          id: crypto.randomUUID(),
-          phase: 'thinking',
-          title: 'Request queued',
-          detail: 'Da nhan input va bat dau chuan bi pipeline agent.',
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          tags: ['request'],
-        },
-      ])
+    setAgentStatus('Đang chuẩn bị xếp lịch...')
+    setAgentStep('preparing')
+    setAgentElapsed(0)
+    setAgentTimeline([
+      {
+        id: crypto.randomUUID(),
+        phase: 'translator',
+        title: 'Bắt đầu xếp lịch',
+        detail: 'Dùng ràng buộc đã duyệt và chạy bộ giải CP-SAT cố định (không gọi AI).',
+        status: 'active',
+        timestamp: new Date().toISOString(),
+        tags: ['solve'],
+      },
+    ])
 
       if (agentTimerRef.current) clearInterval(agentTimerRef.current)
 
@@ -1150,17 +1150,9 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
       setAgentElapsed((prev) => prev + 1)
     }, 1000)
 
-      // === NEW LOCAL AGENT INTEGRATION ===
-      if (!aiProvider) {
-        setAiError('Vui lòng cấu hình AI Provider (Base URL + API Key + Model) trước khi dùng tính năng AI.')
-        setShowSettingsModal(true)
-        setAiLoading(false)
-        return
-      }
-
       try {
         const agentInput = solveGate.agentInput
-        const inputDigest = buildRunCacheDigest(agentInput, aiProvider, confirmedConstraints)
+        const inputDigest = buildRunCacheDigest(agentInput, solveConfig, confirmedConstraints)
         const cachedRun = readCachedRuns().find((run) => run.inputDigest === inputDigest)
         if (cachedRun) {
           setAiResult(cachedRun.result)
@@ -1172,21 +1164,56 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
         const agentResult = await runLocalAgent(
           agentInput,
           {
-            ...aiProvider,
+            ...solveConfig,
             onEvent: (event) => {
-              // Map new local agent events to existing UI state (reusing all the beautiful timeline UI)
-              if (event.type === 'status' || event.type === 'phase') {
+              if (event.type === 'status') {
                 setAgentStatus(event.message)
-                setAgentStep(event.type === 'phase' ? toProgressStep(event.phase) : 'thinking')
+              } else if (event.type === 'phase') {
+                setAgentStatus(event.message)
+                setAgentStep(toProgressStep(event.phase))
+              } else if (event.type === 'execution_result') {
+                setAgentStep(event.result.ok ? 'checking' : 'running')
+                setAgentStatus(
+                  event.result.ok
+                    ? 'Đã xếp xong, đang kiểm tra lịch...'
+                    : 'Bộ giải gặp lỗi khi chạy.'
+                )
+              } else if (event.type === 'final_result') {
+                setAgentStep('idle')
+                setAgentStatus('Hoàn thành.')
+              } else if (event.type === 'error') {
+                setAgentStatus(event.message)
               }
-              const eventPhase = event.type === 'phase' ? event.phase : 'coding'
-              const eventTitle = 'message' in event ? (event as { message: string }).message : event.type
+
+              const eventTitle =
+                event.type === 'phase' || event.type === 'status'
+                  ? event.message
+                  : event.type === 'execution_result'
+                    ? event.result.ok
+                      ? 'Bộ giải đã chạy xong'
+                      : 'Bộ giải lỗi'
+                    : event.type === 'final_result'
+                      ? 'Kiểm tra xong'
+                      : event.type === 'error'
+                        ? event.message
+                        : event.type
+
               pushTimelineEvent({
                 id: crypto.randomUUID(),
-                phase: eventPhase,
+                phase:
+                  event.type === 'phase'
+                    ? event.phase
+                    : event.type === 'execution_result'
+                      ? 'checking'
+                      : event.type === 'final_result'
+                        ? 'idle'
+                        : 'running',
                 title: eventTitle,
-                detail: JSON.stringify(event).slice(0, 200),
-                status: 'active',
+                detail:
+                  event.type === 'execution_result'
+                    ? `Trạng thái: ${event.result.status}`
+                    : undefined,
+                status: event.type === 'error' ? 'error' : 'active',
                 timestamp: new Date().toISOString(),
               })
             },
@@ -2286,7 +2313,7 @@ const handleDownloadExcel = useCallback(async () => {
                       <button
                         type="button"
                         onClick={() => handleGenerate()}
-                        disabled={aiLoading || !aiProvider || activePeriodCount <= 0 || !canProceedToSolve}
+                        disabled={aiLoading || activePeriodCount <= 0 || !canProceedToSolve}
                         title={!canProceedToSolve ? (solveBlockHint ?? undefined) : undefined}
                         className={`${navNextClass} ${navDisabledClass}`}
                       >
@@ -2297,7 +2324,7 @@ const handleDownloadExcel = useCallback(async () => {
                           </>
                         ) : (
                           <>
-                            <Sparkles size={14} strokeWidth={1.5} />
+                            <CalendarDays size={14} strokeWidth={1.5} />
                             Xếp lịch
                           </>
                         )}
@@ -2347,13 +2374,12 @@ const handleDownloadExcel = useCallback(async () => {
                       </div>
 
                       <div className="mb-4 rounded-md border border-dashed border-white/[0.06] bg-[#0a0a0a] px-4 py-3 text-sm text-white/45">
-                        AI sẽ xử lý phần xếp lịch trong nền và chỉ trả ra kết quả cuối cùng ở bảng bên dưới.
+                        Bước này chạy bộ giải CP-SAT cố định trên máy — không gọi AI. Kết quả hiện ở bảng bên dưới sau khi kiểm tra ràng buộc.
                       </div>
 
-                      {/* === NEW AI Provider Settings (replaces old Lowprizo key) === */}
                       <div className="mb-4 rounded-md border border-white/[0.06] bg-[#0a0a0a] p-4">
                         <div className="mb-2 flex items-center justify-between">
-                          <span className="block text-xs font-medium text-white/50">AI Provider (Local)</span>
+                          <span className="block text-xs font-medium text-white/50">Bộ giải xếp lịch</span>
                           <button
                             type="button"
                             onClick={() => setShowSettingsModal(true)}
@@ -2363,15 +2389,19 @@ const handleDownloadExcel = useCallback(async () => {
                           </button>
                         </div>
 
-                        <div className="text-sm text-white/80">
-                          {aiProvider ? (
-                            <div>
-                              <div>Model: <span className="font-mono text-xs">{aiProvider.model}</span></div>
-                              <div className="text-[10px] text-emerald-400">Đã cấu hình • Click "Cấu hình" để thay đổi</div>
-                            </div>
-                          ) : (
-                            <div className="text-amber-400">Chưa cấu hình AI Provider</div>
-                          )}
+                        <div className="space-y-1 text-sm text-white/80">
+                          <div>
+                            Mức hiệu năng:{' '}
+                            <span className="font-medium text-white">
+                              {SOLVER_PROFILE_LABELS[solveConfig.solverProfile ?? 'balanced']}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-white/40">
+                            Runtime: {solveConfig.solverRuntimeMode ?? 'bundled'}
+                          </div>
+                          <div className="text-[10px] text-white/35">
+                            AI chỉ dùng ở bước «AI phân tích» ràng buộc — không cần cho xếp lịch.
+                          </div>
                         </div>
                       </div>
 
@@ -2435,27 +2465,24 @@ const handleDownloadExcel = useCallback(async () => {
                           <div className="mb-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
                             <div
                               className="h-full rounded-full bg-blue-500/60 transition-all duration-500"
-                              style={{ width: `${agentIteration > 0 ? Math.min((agentIteration / agentMaxIterations) * 100, 100) : 5}%` }}
+                              style={{ width: `${solveProgressPercent(agentStep)}%` }}
                             />
                           </div>
 
                           {/* Status message */}
                           <div className="flex items-center justify-between">
-                            <span className="text-xs text-white/40">{agentStatus || 'Đang khởi tạo...'}</span>
-                            {agentIteration > 0 && (
-                              <span className="text-[10px] text-white/25">Lần {agentIteration}/{agentMaxIterations}</span>
-                            )}
+                            <span className="text-xs text-white/40">{agentStatus || 'Đang chuẩn bị...'}</span>
                           </div>
                         </div>
                       )}
 
                       <div className="mb-4 flex items-center gap-2.5">
                         <span className={iconShellClass}>
-                          <Sparkles size={16} strokeWidth={1.5} />
+                          <CalendarDays size={16} strokeWidth={1.5} />
                         </span>
                         <div>
                           <h2 className="text-sm font-semibold text-white">Thời khóa biểu đã xếp</h2>
-                          <p className="text-xs text-white/40">Kết quả cuối cùng theo giáo viên và môn học</p>
+                          <p className="text-xs text-white/40">Kết quả từ bộ giải CP-SAT và kiểm tra ràng buộc</p>
                         </div>
                       </div>
 
