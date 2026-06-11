@@ -1,5 +1,5 @@
 import type { ConstraintSpec } from './constraint-spec';
-import type { InterpretationCardDTO } from './constraint-clarification-types';
+import type { ClarificationOption, InterpretationCardDTO } from './constraint-clarification-types';
 import type { SemanticConstraint } from './semantic-constraint';
 
 export type RawConstraintInput = {
@@ -42,7 +42,8 @@ export type ConstraintParseIssueCode =
 export type ConstraintClarificationQuestion = {
   id: string;
   prompt: string;
-  options: string[];
+  options: ClarificationOption[];
+  allowFreeText?: boolean;
 };
 
 export type ConstraintParseIssue = {

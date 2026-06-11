@@ -24,14 +24,18 @@ import ExcelJS from 'exceljs'
 
 // Local AI Agent (new implementation following the approved architecture plan)
 import { runLocalAgent } from './ai/local-agent'
-import { humanizeDraft } from './ai/constraint-humanizer'
+import { humanizeConstraintSpec, humanizeDraft } from './ai/constraint-humanizer'
+import type { ConstraintSpec } from './ai/constraint-spec'
 import {
   confirmedFromDraftsAfterUserAccept,
   constraintItemsToRaw,
   validateConfirmedSolveRequest,
 } from './ai/solver-constraint-gate'
 import { ConstraintInputPanel, type PendingAiPreview } from './constraints/ConstraintInputPanel'
+import { ConstraintEditDialog } from './constraints/ConstraintEditDialog'
 import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
+import { ConstraintTemplatePicker } from './constraints/ConstraintTemplatePicker'
+import type { ConstraintFormTemplateId } from './constraints/constraint-form-schema'
 import { fetchConstraintIntakeAiAnalysis } from './constraints/constraint-intake-service'
 import { buildDraftFromReparseResult, buildDraftFromCustomNormalization, buildDraftFromAnalyzeResult, rawInputFromText } from './constraints/constraint-intake-ai'
 import { constraintItemFromPending } from './constraints/import-pending-constraint'
@@ -188,6 +192,8 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const [chatLoading, setChatLoading] = useState(false)
   const [intakeError, setIntakeError] = useState<string | null>(null)
   const [pendingAiPreview, setPendingAiPreview] = useState<PendingAiPreview | null>(null)
+  const [intakeTemplatePickerOpen, setIntakeTemplatePickerOpen] = useState(false)
+  const [intakeManualEditOpen, setIntakeManualEditOpen] = useState(false)
   const conversationCache = useRef<Map<string, { result: PendingAiPreview; timestamp: number }>>(new Map())
 
   // === NEW: Local AI Provider Settings (Base URL + Key + Model) ===
@@ -976,6 +982,76 @@ export default function App({ onBackToLanding, quickDatasetText }: TimetableAppP
   const dismissAiPreview = () => {
     setPendingAiPreview(null)
     setIntakeError(null)
+  }
+
+  const reparsePreviewWithFeedback = (feedback: string) => {
+    if (!pendingAiPreview) return
+    const conversation = [
+      ...(pendingAiPreview.conversation ?? []),
+      { role: 'user' as const, content: feedback },
+    ]
+    setPendingAiPreview({ ...pendingAiPreview, conversation })
+    void handleIntakeAiAnalysis(
+      pendingAiPreview.rawText,
+      pendingAiPreview.item.type,
+      pendingAiPreview.item.weight,
+      conversation
+    )
+  }
+
+  const applyPreviewSpecDraft = (spec: ConstraintSpec) => {
+    if (!pendingAiPreview) return
+    setPendingAiPreview({
+      ...pendingAiPreview,
+      draft: {
+        ...pendingAiPreview.draft,
+        proposedSpecs: [spec],
+        status: 'parsed',
+        confidence: 'high',
+        displayText: humanizeConstraintSpec(spec),
+        issues: pendingAiPreview.draft.issues.filter((issue) => issue.code !== 'needs_user_clarification'),
+        clarificationQuestions: undefined,
+      },
+    })
+  }
+
+  const demotePreviewToPreferred = () => {
+    if (!pendingAiPreview) return
+    setPendingAiPreview({
+      ...pendingAiPreview,
+      item: {
+        ...pendingAiPreview.item,
+        type: 'preferred',
+        weight: pendingAiPreview.item.weight ?? 5,
+      },
+    })
+  }
+
+  const demoteConstraint = (constraintId: string) => {
+    setConstraintList((current) =>
+      current.map((constraint) =>
+        constraint.id === constraintId
+          ? { ...constraint, type: 'preferred', weight: constraint.weight ?? 5 }
+          : constraint
+      )
+    )
+  }
+
+  const applyIntakeTemplate = (templateId: ConstraintFormTemplateId) => {
+    if (!pendingAiPreview) return
+    applyTemplate(
+      pendingAiPreview.item,
+      templateId,
+      constraintAgentInput,
+      pendingAiPreview.draft
+    )
+    setConstraintList((current) => {
+      if (current.some((item) => item.id === pendingAiPreview.item.id)) return current
+      return [...current, pendingAiPreview.item]
+    })
+    setPendingAiPreview(null)
+    setIntakeTemplatePickerOpen(false)
+    setConstraintDraft((current) => ({ ...current, text: '' }))
   }
 
   const deleteConstraint = (id: string) => {
@@ -2077,6 +2153,11 @@ const handleDownloadExcel = useCallback(async () => {
                   </header>
 
                   <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(330px,0.7fr)_minmax(0,1.3fr)]">
+                    {intakeTemplatePickerOpen ? (
+                      <ConstraintTemplatePicker
+                        onSelect={(templateId) => applyIntakeTemplate(templateId)}
+                      />
+                    ) : null}
                     <ConstraintInputPanel
                       draft={constraintDraft}
                       onDraftChange={(patch) => setConstraintDraft((current) => ({ ...current, ...patch }))}
@@ -2092,7 +2173,28 @@ const handleDownloadExcel = useCallback(async () => {
                       onDismissAiPreview={dismissAiPreview}
                       onSendChatMessage={sendChatMessage}
                       chatLoading={chatLoading}
+                      onApplyPreviewSpecDraft={applyPreviewSpecDraft}
+                      onReparsePreviewWithFeedback={reparsePreviewWithFeedback}
+                      onOpenTemplatePicker={() => setIntakeTemplatePickerOpen(true)}
+                      onOpenManualEdit={() => setIntakeManualEditOpen(true)}
+                      onDemotePreviewToPreferred={demotePreviewToPreferred}
                     />
+                    {intakeManualEditOpen && pendingAiPreview ? (
+                      <ConstraintEditDialog
+                        open={intakeManualEditOpen}
+                        onOpenChange={(open) => setIntakeManualEditOpen(open)}
+                        constraint={pendingAiPreview.item}
+                        draft={pendingAiPreview.draft}
+                        agentInput={constraintAgentInput}
+                        onSave={(updated) => {
+                          setPendingAiPreview({
+                            ...pendingAiPreview,
+                            draft: updated,
+                          })
+                          setIntakeManualEditOpen(false)
+                        }}
+                      />
+                    ) : null}
                     <ConstraintReviewPanel
                       constraints={sortedConstraintList}
                       drafts={constraintDrafts}
@@ -2122,6 +2224,7 @@ const handleDownloadExcel = useCallback(async () => {
                             }
                           : undefined
                       }
+                      onDemoteConstraint={demoteConstraint}
                       highlightConstraintIds={highlightConstraintIds}
                       reparseLoading={reparseLoading}
                     />

@@ -12,6 +12,10 @@ import { buildClarificationQuestions } from '../ai/constraint-clarification';
 import { buildSpecsFromAnalyzeResult, type AnalyzeConstraintResult } from '../ai/analyze-constraint-service';
 import type { AgentInputPayload } from '../ai/types';
 
+function uniqueLabels(labels: string[]): string[] {
+  return Array.from(new Set(labels)).filter(Boolean);
+}
+
 export function finalizeAiDisplayText(
   agentInput: AgentInputPayload,
   rawText: string,
@@ -134,7 +138,12 @@ export function buildDraftFromAnalyzeResult(
   if (result.status === 'needs_clarification') {
     const structuredQuestions = buildClarificationQuestions(
       raw.text,
-      specs.map((spec) => ({ kind: spec.kind, params: spec.params }))
+      specs.map((spec) => ({ kind: spec.kind, params: spec.params })),
+      {
+        teachers: uniqueLabels(agentInput.assignments.map((assignment) => assignment.teacher.label)),
+        classes: uniqueLabels(agentInput.assignments.map((assignment) => assignment.class.label)),
+        subjects: uniqueLabels(agentInput.assignments.map((assignment) => assignment.subject.label)),
+      }
     );
     const customNorm: CustomConstraintNormalizationResult = {
       status: 'needs_clarification',

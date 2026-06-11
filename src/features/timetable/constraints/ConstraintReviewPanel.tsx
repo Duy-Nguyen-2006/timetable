@@ -29,6 +29,7 @@ type ConstraintReviewPanelProps = {
   onSaveDraft: (updated: ParsedConstraintDraft) => void;
   onApplyTemplate: (constraint: ConstraintItem, templateId: ConstraintFormTemplateId) => void;
   onAiAnalyze?: (constraint: ConstraintItem, draft: ParsedConstraintDraft, userFeedback?: string) => void;
+  onDemoteConstraint?: (constraintId: string) => void;
   highlightConstraintIds?: Set<string>;
 };
 
@@ -48,6 +49,7 @@ export function ConstraintReviewPanel({
   onSaveDraft,
   onApplyTemplate,
   onAiAnalyze,
+  onDemoteConstraint,
   highlightConstraintIds,
 }: ConstraintReviewPanelProps) {
   const [editConstraintId, setEditConstraintId] = useState<string | null>(null);
@@ -116,6 +118,20 @@ export function ConstraintReviewPanel({
                   : undefined
               }
               onOpenTemplatePicker={() => setTemplateForId(constraint.id)}
+              onOpenManualEdit={() => setEditConstraintId(constraint.id)}
+              onApplySpecDraft={(spec) => {
+                const existing = draftByRaw.get(constraint.id);
+                if (!existing) return;
+                onSaveDraft({
+                  ...existing,
+                  proposedSpecs: [spec],
+                  status: 'parsed',
+                  confidence: 'high',
+                  displayText: spec.original,
+                  issues: existing.issues.filter((issue) => issue.code !== 'needs_user_clarification'),
+                });
+              }}
+              onDemoteToPreferred={() => onDemoteConstraint?.(constraint.id)}
               isReparsing={reparseLoading === constraint.id}
               highlight={highlightConstraintIds?.has(constraint.id)}
             />

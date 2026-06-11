@@ -1,12 +1,5 @@
 /**
- * Tests for buildClarificationQuestions (Phase 0.5).
- *
- * The vague "general_meaning" fallback was removed. The new behaviour:
- *   1. Pattern-matched questions (heavy/session/same-day) are preserved.
- *   2. If the caller passes candidate specs, surface an A-or-B choice
- *      derived from those candidates.
- *   3. If nothing matches, surface a CONCRETE domain question — never
- *      "what do you mean".
+ * Tests for buildClarificationQuestions (suggest-first clarification).
  */
 
 import test from 'node:test';
@@ -27,18 +20,15 @@ test('buildClarificationQuestions: "nặng + cùng ngày" pattern -> heavy_same_
 });
 
 test('buildClarificationQuestions: VAGUE fallback no longer exists', () => {
-  // The exact text that used to trigger "general_meaning" must now produce
-  // a concrete domain question (or a pattern match) — never a vague prompt.
   const questions = buildClarificationQuestions('Xếp lịch cho trường');
   for (const q of questions) {
     assert.notEqual(q.id, 'general_meaning', 'general_meaning must be removed');
     assert.ok(q.options.length >= 2, 'each question must have ≥2 concrete options');
-    // No "Bạn muốn nhấn mạnh điều gì nhất" or similar vague prompt.
     assert.doesNotMatch(q.prompt, /Bạn muốn nhấn mạnh điều gì nhất/u);
   }
 });
 
-test('buildClarificationQuestions: candidates path -> renders candidate kinds in Vietnamese', () => {
+test('buildClarificationQuestions: candidates path -> humanized labels without jargon', () => {
   const candidates = [
     { kind: 'teacher_block_period', params: { teacher: 'Thủy', period: 4 } },
     { kind: 'teacher_required_period', params: { teacher: 'Thủy', period: 4, minCount: 1 } },
@@ -49,28 +39,57 @@ test('buildClarificationQuestions: candidates path -> renders candidate kinds in
   );
   const pick = questions.find((q) => q.id === 'pick_specific_interpretation');
   assert.ok(pick, 'expected pick_specific_interpretation question when candidates are provided');
-  assert.equal(pick!.options.length, 2);
-  assert.match(pick!.options.join('\n'), /teacher_block_period/);
-  assert.match(pick!.options.join('\n'), /teacher_required_period/);
+  assert.equal(pick!.options.filter((o) => o.id !== 'none_fit').length, 2);
+  const labels = pick!.options.map((o) => o.labelVi).join('\n');
+  assert.doesNotMatch(labels, /teacher_block_period|teacher_required_period|kind/u);
+  assert.match(labels, /Thủy/u);
 });
 
-test('buildClarificationQuestions: if_then + một người -> at_least_one_vs_both', () => {
+test('buildClarificationQuestions: if_then + một người -> at_least_one_vs_both with recommended option', () => {
   const questions = buildClarificationQuestions(
     'Nếu Hiếu và Thúy dạy cùng ngày thì một người không được dạy tiết 4'
   );
   const pick = questions.find((q) => q.id === 'at_least_one_vs_both');
   assert.ok(pick, 'expected at_least_one_vs_both question');
-  assert.equal(pick!.options.length, 3);
+  assert.equal(pick!.options.filter((o) => o.id !== 'none_fit').length, 3);
   assert.match(pick!.prompt, /một người/u);
   assert.doesNotMatch(pick!.prompt, /Nếu Hiếu và Thúy/u);
+  const recommended = pick!.options.find((o) => o.recommended);
+  assert.ok(recommended, 'expected one recommended option');
+  assert.ok(recommended!.exampleVi, 'recommended option should include exampleVi');
+});
+
+test('buildClarificationQuestions: near-match teacher name -> suggestion question', () => {
+  const questions = buildClarificationQuestions(
+    'Nếu Hiếu và Thúy dạy cùng ngày thì một người không được dạy tiết 4',
+    undefined,
+    { teachers: ['Hiếu', 'Thủy'] }
+  );
+  const nameQuestion = questions.find((q) => q.id.startsWith('near_match_teacher_'));
+  assert.ok(nameQuestion, 'expected near-match teacher suggestion');
+  assert.match(nameQuestion!.prompt, /Thúy/u);
+  assert.match(nameQuestion!.prompt, /Thủy/u);
+  const recommended = nameQuestion!.options.find((o) => o.recommended);
+  assert.ok(recommended, 'near-match should recommend the closest name');
 });
 
 test('buildClarificationQuestions: no candidates + no pattern -> concrete domain question', () => {
   const questions = buildClarificationQuestions('Xếp lịch cho trường');
   assert.ok(questions.length >= 1);
-  // The domain question enumerates GV / lớp / môn / Khác.
-  const allOptions = questions.flatMap((q) => q.options).join('\n');
+  const allOptions = questions.flatMap((q) => q.options).map((o) => o.labelVi).join('\n');
   assert.match(allOptions, /giáo viên/iu);
   assert.match(allOptions, /lớp/iu);
   assert.match(allOptions, /môn/iu);
+});
+
+test('buildClarificationQuestions: every question has escape option and allowFreeText', () => {
+  const questions = buildClarificationQuestions(
+    'Nếu Hiếu và Thúy dạy cùng ngày thì một người không được dạy tiết 4',
+    undefined,
+    { teachers: ['Hiếu', 'Thủy'] }
+  );
+  for (const question of questions) {
+    assert.equal(question.allowFreeText, true);
+    assert.ok(question.options.some((o) => o.id === 'none_fit'));
+  }
 });

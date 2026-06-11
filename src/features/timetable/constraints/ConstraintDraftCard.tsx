@@ -8,6 +8,9 @@ import { checkHardConstraintMechanism } from '../ai/constraint-ir';
 import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
 import { constraintTypes } from '../constants';
 import type { ConstraintItem } from '../types';
+import type { ClarificationOption } from '../ai/constraint-clarification-types';
+import type { ConstraintSpec } from '../ai/constraint-spec';
+import { ClarificationSuggestionsBlock } from './ClarificationSuggestionsBlock';
 import {
   hasRealInterpretation,
   interpretationLine,
@@ -24,7 +27,10 @@ type ConstraintDraftCardProps = {
   onIgnore: () => void;
   onDelete: () => void;
   onAiAnalyze?: (userFeedback?: string) => void;
+  onApplySpecDraft?: (spec: ConstraintSpec) => void;
   onOpenTemplatePicker?: () => void;
+  onOpenManualEdit?: () => void;
+  onDemoteToPreferred?: () => void;
   isNew?: boolean;
   isReparsing?: boolean;
   highlight?: boolean;
@@ -88,7 +94,10 @@ export function ConstraintDraftCard({
   onIgnore,
   onDelete,
   onAiAnalyze,
+  onApplySpecDraft,
   onOpenTemplatePicker,
+  onOpenManualEdit,
+  onDemoteToPreferred,
   isReparsing,
   highlight,
 }: ConstraintDraftCardProps) {
@@ -273,7 +282,7 @@ export function ConstraintDraftCard({
           className="mt-2 rounded border border-amber-500/30 bg-amber-500/[0.06] p-2.5 text-sm"
         >
           <p className="text-[10px] font-medium uppercase tracking-widest text-amber-300/70">
-            Cần bạn làm rõ
+            Gợi ý cách hiểu
           </p>
           {isReparsing ? (
             <p className="mt-1 flex items-center gap-2 leading-relaxed">
@@ -281,28 +290,27 @@ export function ConstraintDraftCard({
               <span className="text-white/50">Đang AI phân tích...</span>
             </p>
           ) : (
-            <div className="mt-2 space-y-3">
+            <div className="mt-2">
               {draft.clarificationQuestions?.length ? (
-                draft.clarificationQuestions.map((question, questionIndex) => (
-                  <div key={question.id ?? `clarification-${questionIndex}`}>
-                    <p className="text-xs leading-relaxed text-amber-100/90">{question.prompt}</p>
-                    {question.options.length > 0 ? (
-                      <div className="mt-2 flex flex-col gap-1.5">
-                        {question.options.map((option, optionIndex) => (
-                          <button
-                            key={`${question.id ?? questionIndex}-option-${optionIndex}`}
-                            type="button"
-                            data-testid="clarification-option"
-                            onClick={() => onAiAnalyze?.(option)}
-                            className="rounded-md border border-amber-500/25 bg-[#0a0a0a] px-2.5 py-2 text-left text-xs text-amber-100/90 hover:border-amber-400/40 hover:bg-amber-500/[0.08]"
-                          >
-                            {option}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))
+                <ClarificationSuggestionsBlock
+                  questions={draft.clarificationQuestions}
+                  reparseCount={draft.reparseCount}
+                  constraintType={constraint.type}
+                  onSelectOption={(_questionId, option: ClarificationOption) => {
+                    if (option.id === 'use_teacher' || option.id.startsWith('use_')) {
+                      onAiAnalyze?.(`Dùng tên «${option.labelVi.replace(/^Dùng «|»$/gu, '')}»`);
+                      return;
+                    }
+                    onAiAnalyze?.(option.labelVi);
+                  }}
+                  onApplySpecDraft={onApplySpecDraft}
+                  onReparseWithFeedback={(feedback) => onAiAnalyze?.(feedback)}
+                  onOpenManualEdit={onOpenManualEdit}
+                  onOpenTemplatePicker={onOpenTemplatePicker}
+                  onDemoteToPreferred={onDemoteToPreferred}
+                  showAiRetry={Boolean(onAiAnalyze)}
+                  onAiRetry={() => onAiAnalyze?.()}
+                />
               ) : visibleIssues.length > 0 ? (
                 <ul className="space-y-0.5 text-xs text-amber-300/80">
                   {visibleIssues.map((issue, i) => (
@@ -314,16 +322,6 @@ export function ConstraintDraftCard({
                   Mình chưa chắc cách hiểu câu này. Chọn giúp cách đúng ý bạn bên dưới, hoặc dùng mẫu có sẵn.
                 </p>
               )}
-              {onOpenTemplatePicker ? (
-                <button
-                  type="button"
-                  data-testid="use-template-button"
-                  onClick={onOpenTemplatePicker}
-                  className="mt-1 inline-flex items-center rounded-md border border-white/[0.12] bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/75 hover:bg-white/[0.08]"
-                >
-                  Dùng mẫu có sẵn
-                </button>
-              ) : null}
             </div>
           )}
         </div>

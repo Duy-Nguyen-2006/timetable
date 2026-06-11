@@ -167,7 +167,7 @@ export function validateConstraintSpecs(
   issues: ConstraintParseIssue[];
   status: ConstraintParseStatus;
   confidence?: 'high' | 'medium' | 'low';
-  clarificationQuestions?: Array<{ id: string; prompt: string; options: string[] }>;
+  clarificationQuestions?: Array<{ id: string; prompt: string; options: import('./constraint-clarification-types').ClarificationOption[]; allowFreeText?: boolean }>;
 } {
   const rawText = options?.rawText ?? specs[0]?.original ?? '';
   if (isRoomConstraintText(rawText)) {
@@ -259,7 +259,11 @@ export function validateConstraintSpecs(
       status: 'needs_review',
       issues,
       confidence: recomputedConfidence,
-      clarificationQuestions: buildClarificationQuestions(rawText),
+      clarificationQuestions: buildClarificationQuestions(rawText, undefined, {
+        teachers: entities.teachers,
+        classes: entities.classes,
+        subjects: entities.subjects,
+      }),
     };
   }
 
@@ -282,8 +286,15 @@ export function buildDraftFromSpecs(
     source: meta.source,
     confidence: meta.confidence,
   });
+  const entityLabels = collectEntityLabels(input);
   const clarificationQuestions =
-    status === 'needs_review' ? buildClarificationQuestions(raw.text) : undefined;
+    status === 'needs_review'
+      ? buildClarificationQuestions(raw.text, undefined, {
+          teachers: entityLabels.teachers,
+          classes: entityLabels.classes,
+          subjects: entityLabels.subjects,
+        })
+      : undefined;
 
   const draftSummary = humanizeDraft({
     id: draftId,

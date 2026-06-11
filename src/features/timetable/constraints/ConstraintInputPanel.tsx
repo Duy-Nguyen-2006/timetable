@@ -13,9 +13,13 @@ import {
 } from '../constants';
 import { suggestBuiltInConstraint, type BuiltInSuggestion } from '../ai/built-in-suggestion';
 import type { ConstraintSpec } from '../ai/constraint-spec';
+import type { ClarificationOption } from '../ai/constraint-clarification-types';
+import type { ConstraintSpec } from '../ai/constraint-spec';
 import type { ParsedConstraintDraft } from '../ai/constraint-review-types';
 import type { AgentInputPayload } from '../ai/types';
 import type { ConstraintItem } from '../types';
+import { ClarificationSuggestionsBlock } from './ClarificationSuggestionsBlock';
+import { hasRealInterpretation } from './constraint-review-ui';
 import {
   CONSTRAINT_GROUP_LABELS,
   CONSTRAINT_TEMPLATES,
@@ -55,6 +59,11 @@ type ConstraintInputPanelProps = {
   onDismissAiPreview: () => void;
   onSendChatMessage?: (message: string) => void;
   chatLoading?: boolean;
+  onApplyPreviewSpecDraft?: (spec: ConstraintSpec) => void;
+  onReparsePreviewWithFeedback?: (feedback: string) => void;
+  onOpenTemplatePicker?: () => void;
+  onOpenManualEdit?: () => void;
+  onDemotePreviewToPreferred?: () => void;
 };
 
 function uniqueLabels(labels: string[]): string[] {
@@ -104,6 +113,11 @@ export function ConstraintInputPanel({
   onDismissAiPreview,
   onSendChatMessage,
   chatLoading,
+  onApplyPreviewSpecDraft,
+  onReparsePreviewWithFeedback,
+  onOpenTemplatePicker,
+  onOpenManualEdit,
+  onDemotePreviewToPreferred,
 }: ConstraintInputPanelProps) {
   const [suggestion, setSuggestion] = useState<BuiltInSuggestion | null>(null);
   const [chatInput, setChatInput] = useState('');
@@ -168,6 +182,13 @@ export function ConstraintInputPanel({
   const isBuiltIn = suggestion?.decision === 'suggest_built_in';
   const isCustom = suggestion?.decision === 'use_custom';
   const hasPreview = Boolean(pendingAiPreview);
+  const previewShowInterpretation = pendingAiPreview
+    ? hasRealInterpretation(pendingAiPreview.draft, undefined, pendingAiPreview.rawText)
+    : false;
+  const previewInterpretation =
+    pendingAiPreview?.draft.displayText?.trim() ||
+    pendingAiPreview?.draft.explanation?.trim() ||
+    '';
   const suggestionSpecs = isBuiltIn && suggestion?.specsDraft?.length
     ? suggestion.specsDraft
     : isBuiltIn && suggestion
@@ -284,16 +305,36 @@ export function ConstraintInputPanel({
               <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Bạn viết</p>
               <p className="mt-1 leading-relaxed text-white/55">{pendingAiPreview.rawText}</p>
             </div>
-            <div className="rounded border border-white/[0.06] bg-[#0a0a0a] px-2.5 py-2">
-              <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Hiểu là</p>
-              <p className="mt-1 whitespace-pre-line leading-relaxed text-white">{pendingAiPreview.draft.displayText || pendingAiPreview.draft.explanation || pendingAiPreview.rawText}</p>
-            </div>
+            {previewShowInterpretation ? (
+              <div className="rounded border border-white/[0.06] bg-[#0a0a0a] px-2.5 py-2">
+                <p className="text-[10px] font-medium uppercase tracking-widest text-white/30">Hiểu là</p>
+                <p className="mt-1 whitespace-pre-line leading-relaxed text-white">{previewInterpretation}</p>
+              </div>
+            ) : null}
             {pendingAiPreview.draft.clarificationQuestions?.length ? (
               <div className="rounded border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
-                <p className="text-[10px] font-medium uppercase tracking-widest text-amber-300/70">AI cần hỏi thêm</p>
-                <ul className="mt-1 list-disc pl-4 leading-relaxed text-amber-200/80">
-                  {pendingAiPreview.draft.clarificationQuestions.map((q, i) => (<li key={q.id ?? i}>{q.prompt}</li>))}
-                </ul>
+                <p className="text-[10px] font-medium uppercase tracking-widest text-amber-300/70">Gợi ý cách hiểu</p>
+                <div className="mt-2">
+                  <ClarificationSuggestionsBlock
+                    questions={pendingAiPreview.draft.clarificationQuestions}
+                    reparseCount={pendingAiPreview.reparseCount}
+                    constraintType={pendingAiPreview.item.type}
+                    onSelectOption={(_questionId, option: ClarificationOption) => {
+                      if (option.id.startsWith('use_')) {
+                        onReparsePreviewWithFeedback?.(option.labelVi);
+                        return;
+                      }
+                      onReparsePreviewWithFeedback?.(option.labelVi);
+                    }}
+                    onApplySpecDraft={onApplyPreviewSpecDraft}
+                    onReparseWithFeedback={onReparsePreviewWithFeedback}
+                    onOpenManualEdit={onOpenManualEdit}
+                    onOpenTemplatePicker={onOpenTemplatePicker}
+                    onDemoteToPreferred={onDemotePreviewToPreferred}
+                    showAiRetry={Boolean(onReanalyzeAiPreview)}
+                    onAiRetry={onReanalyzeAiPreview}
+                  />
+                </div>
               </div>
             ) : null}
             {pendingAiPreview.conversation?.length ? (
@@ -326,7 +367,13 @@ export function ConstraintInputPanel({
               Bỏ
             </button>
           </div>
-          {pendingAiPreview.reparseCount >= 3 ? <p className="mt-2 text-[10px] text-white/30">Đã phân tích 3 lần — bấm «Đồng ý» hoặc sửa câu nhập.</p> : null}
+          {pendingAiPreview.reparseCount >= 2 ? (
+            <p className="mt-2 text-[10px] text-white/30">
+              Đã thử AI nhiều lần — ưu tiên «Tự đặt luật» hoặc «Dùng mẫu có sẵn».
+            </p>
+          ) : pendingAiPreview.reparseCount >= 3 ? (
+            <p className="mt-2 text-[10px] text-white/30">Đã phân tích 3 lần — bấm «Đồng ý» hoặc sửa câu nhập.</p>
+          ) : null}
         </div>
       ) : null}
     </section>

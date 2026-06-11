@@ -29,6 +29,10 @@ export type ClarificationOption = {
   labelVi: string;
   /** Optional preview text shown beneath the label for longer context. */
   previewVi?: string;
+  /** Everyday example so users understand what they are choosing. */
+  exampleVi?: string;
+  /** True = default suggestion, shown prominently with «Gợi ý» badge. */
+  recommended?: boolean;
   /** If this option maps to a built-in kind, the draft spec to commit. */
   specDraft?: ConstraintSpec;
   /** If this option maps to an executable IR, the IR to commit. */
