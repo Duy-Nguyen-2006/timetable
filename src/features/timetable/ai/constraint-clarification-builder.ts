@@ -15,10 +15,65 @@ import type { ConstraintSpec } from './constraint-spec';
 import {
   type ClarificationOption,
   type ClarificationQuestion,
+  type InterpretationCardDTO,
   clarificationOptionFromBuiltIn,
 } from './constraint-clarification-types';
+import { humanizeConstraintSpec } from './constraint-humanizer';
 
 export type { ClarificationOption, ClarificationQuestion };
+
+function dayVi(day: unknown): string | undefined {
+  if (typeof day !== 'string' || !day) return undefined;
+  const aliases: Record<string, string> = {
+    monday: 'thứ 2',
+    tuesday: 'thứ 3',
+    wednesday: 'thứ 4',
+    thursday: 'thứ 5',
+    friday: 'thứ 6',
+    saturday: 'thứ 7',
+    sunday: 'chủ nhật',
+    thu2: 'thứ 2',
+    thu3: 'thứ 3',
+    thu4: 'thứ 4',
+    thu5: 'thứ 5',
+    thu6: 'thứ 6',
+    thu7: 'thứ 7',
+  };
+  return aliases[day] ?? day;
+}
+
+function conditionVi(condition: unknown): string | undefined {
+  if (!condition || typeof condition !== 'object') return undefined;
+  const c = condition as Record<string, unknown>;
+  if (c.op === 'teacher_teaches_at_slot') {
+    return `${c.teacher ?? 'Giáo viên'} dạy ${dayVi(c.day) ?? c.day ?? ''} tiết ${c.period ?? ''}`.trim();
+  }
+  if (c.op === 'teacher_teaches_on_day') {
+    return `${c.teacher ?? 'Giáo viên'} dạy ${dayVi(c.day) ?? c.day ?? ''}`.trim();
+  }
+  return undefined;
+}
+
+export function buildInterpretationConfirm(
+  spec: ConstraintSpec,
+  droppedIllustrations: string[] = []
+): InterpretationCardDTO {
+  const thenSpecs = spec.kind === 'if_then' && Array.isArray(spec.params.then)
+    ? spec.params.then as ConstraintSpec[]
+    : [spec];
+  const scope = thenSpecs
+    .map((item) => item.params?.scope)
+    .find((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object'));
+  const scopeDay = scope ? dayVi(scope.day) : undefined;
+
+  return {
+    scopeVi: scopeDay ? `Áp dụng trong ${scopeDay}` : undefined,
+    ifAtomVi: spec.kind === 'if_then' ? conditionVi(spec.params.if) : undefined,
+    thenAtomsVi: thenSpecs.map((item) => humanizeConstraintSpec(item)),
+    notesVi: droppedIllustrations.map((item) => `‘${item.replace(/^(ví dụ|chẳng hạn|kiểu như|như là)\s+/iu, '')}’ được hiểu là ví dụ minh hoạ nên không được encode thành ràng buộc.`),
+    editableAtomIds: thenSpecs.map((item, index) => item.id || `atom_${index}`),
+  };
+}
 
 /**
  * Build a clarification question for ambiguous require-vs-only direction

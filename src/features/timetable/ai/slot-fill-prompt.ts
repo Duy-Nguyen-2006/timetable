@@ -20,10 +20,11 @@ import { getConstraintMeta } from './constraint-registry';
 import { buildTopKPromptSection } from './constraint-retriever';
 
 export const SMALL_SYSTEM_PROMPT = `Bạn map MỘT câu ràng buộc tiếng Việt vào MỘT trong các kind được cung cấp.
-Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả "custom" kèm IR.
+Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả kind "custom".
 KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
-Dùng các "extracted hints" cho param; chỉ map, không tự suy số.
-Output JSON: { kind | "custom", params, confidence, missingParams[] }`;
+Dùng extracted hints như gợi ý, không tự suy số.
+Không encode số nằm trong droppedIllustrations.
+Output JSON: { atoms:[{kind,params,confidence,missingParams}], condition? }`;
 
 /** Build the dynamic user message with resolved entities + top-k candidates. */
 export function buildSlotFillUserMessage(
@@ -55,6 +56,10 @@ export function buildSlotFillUserMessage(
   if (hints.extractedDays.length > 0) {
     lines.push(`- ngày trích được: ${hints.extractedDays.join(', ')}`);
   }
+  if (hints.droppedIllustrations?.length) {
+    lines.push(`- droppedIllustrations: ${hints.droppedIllustrations.join(' | ')}`);
+    lines.push(`- Không đưa thông tin trong droppedIllustrations vào params.`);
+  }
   if (hints.inferredScope) {
     lines.push(`- scope gợi ý: ${hints.inferredScope}`);
   }
@@ -74,7 +79,8 @@ export function buildSlotFillUserMessage(
   lines.push(`## Lưu ý cuối cùng`);
   lines.push(`- Nếu câu có 2 môn trở lên (vd "Toán và Văn"), PHẢI trả đủ một spec cho từng môn.`);
   lines.push(`- Nếu câu có "1 người" / "ngày bất kỳ" / "cùng ngày" mà chưa rõ áp dụng cho ai → trả "clarify".`);
-  lines.push(`- Nếu câu if-then → trả kind: "if_then" với params.if và params.then[] (KHÔNG trả needs_clarification).`);
+  lines.push(`- Nếu câu if-then → trả condition riêng và atoms là THEN atoms; không bọc thêm if_then nếu kind đã hàm chứa điều kiện.`);
+  lines.push(`- "2 giáo viên không được cùng 1 tiết" → teacher_pair_not_same_slot.`);
 
   return lines.join('\n');
 }

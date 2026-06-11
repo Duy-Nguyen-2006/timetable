@@ -1,4 +1,5 @@
 import type { ConstraintSpec } from './constraint-spec';
+import type { InterpretationCardDTO } from './constraint-clarification-types';
 import type { SemanticConstraint } from './semantic-constraint';
 
 export type RawConstraintInput = {
@@ -72,6 +73,7 @@ export type ParsedConstraintDraft = {
   explanation: string;
   issues: ConstraintParseIssue[];
   clarificationQuestions?: ConstraintClarificationQuestion[];
+  interpretationCard?: InterpretationCardDTO;
   source: 'rule' | 'translator' | 'manual' | 'template' | 'ai_reparse';
   confirmedAt?: string;
   /** Re-parse tracking */

@@ -27,6 +27,49 @@ type ConstraintDraftCardProps = {
   highlight?: boolean;
 };
 
+function ConfirmInterpretationPreview({ draft }: { draft: ParsedConstraintDraft }) {
+  const card = draft.interpretationCard;
+  if (!card) return null;
+
+  return (
+    <div
+      data-testid="confirm-interpretation-card"
+      data-editable-atom-ids={card.editableAtomIds.join(',')}
+      className="mt-2 rounded border border-sky-500/25 bg-sky-500/[0.06] p-2 text-xs"
+    >
+      <div className="grid gap-2 sm:grid-cols-[72px_1fr]">
+        {card.scopeVi ? (
+          <>
+            <span className="text-[10px] font-medium uppercase tracking-widest text-sky-200/50">Phạm vi</span>
+            <span className="text-sky-100/85">{card.scopeVi}</span>
+          </>
+        ) : null}
+        {card.ifAtomVi ? (
+          <>
+            <span className="text-[10px] font-medium uppercase tracking-widest text-sky-200/50">Nếu</span>
+            <span className="text-sky-100/85">{card.ifAtomVi}</span>
+          </>
+        ) : null}
+        <span className="text-[10px] font-medium uppercase tracking-widest text-sky-200/50">Thì</span>
+        <ul data-testid="confirm-interpretation-then" className="space-y-1 text-sky-50/90">
+          {card.thenAtomsVi.map((atom, index) => (
+            <li key={`${card.editableAtomIds[index] ?? 'atom'}-${index}`} className="leading-relaxed">
+              {atom}
+            </li>
+          ))}
+        </ul>
+      </div>
+      {card.notesVi.length > 0 ? (
+        <ul data-testid="confirm-interpretation-notes" className="mt-2 space-y-1 border-t border-white/[0.06] pt-2 text-[11px] text-white/45">
+          {card.notesVi.map((note, index) => (
+            <li key={`${note}-${index}`}>{note}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export function ConstraintDraftCard({
   constraint,
   draft,
@@ -174,6 +217,7 @@ export function ConstraintDraftCard({
               <span className={understood ? 'text-white' : 'text-white/50'}>{understood}</span>
             )}
           </p>
+          {!isReparsing ? <ConfirmInterpretationPreview draft={draft} /> : null}
           {!isReparsing && draft.issues.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-xs text-amber-300/80">
               {draft.issues
