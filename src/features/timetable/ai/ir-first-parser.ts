@@ -34,7 +34,7 @@ import { findDisambiguationMatch } from './disambiguation-table';
 import { evaluateNegativeGuard } from './negative-guard';
 import type { ConstraintSpec } from './constraint-spec';
 import type { ConstraintResolverHints } from './constraint-retriever';
-import { analyzeSemanticDirection } from './semantic-direction';
+import { resolveSemanticDirection } from './semantic-direction';
 
 export type IRFirstParseResult =
   | { kind: 'ir'; ir: ConstraintIR; spec: ConstraintSpec }
@@ -116,7 +116,8 @@ function tryParseRequireTeacher(
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
   // Use semantic direction analyzer instead of disambiguation table
-  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  const semanticAnalysis = resolveSemanticDirection(rawText);
+  if (semanticAnalysis.needsClarification || semanticAnalysis.direction === 'contradictory') return null;
   if (semanticAnalysis.direction !== 'require') return null;
 
   // Must be a teacher-scope sentence.
@@ -150,7 +151,8 @@ function tryParseRequireClass(
   klass: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  const semanticAnalysis = resolveSemanticDirection(rawText);
+  if (semanticAnalysis.needsClarification || semanticAnalysis.direction === 'contradictory') return null;
   if (semanticAnalysis.direction !== 'require') return null;
   if (hints.inferredScope && hints.inferredScope !== 'class') return null;
   const period = extractPeriod(rawText, normalized);
@@ -178,7 +180,8 @@ function tryParseRequireSubject(
   subject: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  const semanticAnalysis = resolveSemanticDirection(rawText);
+  if (semanticAnalysis.needsClarification || semanticAnalysis.direction === 'contradictory') return null;
   if (semanticAnalysis.direction !== 'require') return null;
   if (hints.inferredScope && hints.inferredScope !== 'subject') return null;
   const period = extractPeriod(rawText, normalized);
@@ -194,7 +197,7 @@ function tryParseRequireSubject(
         var: 'd',
         in: 'days',
         body: {
-          forall: {
+          exists: {
             var: 'c',
             in: 'classes',
             body: { classSubjectAt: { class: '$$C$$', subject, day: '$$D$$', period } },
@@ -202,7 +205,7 @@ function tryParseRequireSubject(
         },
       },
     },
-    explain: `Mỗi lớp, mỗi ngày: số tiết môn ${subject} ở tiết ${period} ≥ ${minCount}`,
+    explain: `Ít nhất ${minCount} ngày/tuần có lớp học môn ${subject} ở tiết ${period}`,
   });
 }
 
@@ -212,7 +215,8 @@ function tryParseBlockTeacher(
   teacher: string,
   hints: ConstraintResolverHints
 ): ConstraintIR | null {
-  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  const semanticAnalysis = resolveSemanticDirection(rawText);
+  if (semanticAnalysis.needsClarification || semanticAnalysis.direction === 'contradictory') return null;
   if (semanticAnalysis.direction !== 'block') return null;
   if (hints.inferredScope && hints.inferredScope !== 'teacher') return null;
   const period = extractPeriod(rawText, normalized);
@@ -241,7 +245,8 @@ function tryParseOnlyTeacher(
   hints: ConstraintResolverHints,
   maxPeriods: number
 ): ConstraintIR | null {
-  const semanticAnalysis = analyzeSemanticDirection(rawText);
+  const semanticAnalysis = resolveSemanticDirection(rawText);
+  if (semanticAnalysis.needsClarification || semanticAnalysis.direction === 'contradictory') return null;
   if (semanticAnalysis.direction !== 'only') return null;
   if (hints.inferredScope && hints.inferredScope !== 'teacher') return null;
   // Allowed: "chỉ dạy tiết 4" or "chỉ dạy các tiết 2, 3, 4"
@@ -337,6 +342,14 @@ export function parseIRFirst(
 ): IRFirstParseResult {
   const maxPeriods = options?.maxPeriods ?? 5;
   const normalized = normalizeConstraintText(rawText);
+
+  const direction = resolveSemanticDirection(rawText);
+  if (direction.needsClarification || direction.direction === 'contradictory') {
+    return {
+      kind: 'needs_clarification',
+      reason: direction.explanation,
+    };
+  }
 
   // Try each require/block/only family.
   const teacher = hints.resolvedTeacher;

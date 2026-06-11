@@ -21,7 +21,12 @@
 import type { BuiltInConstraintScope, ConstraintKind } from './constraint-registry';
 import { BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
 import { normalizeConstraintText } from './translator-text';
-import { analyzeSemanticDirection } from './semantic-direction';
+import { resolveSemanticDirection } from './semantic-direction';
+import { getCatalogEmbedding } from './catalog-embeddings';
+import { computeSemanticEmbedding, cosineSimilarity } from './text-embedding';
+import { retrieverMarginFromScores } from './parse-confidence';
+
+export { retrieverMarginFromScores };
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1499,6 +1504,120 @@ function catalogCandidatesForScope(
   );
 }
 
+const EMBEDDING_WEIGHT = 3;
+const TRIGGER_HIT_BONUS = 12;
+const NEGATIVE_FEW_SHOT_PENALTY = 5;
+const NEGATIVE_FEW_SHOT_SIM_THRESHOLD = 0.55;
+
+function catalogEmbeddingForEntry(entry: CatalogEntry): number[] {
+  return getCatalogEmbedding({
+    kind: entry.kind,
+    synonyms: entry.synonyms,
+    fewShots: entry.fewShots,
+    negativeFewShots: entry.negativeFewShots,
+  });
+}
+
+function negativeFewShotPenalty(
+  text: string,
+  textVec: number[],
+  entry: CatalogEntry,
+  userDirection: ReturnType<typeof resolveSemanticDirection>['direction']
+): number {
+  let penalty = 0;
+  for (const negative of entry.negativeFewShots) {
+    const negativeDirection = resolveSemanticDirection(negative.text).direction;
+    if (
+      userDirection !== 'unknown' &&
+      negativeDirection !== 'unknown' &&
+      userDirection !== negativeDirection
+    ) {
+      continue;
+    }
+    const negativeVec = computeSemanticEmbedding(negative.text);
+    const similarity = cosineSimilarity(textVec, negativeVec);
+    if (similarity >= NEGATIVE_FEW_SHOT_SIM_THRESHOLD) {
+      penalty += similarity * NEGATIVE_FEW_SHOT_PENALTY;
+    }
+  }
+  return penalty;
+}
+
+function scoreCatalogEntry(
+  text: string,
+  textVec: number[],
+  entry: CatalogEntry,
+  hints: ConstraintResolverHints,
+  scope: BuiltInConstraintScope | null,
+  semanticAnalysis: ReturnType<typeof resolveSemanticDirection>
+): number {
+  let score = lexicalScore(text, entry);
+
+  if (entry.triggers.some((trigger) => trigger.test(text))) {
+    score += TRIGGER_HIT_BONUS;
+  }
+
+  const catalogVec = catalogEmbeddingForEntry(entry);
+  score += cosineSimilarity(textVec, catalogVec) * EMBEDDING_WEIGHT;
+  score -= negativeFewShotPenalty(text, textVec, entry, semanticAnalysis.direction);
+
+  if (scope === null && hints.inferredScope && entry.scope === hints.inferredScope) {
+    score += 2;
+  }
+
+  if (hints.mentionsBlock && semanticAnalysis.direction === 'block') {
+    if (entry.triggers.some((tr) => tr.test(text))) score += 2;
+  }
+  if (hints.mentionsMax && /(t[ốo]i\s*đa|không?\s*quá|giới\s*hạn|quá\s*\d)/iu.test(text)) {
+    if (entry.kind.includes('max') || entry.kind.includes('limit')) score += 10;
+    if (entry.kind.includes('block')) score -= 6;
+  }
+  if (hints.mentionsConsecutive && /(liên\s*tiếp|liên\s*tục)/iu.test(text)) {
+    if (entry.kind.includes('consecutive')) score += 2;
+  }
+  if (
+    entry.kind.includes('first_period') &&
+    !/(mỗi|mot)\s*ngày|trong\s*mỗi\s*ngày/iu.test(text)
+  ) {
+    score -= 12;
+  }
+  if (hints.mentionsIfThen && /(nếu|neu)[\s\S]+(thì|thi)/iu.test(text)) {
+    if (entry.kind === 'if_then') score += 5;
+  }
+
+  if (semanticAnalysis.direction !== 'unknown' && semanticAnalysis.direction !== 'contradictory') {
+    if (semanticAnalysis.direction === 'require' && entry.kind.includes('required')) {
+      score += 10;
+    } else if (semanticAnalysis.direction === 'block' && entry.kind.includes('block')) {
+      score += 10;
+    } else if (semanticAnalysis.direction === 'only' && entry.kind.includes('allowed')) {
+      score += 10;
+    } else if (semanticAnalysis.direction === 'prefer' && entry.kind.includes('preferred')) {
+      score += 10;
+    }
+  }
+
+  if (semanticAnalysis.direction === 'require') {
+    if (entry.kind.includes('block') || entry.kind.includes('allowed') || entry.kind.includes('preferred')) {
+      score -= 8;
+    }
+  } else if (semanticAnalysis.direction === 'block') {
+    if (entry.kind.includes('required') || entry.kind.includes('allowed') || entry.kind.includes('preferred')) {
+      score -= 8;
+    }
+  } else if (semanticAnalysis.direction === 'only') {
+    if (entry.kind.includes('required') || entry.kind.includes('block') || entry.kind.includes('preferred')) {
+      score -= 8;
+    }
+  } else if (semanticAnalysis.direction === 'prefer') {
+    if (entry.kind.includes('required') || entry.kind.includes('block') || entry.kind.includes('allowed')) {
+      score -= 8;
+    }
+  }
+
+  return score;
+}
+
 /** Retrieve top-k candidates within a scope (or all scopes if scope is null). */
 export function retrieveTopK(
   hints: ConstraintResolverHints,
@@ -1509,80 +1628,20 @@ export function retrieveTopK(
   if (!text) return [];
 
   const candidates = catalogCandidatesForScope(text, scope);
+  const semanticAnalysis = resolveSemanticDirection(text);
+  const textVec = computeSemanticEmbedding(text);
 
-  // Semantic direction analysis for scoring boosts
-  const semanticAnalysis = analyzeSemanticDirection(text);
+  const scored = candidates.map((entry) => ({
+    entry,
+    score: scoreCatalogEntry(text, textVec, entry, hints, scope, semanticAnalysis),
+  }));
 
-  // Score each candidate
-  const scored = candidates.map((entry) => {
-    let score = lexicalScore(text, entry);
-
-    // Scope-inference bonus: if we already inferred the scope and it matches, boost
-    if (scope === null && hints.inferredScope && entry.scope === hints.inferredScope) {
-      score += 2;
-    }
-
-    // Keyword bonus: boost kinds matching the detected keywords
-    if (hints.mentionsBlock && semanticAnalysis.direction === 'block') {
-      if (entry.triggers.some((tr) => tr.test(text))) score += 2;
-    }
-    if (hints.mentionsMax && /(t[ốo]i\s*đa|không?\s*quá|giới\s*hạn)/iu.test(text)) {
-      if (entry.kind.includes('max') || entry.kind.includes('limit')) score += 2;
-    }
-    if (hints.mentionsConsecutive && /(liên\s*tiếp|liên\s*tục)/iu.test(text)) {
-      if (entry.kind.includes('consecutive')) score += 2;
-    }
-    if (hints.mentionsIfThen && /(nếu|neu)[\s\S]+(thì|thi)/iu.test(text)) {
-      if (entry.kind === 'if_then') score += 5;
-    }
-
-    // Semantic direction bonus: strongly favor kinds matching the detected direction.
-    // This MUST outweigh generic lexical overlap on shared tokens like 'tiết'/'dạy'/'có'
-    // so that a require direction cannot be silently flipped into a block/only kind
-    // (or vice versa) due to incidental token overlap.
-    if (semanticAnalysis.direction !== 'unknown' && semanticAnalysis.direction !== 'contradictory') {
-      if (semanticAnalysis.direction === 'require' && entry.kind.includes('required')) {
-        score += 10;
-      } else if (semanticAnalysis.direction === 'block' && entry.kind.includes('block')) {
-        score += 10;
-      } else if (semanticAnalysis.direction === 'only' && entry.kind.includes('allowed')) {
-        score += 10;
-      } else if (semanticAnalysis.direction === 'prefer' && entry.kind.includes('preferred')) {
-        score += 10;
-      }
-    }
-
-    // Anti-flip penalty: when direction is clearly detected, demote any kind that
-    // contradicts the direction. This prevents "phải có" → block/only, "không dạy" →
-    // require, and "chỉ dạy" → require/allowed_only_without_chỉ.
-    if (semanticAnalysis.direction === 'require') {
-      if (entry.kind.includes('block') || entry.kind.includes('allowed') || entry.kind.includes('preferred')) {
-        score -= 8;
-      }
-    } else if (semanticAnalysis.direction === 'block') {
-      if (entry.kind.includes('required') || entry.kind.includes('allowed') || entry.kind.includes('preferred')) {
-        score -= 8;
-      }
-    } else if (semanticAnalysis.direction === 'only') {
-      if (entry.kind.includes('required') || entry.kind.includes('block') || entry.kind.includes('preferred')) {
-        score -= 8;
-      }
-    } else if (semanticAnalysis.direction === 'prefer') {
-      if (entry.kind.includes('required') || entry.kind.includes('block') || entry.kind.includes('allowed')) {
-        score -= 8;
-      }
-    }
-
-    return { entry, score };
-  });
-
-  // Sort by score desc, then return top-k
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, k).map(({ entry, score }) => ({
     kind: entry.kind,
     scope: entry.scope,
     score,
-    embedding: entry.embedding,
+    embedding: catalogEmbeddingForEntry(entry),
     triggers: entry.triggers,
     synonyms: entry.synonyms,
     fewShots: entry.fewShots,
@@ -1626,67 +1685,16 @@ export function buildTopKPromptSection(
  * Compute cosine similarity between text embedding and a catalog embedding.
  * Uses simple TF-IDF-like vectors as placeholder until real embeddings are precomputed.
  */
+/** @deprecated Use computeSemanticEmbedding from text-embedding.ts */
 export function computeTextEmbedding(text: string): number[] {
-  // Simple TF-IDF-like 384-dim vector (placeholder).
-  // In production, call the embedding API offline and cache in CATALOG.
-  const tokens = tokenize(text);
-  const dim = 384;
-  const vec = new Array<number>(dim).fill(0);
-  for (const token of tokens) {
-    let hash = 0;
-    for (let i = 0; i < token.length; i++) {
-      hash = (hash * 31 + token.charCodeAt(i)) >>> 0;
-    }
-    const idx = hash % dim;
-    vec[idx] += 1;
-  }
-  // Normalize
-  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
-  if (norm > 0) {
-    for (let i = 0; i < dim; i++) vec[i] /= norm;
-  }
-  return vec;
+  return computeSemanticEmbedding(text);
 }
 
-/** Embedding-based top-k rerank (used when text embedding is available). */
+/** Alias for retrieveTopK — embeddings are always applied in the main path. */
 export function retrieveTopKWithEmbedding(
   hints: ConstraintResolverHints,
   scope: BuiltInConstraintScope | null,
   k = 5
 ): ConstraintRetrieverCandidate[] {
-  const candidates = catalogCandidatesForScope(hints.normalizedText, scope);
-
-  const textVec = computeTextEmbedding(hints.normalizedText);
-
-  const scored = candidates.map((entry) => {
-    let score = lexicalScore(hints.normalizedText, entry);
-
-    // If entry has a real embedding, add cosine similarity
-    if (entry.embedding && entry.embedding.length === textVec.length) {
-      const sim = cosineSimilarity(textVec, entry.embedding);
-      score += sim * 5; // Weight embedding score
-    }
-
-    if (scope === null && hints.inferredScope && entry.scope === hints.inferredScope) {
-      score += 2;
-    }
-    if (hints.mentionsIfThen && /(nếu|neu)[\s\S]+(thì|thi)/iu.test(hints.normalizedText)) {
-      if (entry.kind === 'if_then') score += 5;
-    }
-
-    return { entry, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, k).map((c) => ({
-    kind: c.entry.kind,
-    scope: c.entry.scope,
-    score: c.score,
-    embedding: c.entry.embedding,
-    triggers: c.entry.triggers,
-    synonyms: c.entry.synonyms,
-    fewShots: c.entry.fewShots,
-    negativeFewShots: c.entry.negativeFewShots,
-    requiredParams: c.entry.requiredParams,
-  }));
+  return retrieveTopK(hints, scope, k);
 }

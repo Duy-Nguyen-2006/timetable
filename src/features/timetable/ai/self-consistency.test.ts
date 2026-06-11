@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { canonicalSlotFillString, voteSlotFillResponses } from './self-consistency';
+import { canonicalSlotFillString, getConsensusRatio, voteSlotFillResponses } from './self-consistency';
 
 const response = {
   atoms: [{
@@ -22,6 +22,11 @@ test('voteSlotFillResponses accepts unanimous responses', () => {
   const accepted = voteSlotFillResponses([response, response, response]);
   assert.equal(accepted.accepted, true);
   assert.equal(accepted.calls, 3);
+  assert.equal(accepted.consensusRatio, 1);
+});
+
+test('getConsensusRatio returns winner share', () => {
+  assert.equal(getConsensusRatio([response, response, { atoms: [{ ...response.atoms[0], params: { teacher: 'Sơn', day: 'monday', period: 5 } }] }]), 2 / 3);
 });
 
 test('voteSlotFillResponses accepts 2/3 majority', () => {

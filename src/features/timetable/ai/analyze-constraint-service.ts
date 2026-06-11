@@ -33,15 +33,18 @@ import { matchKnownEntities, suggestBuiltInConstraint } from './built-in-suggest
 import { SOLVER_ENCODABLE_KIND_LIST, BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
 import type { BuiltInConstraintScope } from './constraint-registry';
 import { normalizeConstraintText, extractCountNumber, extractPeriodNumber, extractDayId } from './translator-text';
-import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
+import { retrieveTopK, retrieverMarginFromScores, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 import { evaluateNegativeGuardForSpecs } from './negative-guard';
 import {
-  analyzeSemanticDirection,
+  resolveSemanticDirection,
   mentionsConsecutiveMarker,
   mentionsIfThenMarker,
   mentionsMaxMarker,
   mentionsMinMarker,
 } from './semantic-direction';
+import { calibrateParseConfidence } from './parse-confidence';
+import { runSemanticVerify } from './semantic-verify';
+import { backTranslateBatch } from './back-translation-check';
 import { semanticConstraintToSpecs } from './semantic-to-spec';
 import { validateIR } from './constraint-ir';
 import type { BoolExpr } from './constraint-ir';
@@ -442,12 +445,12 @@ function buildResolverHints(
       .map((d) => (normalized.includes(d.id) || normalized.includes(d.label.toLowerCase()) ? d.id : null))
       .filter(Boolean) as string[],
     inferredScope,
-    mentionsBlock: analyzeSemanticDirection(rawText).matched.block.length > 0,
+    mentionsBlock: resolveSemanticDirection(rawText).matched.block.length > 0,
     mentionsMax: mentionsMaxMarker(rawText),
     mentionsMin: mentionsMinMarker(rawText),
     mentionsConsecutive: mentionsConsecutiveMarker(rawText),
-    mentionsOnly: analyzeSemanticDirection(rawText).matched.only.length > 0,
-    mentionsPreferred: analyzeSemanticDirection(rawText).matched.prefer.length > 0,
+    mentionsOnly: resolveSemanticDirection(rawText).matched.only.length > 0,
+    mentionsPreferred: resolveSemanticDirection(rawText).matched.prefer.length > 0,
     mentionsIfThen: mentionsIfThenMarker(rawText),
   };
 }
@@ -520,6 +523,26 @@ export async function analyzeConstraint(
 ): Promise<AnalyzeConstraintResult> {
   // Stage 1: Build resolver hints (CODE — no LLM)
   const hints = buildResolverHints(rawText, agentInput);
+  const semanticDirection = resolveSemanticDirection(rawText);
+  if (
+    semanticDirection.needsClarification ||
+    semanticDirection.direction === 'contradictory'
+  ) {
+    return {
+      status: 'needs_clarification',
+      normalizedText: rawText,
+      specs: [],
+      confidence: 'low',
+      requiresConfirmation: true,
+      guardReasons: [],
+      clarificationQuestions: [
+        semanticDirection.explanation,
+        'Bạn có thể diễn đạt lại rõ hơn ý định (bắt buộc / cấm / chỉ được / ưu tiên)?',
+      ],
+      assumptions: [],
+      unresolvedQuestions: ['Hướng ngữ nghĩa chưa rõ hoặc mâu thuẫn.'],
+    };
+  }
   // Stage 2: Retrieve top-k candidates (CODE)
   const topKCandidates = retrieveTopK(hints, hints.inferredScope, 5);
   // Stage 3: LLM slot-fill with small prompt
@@ -616,6 +639,16 @@ export async function analyzeConstraint(
       }
     }
 
+    const backTranslationScore = specs.length > 0
+      ? backTranslateBatch(specs, rawText).score
+      : 0;
+    const semanticVerify = await runSemanticVerify({
+      originalText: rawText,
+      specs,
+      config,
+      useLlm: true,
+    });
+
     // Run negative-guard over the LLM-emitted specs FIRST. This catches silent
     // semantic flips (require→block, block→allowed) regardless of confidence.
     const guardResult = evaluateNegativeGuardForSpecs(specs, rawText);
@@ -628,7 +661,14 @@ export async function analyzeConstraint(
     // was the root cause of bug "Thủy phải có tiết 4" being silently inverted.
     let resolvedStatus: AnalyzeConstraintStatus = validated.status;
     let resolvedSpecs = specs;
-    let resolvedConfidence: 'high' | 'medium' | 'low' = validated.confidence;
+    let resolvedConfidence: 'high' | 'medium' | 'low' = calibrateParseConfidence({
+      retrieverMargin: retrieverMarginFromScores(topKCandidates.map((candidate) => candidate.score)),
+      consensusRatio: 1,
+      backTranslationScore,
+      semanticVerifyScore: semanticVerify.score,
+      atomConfidenceHigh: validated.confidence === 'high',
+      directionNeedsClarification: semanticDirection.needsClarification,
+    });
     let resolvedNormalizedText = validated.normalizedText;
     let resolvedClarificationQuestions = validated.clarificationQuestions ?? [];
 
@@ -662,7 +702,8 @@ export async function analyzeConstraint(
     let resolvedRequiresConfirmation =
       resolvedStatus === 'needs_clarification' ||
       resolvedStatus === 'unsupported' ||
-      resolvedStatus === 'semantic_only';
+      resolvedStatus === 'semantic_only' ||
+      !semanticVerify.accepted;
     const guardReasons: string[] = [];
 
     // Apply guard demotions: any demoted spec caps confidence at `medium` and

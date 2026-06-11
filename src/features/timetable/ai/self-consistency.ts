@@ -5,6 +5,8 @@ export type SelfConsistencyResult = {
   calls: number;
   canonicalVotes: string[];
   winner?: SlotFillResponse;
+  /** Winner vote count / total responses (0..1). */
+  consensusRatio: number;
 };
 
 function normalizeForVote(response: SlotFillResponse): SlotFillResponse {
@@ -33,10 +35,17 @@ export function voteSlotFillResponses(responses: SlotFillResponse[]): SelfConsis
   const [winnerKey, winnerCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
   const winnerIndex = winnerKey ? canonicalVotes.indexOf(winnerKey) : -1;
   const majorityThreshold = Math.ceil(responses.length / 2);
+  const consensusRatio = responses.length > 0 ? (winnerCount ?? 0) / responses.length : 0;
   return {
     accepted: responses.length > 0 && (winnerCount ?? 0) >= majorityThreshold,
     calls: responses.length,
     canonicalVotes,
     winner: winnerIndex >= 0 ? responses[winnerIndex] : undefined,
+    consensusRatio,
   };
+}
+
+/** Agreement ratio for the winning slot-fill response (0..1). */
+export function getConsensusRatio(responses: SlotFillResponse[]): number {
+  return voteSlotFillResponses(responses).consensusRatio;
 }
