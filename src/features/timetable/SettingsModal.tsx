@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import type { AIProviderConfig, AIProviderType, SolverProfile, SolverRuntimeMode } from './ai/types';
-import { resolveProvider, normalizeBaseURL } from '@/lib/provider';
+import { resolveProvider, normalizeBaseURL, normalizeProviderModel, parseProviderPasteLine } from '@/lib/provider';
 
 interface SettingsModalProps {
   open: boolean;
@@ -60,7 +60,31 @@ export function SettingsModal({
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [quickPaste, setQuickPaste] = useState('');
   const { toast } = useToast();
+
+  const applyProviderPaste = (raw: string): boolean => {
+    const parsed = parseProviderPasteLine(raw);
+    if (!parsed) return false;
+    if (parsed.baseURL) setBaseURL(parsed.baseURL);
+    if (parsed.model) setModel(parsed.model);
+    if (parsed.apiKey) setApiKey(parsed.apiKey);
+    setTestResult(null);
+    return Boolean(parsed.baseURL || parsed.model || parsed.apiKey);
+  };
+
+  const handleQuickPasteApply = () => {
+    if (!applyProviderPaste(quickPaste)) {
+      toast({
+        title: 'Không đọc được',
+        description: 'Dán theo mẫu: Base URL, model tên-model, sk-or-api-key',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setQuickPaste('');
+    toast({ title: 'Đã điền', description: 'Kiểm tra 3 ô bên dưới rồi bấm Test hoặc Lưu.' });
+  };
 
   const handleTest = async () => {
     if (!baseURL.trim()) {
@@ -86,7 +110,7 @@ export function SettingsModal({
           provider: inferProvider(baseURL.trim(), model.trim()),
           baseURL: baseURL.trim(),
           apiKey: apiKey.trim(),
-          model: model.trim(),
+          model: normalizeProviderModel(model),
         }),
       });
 
@@ -121,7 +145,7 @@ export function SettingsModal({
   const handleSave = async () => {
     const trimmedBaseURL = normalizeBaseURL(baseURL.trim());
     const trimmedKey = apiKey.trim();
-    const trimmedModel = model.trim();
+    const trimmedModel = normalizeProviderModel(model);
 
     if (!trimmedBaseURL) {
       toast({ title: 'Lỗi', description: 'Base URL không được để trống', variant: 'destructive' });
@@ -175,10 +199,41 @@ export function SettingsModal({
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
+            <Label>Dán nhanh (tùy chọn)</Label>
+            <textarea
+              value={quickPaste}
+              onChange={(e) => setQuickPaste(e.target.value)}
+              onPaste={(e) => {
+                const text = e.clipboardData.getData('text');
+                if (applyProviderPaste(text)) {
+                  e.preventDefault();
+                  setQuickPaste('');
+                  toast({ title: 'Đã điền từ clipboard', description: 'Kiểm tra 3 ô bên dưới rồi bấm Test hoặc Lưu.' });
+                }
+              }}
+              rows={2}
+              placeholder="https://openrouter.ai/api/v1, model deepseek/deepseek-v4-flash, sk-or-..."
+              className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+            <Button type="button" variant="secondary" className="w-full" onClick={handleQuickPasteApply}>
+              Áp dụng dòng dán nhanh
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Có thể dán cả dòng vào ô này hoặc Ctrl+V trực tiếp — hệ thống tự tách URL, model và API key.
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label>Base URL</Label>
             <Input
               value={baseURL}
               onChange={(e) => setBaseURL(e.target.value)}
+              onPaste={(e) => {
+                const text = e.clipboardData.getData('text');
+                if (text.includes(',') && applyProviderPaste(text)) {
+                  e.preventDefault();
+                }
+              }}
               placeholder="https://openrouter.ai/api/v1"
             />
           </div>
@@ -198,6 +253,7 @@ export function SettingsModal({
             <Input
               value={model}
               onChange={(e) => setModel(e.target.value)}
+              onBlur={(e) => setModel(normalizeProviderModel(e.target.value))}
               placeholder="deepseek/deepseek-chat"
             />
             <p className="text-xs text-muted-foreground">

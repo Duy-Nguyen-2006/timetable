@@ -80,7 +80,7 @@ export function SelectPage({
               Cấu hình AI Provider
             </div>
             <p className="mt-1 text-xs text-white/50">
-              Cần thiết để sử dụng tính năng xếp lịch tự động bằng AI (LLM + OR-Tools)
+              Chỉ cần cho nút «AI phân tích» ràng buộc. Bước xếp lịch chạy CP-SAT cố định, không gọi LLM.
             </p>
             {aiProvider ? (
               <div className="mt-2 text-xs text-emerald-400">
@@ -88,7 +88,7 @@ export function SelectPage({
               </div>
             ) : (
               <div className="mt-2 text-xs text-amber-400">
-                Chưa cấu hình — Bắt buộc phải thiết lập trước khi dùng AI
+                Chưa cấu hình — Cần khi bạn muốn dùng «AI phân tích» ràng buộc
               </div>
             )}
           </div>

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { type ProviderType, resolveProvider, normalizeBaseURL } from '@/lib/provider'
+import { type ProviderType, resolveProvider, normalizeBaseURL, normalizeProviderModel } from '@/lib/provider'
 
 type TestProviderPayload = {
   provider?: ProviderType
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: validation.message }, { status: 400 })
     }
     const apiKey = String(body.apiKey ?? '').trim()
-    const model = String(body.model ?? '').trim()
+    const model = normalizeProviderModel(String(body.model ?? ''))
     const provider = resolveProvider(body.provider, baseURL, model)
     const isOpenRouter = provider === 'openrouter' || baseURL.toLowerCase().includes('openrouter.ai')
 

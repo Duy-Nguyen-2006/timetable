@@ -41,3 +41,45 @@ export function resolveProvider(
 export function normalizeBaseURL(baseURL: string): string {
   return baseURL.replace(/\/+$/u, '');
 }
+
+/** Strip accidental "model " prefix when users paste comma-separated config blobs. */
+export function normalizeProviderModel(model: string): string {
+  return model.trim().replace(/^model\s+/iu, '').trim();
+}
+
+export type ParsedProviderPaste = {
+  baseURL?: string;
+  model?: string;
+  apiKey?: string;
+};
+
+/**
+ * Parse one-line provider config pasted from notes/chat, e.g.
+ * `https://openrouter.ai/api/v1, model deepseek/deepseek-v4-flash, sk-or-...`
+ */
+export function parseProviderPasteLine(raw: string): ParsedProviderPaste | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const urlMatch = trimmed.match(/https?:\/\/[^\s,]+/iu);
+  const keyMatch = trimmed.match(/sk-[a-zA-Z0-9._-]+/u);
+
+  let model: string | undefined;
+  const modelLabelMatch = trimmed.match(/model\s+([^,]+)/iu);
+  if (modelLabelMatch) {
+    model = normalizeProviderModel(modelLabelMatch[1]);
+  } else if (urlMatch && keyMatch) {
+    const start = urlMatch.index! + urlMatch[0].length;
+    const end = trimmed.indexOf(keyMatch[0]);
+    const middle = trimmed.slice(start, end).replace(/^[\s,]+|[\s,]+$/gu, '');
+    if (middle) model = normalizeProviderModel(middle);
+  }
+
+  if (!urlMatch && !keyMatch && !model) return null;
+
+  return {
+    ...(urlMatch ? { baseURL: normalizeBaseURL(urlMatch[0]) } : {}),
+    ...(model ? { model } : {}),
+    ...(keyMatch ? { apiKey: keyMatch[0] } : {}),
+  };
+}
