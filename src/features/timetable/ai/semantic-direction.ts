@@ -57,7 +57,7 @@ const BOUNDED = (inner: string): string =>
   `${WORD_BOUNDARY.start}${inner}${WORD_BOUNDARY.end}`;
 
 /** REQUIRE markers: positive intent, at-least semantics. */
-const REQUIRE_PATTERNS = [
+export const REQUIRE_PATTERNS = [
   { pattern: new RegExp(BOUNDED('ph[ảa]i\\s+c[óo]'), 'iu'), marker: 'phải có', weight: 1.0 },
   { pattern: new RegExp(BOUNDED('phai\\s+co'), 'iu'), marker: 'phai co', weight: 1.0 },
   { pattern: new RegExp(BOUNDED('c[ầa]n\\s+c[óo]'), 'iu'), marker: 'cần có', weight: 1.0 },
@@ -78,7 +78,7 @@ const REQUIRE_PATTERNS = [
 ] as const;
 
 /** BLOCK markers: negative intent, forbid semantics. */
-const BLOCK_PATTERNS = [
+export const BLOCK_PATTERNS = [
   { pattern: new RegExp(BOUNDED('kh[ôo]ng\\s+(d[ạa]y|h[ọo]c|đ[ượu][ợo]c|x[ếe]p)'), 'iu'), marker: 'không', weight: 1.0 },
   { pattern: new RegExp(BOUNDED('khong\\s+(day|hoc|duoc|xep)'), 'iu'), marker: 'khong', weight: 1.0 },
   { pattern: new RegExp(BOUNDED('ko\\s+(d[ạa]y|h[ọo]c|đ[ượu][ợo]c)'), 'iu'), marker: 'ko', weight: 1.0 },

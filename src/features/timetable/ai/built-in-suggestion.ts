@@ -211,8 +211,8 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
       );
     }
 
-    // Class require period
-    if (classMatch.status === 'matched') {
+    // Class require period (skip when subject also matched — handled below)
+    if (classMatch.status === 'matched' && subjectMatch.status !== 'matched') {
       const definition = supportedDefinition(definitions, 'class_required_period');
       if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
       return suggest(
