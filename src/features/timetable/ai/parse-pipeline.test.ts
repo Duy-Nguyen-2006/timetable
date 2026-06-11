@@ -92,7 +92,9 @@ test('buildSlotFillPrompt is much smaller than legacy prompt', () => {
   });
   const candidates = retrieveTopK(hints, 'teacher', 5);
   const { system, user } = buildSlotFillPrompt('Thầy Sơn không dạy thứ 2', hints, candidates);
-  assert.ok(system.length + user.length < 3000, `total prompt size: ${system.length + user.length}`);
+  // The few-shot examples (FS1/FS2/FS3) add ~400 chars; total is still
+  // much smaller than the old mega prompt (~8000+ chars).
+  assert.ok(system.length + user.length < 4000, `total prompt size: ${system.length + user.length}`);
 });
 
 test('buildSlotFillUserMessage includes extracted number', () => {
