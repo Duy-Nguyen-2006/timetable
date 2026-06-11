@@ -32,10 +32,16 @@ import { __translatorInternal } from './translator';
 import { matchKnownEntities, suggestBuiltInConstraint } from './built-in-suggestion';
 import { SOLVER_ENCODABLE_KIND_LIST, BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
 import type { BuiltInConstraintScope } from './constraint-registry';
-import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
+import { normalizeConstraintText, extractCountNumber, extractPeriodNumber, extractDayId } from './translator-text';
 import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 import { evaluateNegativeGuardForSpecs } from './negative-guard';
-import { analyzeSemanticDirection } from './semantic-direction';
+import {
+  analyzeSemanticDirection,
+  mentionsConsecutiveMarker,
+  mentionsIfThenMarker,
+  mentionsMaxMarker,
+  mentionsMinMarker,
+} from './semantic-direction';
 import { semanticConstraintToSpecs } from './semantic-to-spec';
 import { validateIR } from './constraint-ir';
 import type { BoolExpr } from './constraint-ir';
@@ -274,6 +280,14 @@ ${sessionLines.length > 0 ? sessionLines.join('\n') : '  (chưa có)'}
 ${assignments.length > 0 ? assignments.join('\n') : '  (chưa có)'}`;
 }
 
+function isUnparsedHardSpec(spec: ConstraintSpec): boolean {
+  return (
+    spec.kind === 'custom_dsl' &&
+    spec.severity === 'hard' &&
+    (spec.notes?.includes('UNPARSED_HARD') || spec.notes === 'fallback_parser:UNPARSED_HARD')
+  );
+}
+
 function fallbackBuiltInSpecs(
   rawText: string,
   constraintType: 'required' | 'preferred',
@@ -285,9 +299,10 @@ function fallbackBuiltInSpecs(
     constraints: [{ type: constraintType, text: rawText, weight }],
   };
   const parsed = __translatorInternal.fallbackFromRuleParser(input);
-  return __translatorInternal
-    .sanitizeSpecs(input, parsed)
-    .filter((spec) => spec.kind !== 'custom_dsl');
+  const sanitized = __translatorInternal.sanitizeSpecs(input, parsed);
+  const hardUnparsed = sanitized.filter(isUnparsedHardSpec);
+  if (hardUnparsed.length > 0) return hardUnparsed;
+  return sanitized.filter((spec) => spec.kind !== 'custom_dsl');
 }
 
 function uniqueLabels(labels: string[]): string[] {
@@ -363,7 +378,16 @@ function hasTechnicalOrUnknownText(text: string): boolean {
   return /\b[a-z]+(?:_[a-z]+)+\b/u.test(text) || text.includes('điều kiện chưa xác định');
 }
 
-function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
+function clarifyAmbiguousIfThen(rawText: string, agentInput?: AgentInputPayload): AnalyzeConstraintResult {
+  const teachers = agentInput
+    ? matchKnownEntities(rawText, uniqueLabels(agentInput.assignments.map((assignment) => assignment.teacher.label)))
+    : [];
+  const classes = agentInput
+    ? matchKnownEntities(rawText, uniqueLabels(agentInput.assignments.map((assignment) => assignment.class.label)))
+    : [];
+  const teacherPair = teachers.length >= 2 ? `${teachers[0]} và ${teachers[1]}` : teachers[0] ?? 'các giáo viên được nhắc';
+  const classHint = classes[0] ?? 'lớp cụ thể';
+
   return {
     status: 'needs_clarification',
     normalizedText: 'AI chưa đủ thông tin để hiểu ràng buộc này một cách chắc chắn.',
@@ -372,9 +396,9 @@ function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
     requiresConfirmation: true,
     guardReasons: [],
     clarificationQuestions: [
-      `Mình chưa rõ điều kiện trong câu “${rawText}”. “Hiếu và Thúy dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
-      '“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định Hiếu/Thúy không dạy tiết 4?',
-      'Ràng buộc này áp dụng cho tất cả lớp hay chỉ một lớp cụ thể?',
+      `Mình chưa rõ điều kiện trong câu “${rawText}”. “${teacherPair} dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
+      `“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định một giáo viên không dạy tiết 4?`,
+      `Ràng buộc này áp dụng cho tất cả lớp hay chỉ ${classHint}?`,
     ],
     assumptions: [],
     unresolvedQuestions: [
@@ -412,20 +436,19 @@ function buildResolverHints(
     resolvedSubjects,
     resolvedClass,
     resolvedClasses,
-    extractedNumber: extractFirstNumber(rawText),
+    extractedNumber: extractCountNumber(rawText),
     extractedPeriods: [],
     extractedDays: agentInput.days
       .map((d) => (normalized.includes(d.id) || normalized.includes(d.label.toLowerCase()) ? d.id : null))
       .filter(Boolean) as string[],
     inferredScope,
-    // M3.2: Use shared semantic-direction analyzer instead of duplicated regex
     mentionsBlock: analyzeSemanticDirection(rawText).matched.block.length > 0,
-    mentionsMax: /tối\s*đa|tối\s*da|quá|không.*quá|khong.*qua/iu.test(normalized),
-    mentionsMin: /ít\s*nhất|tối\s*thiểu/iu.test(normalized),
-    mentionsConsecutive: /liên\s*tiếp|liên\s*tục/iu.test(normalized),
+    mentionsMax: mentionsMaxMarker(rawText),
+    mentionsMin: mentionsMinMarker(rawText),
+    mentionsConsecutive: mentionsConsecutiveMarker(rawText),
     mentionsOnly: analyzeSemanticDirection(rawText).matched.only.length > 0,
     mentionsPreferred: analyzeSemanticDirection(rawText).matched.prefer.length > 0,
-    mentionsIfThen: /nếu.*thì|neu.*thi/iu.test(normalized),
+    mentionsIfThen: mentionsIfThenMarker(rawText),
   };
 }
 
@@ -667,7 +690,7 @@ export async function analyzeConstraint(
       (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText))
     ) {
       return {
-        ...clarifyAmbiguousIfThen(rawText),
+        ...clarifyAmbiguousIfThen(rawText, agentInput),
         requiresConfirmation: true,
         guardReasons,
         rawResponse: content,
@@ -697,6 +720,25 @@ export async function analyzeConstraint(
     // confidence `medium` and REQUIRES explicit user confirmation. This is the
     // ONLY place where the rule parser may produce an auto-mapped result.
     const deterministic = mergedDeterministicFallbackSpecs(rawText, constraintType, weight, agentInput);
+    if (deterministic.some(isUnparsedHardSpec)) {
+      return {
+        status: 'needs_clarification',
+        normalizedText: rawText,
+        specs: [],
+        confidence: 'low',
+        requiresConfirmation: true,
+        guardReasons: [],
+        clarificationQuestions: [
+          'Rule parser chưa hiểu ràng buộc bắt buộc này — bạn có thể diễn đạt lại rõ hơn hoặc chọn mẫu có sẵn?',
+        ],
+        assumptions: [
+          `AI phân tích lỗi và rule parser chỉ trả custom_dsl cho ràng buộc hard. Lỗi gốc: ${
+            error instanceof Error ? error.message : 'unknown'
+          }`,
+        ],
+        unresolvedQuestions: ['Ràng buộc bắt buộc chưa được map sang kind máy hiểu.'],
+      };
+    }
     if (deterministic.length > 0) {
       // Run the negative-guard on fallback specs too — the rule parser is
       // exactly where silent flips originate.

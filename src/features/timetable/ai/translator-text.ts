@@ -5,11 +5,59 @@ export function includesLabel(text: string, label: string): boolean {
   return text.toLocaleLowerCase('vi').includes(label.toLocaleLowerCase('vi'));
 }
 
+const VIETNAMESE_NUMBER_WORDS: Record<string, number> = {
+  mot: 1,
+  hai: 2,
+  ba: 3,
+  bon: 4,
+  tu: 4,
+  nam: 5,
+  sau: 6,
+  bay: 7,
+  tam: 8,
+  chin: 9,
+  muoi: 10,
+};
+
+/** Parse a digit or common Vietnamese number word (normalized, no diacritics). */
+export function parseVietnameseNumberToken(token: string): number | null {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+  const asDigit = Number(trimmed);
+  if (Number.isFinite(asDigit) && asDigit > 0) return asDigit;
+  const normalized = normalizeConstraintText(trimmed);
+  return VIETNAMESE_NUMBER_WORDS[normalized] ?? null;
+}
+
 export function extractFirstNumber(text: string): number | null {
   const matched = text.match(/\b(\d+)\b/u);
   if (!matched) return null;
   const value = Number(matched[1]);
   return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Extract a quantity/count only when the text has an explicit count marker
+ * (ít nhất, tối đa, N tiết, …). Avoids treating "tiết 4" period numbers as counts.
+ */
+export function extractCountNumber(text: string): number | null {
+  const normalized = normalizeConstraintText(text);
+
+  const markerMatch = normalized.match(
+    /(?:it\s*nhat|toi\s*thieu|toi\s*da|khong\s*qua|khong\s*hon|gioi\s*han|qua\s*)\s*(\d+|[a-z]+)/iu
+  );
+  if (markerMatch) {
+    const value = parseVietnameseNumberToken(markerMatch[1]);
+    if (value !== null) return value;
+  }
+
+  const countBeforeTiet = normalized.match(/\b(\d+|[a-z]+)\s+tiet\b/iu);
+  if (countBeforeTiet) {
+    const value = parseVietnameseNumberToken(countBeforeTiet[1]);
+    if (value !== null) return value;
+  }
+
+  return null;
 }
 
 /** Số tiết trong cụm “N tiết liên tiếp” (tránh lấy nhầm “1 môn”, “1 lớp”). */

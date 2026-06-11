@@ -30,6 +30,7 @@ import type { SlotFillResponse } from './slot-fill-types';
 import { BUILT_IN_CONSTRAINT_KINDS, type BuiltInConstraintScope } from './constraint-registry';
 import { invokeAnalyzeChat } from './analyze-constraint-service';
 import { parseIRFirstWithGuard } from './ir-first-parser';
+import { buildTranslatorPeriodsByDay } from './translator-periods';
 import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
 import { getParserMode, isIRFirstAuthoritative } from './parser-mode';
 import { buildInterpretationConfirm } from './constraint-clarification-builder';
@@ -312,7 +313,10 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   const legacyStatus = specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'semantic_only' : 'mapped_builtin') : 'needs_clarification';
   const parserMode = getParserMode();
   const runIrFirst = parserMode !== 'legacy';
-  const irFirstResult = runIrFirst ? parseIRFirstWithGuard(rawText, hints) : undefined;
+  const periodsByDay = buildTranslatorPeriodsByDay(agentInput);
+  const allActivePeriods = Object.values(periodsByDay).flat();
+  const maxPeriods = allActivePeriods.length > 0 ? Math.max(...allActivePeriods) : 5;
+  const irFirstResult = runIrFirst ? parseIRFirstWithGuard(rawText, hints, { maxPeriods }) : undefined;
 
   if (runIrFirst && irFirstResult) {
     const shadowNew = irFirstResult.kind === 'ir'

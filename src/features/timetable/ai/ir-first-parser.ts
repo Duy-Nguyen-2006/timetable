@@ -105,6 +105,10 @@ function buildIR(args: {
  *
  * Returns the IR or null if the sentence doesn't match.
  */
+function resolveMinCount(hints: ConstraintResolverHints): number {
+  return hints.extractedNumber ?? 1;
+}
+
 function tryParseRequireTeacher(
   rawText: string,
   normalized: string,
@@ -121,7 +125,7 @@ function tryParseRequireTeacher(
   const period = extractPeriod(rawText, normalized);
   if (period === null) return null;
 
-  const minCount = hints.extractedNumber ?? 1;
+  const minCount = resolveMinCount(hints);
 
   const ir = buildIR({
     id: 'ir_first_teacher_required_period',
@@ -151,7 +155,7 @@ function tryParseRequireClass(
   if (hints.inferredScope && hints.inferredScope !== 'class') return null;
   const period = extractPeriod(rawText, normalized);
   if (period === null) return null;
-  const minCount = hints.extractedNumber ?? 1;
+  const minCount = resolveMinCount(hints);
   return buildIR({
     id: 'ir_first_class_required_period',
     original: rawText,
@@ -179,7 +183,7 @@ function tryParseRequireSubject(
   if (hints.inferredScope && hints.inferredScope !== 'subject') return null;
   const period = extractPeriod(rawText, normalized);
   if (period === null) return null;
-  const minCount = hints.extractedNumber ?? 1;
+  const minCount = resolveMinCount(hints);
   return buildIR({
     id: 'ir_first_subject_required_period',
     original: rawText,
@@ -234,7 +238,8 @@ function tryParseOnlyTeacher(
   rawText: string,
   normalized: string,
   teacher: string,
-  hints: ConstraintResolverHints
+  hints: ConstraintResolverHints,
+  maxPeriods: number
 ): ConstraintIR | null {
   const semanticAnalysis = analyzeSemanticDirection(rawText);
   if (semanticAnalysis.direction !== 'only') return null;
@@ -242,7 +247,7 @@ function tryParseOnlyTeacher(
   // Allowed: "chỉ dạy tiết 4" or "chỉ dạy các tiết 2, 3, 4"
   const periods = extractPeriods(normalized);
   if (periods.length === 0) return null;
-  const maxPeriod = Math.max(5, ...periods);
+  const maxPeriod = Math.max(maxPeriods, ...periods);
   const disallowed = Array.from({ length: maxPeriod }, (_, index) => index + 1).filter(
     (period) => !periods.includes(period)
   );
@@ -320,10 +325,17 @@ function tryParseMaxPerDayTeacher(
  * returns the first match. If no pattern matches, it returns
  * `escalate_to_tier2` so the caller knows to invoke the LLM.
  */
+export type IRFirstParseOptions = {
+  /** Max periods per day from agentInput.periodCounts; defaults to 5. */
+  maxPeriods?: number;
+};
+
 export function parseIRFirst(
   rawText: string,
-  hints: ConstraintResolverHints
+  hints: ConstraintResolverHints,
+  options?: IRFirstParseOptions
 ): IRFirstParseResult {
+  const maxPeriods = options?.maxPeriods ?? 5;
   const normalized = normalizeConstraintText(rawText);
 
   // Try each require/block/only family.
@@ -333,12 +345,12 @@ export function parseIRFirst(
 
   if (teacher) {
     const requireIr = tryParseRequireTeacher(rawText, normalized, teacher, hints);
-    if (requireIr) return { kind: 'ir', ir: requireIr, spec: specFromIR(requireIr, 'teacher_required_period', { teacher, period: extractPeriod(rawText, normalized) ?? 0, minCount: hints.extractedNumber ?? 1 }) };
+    if (requireIr) return { kind: 'ir', ir: requireIr, spec: specFromIR(requireIr, 'teacher_required_period', { teacher, period: extractPeriod(rawText, normalized) ?? 0, minCount: resolveMinCount(hints) }) };
 
     const blockIr = tryParseBlockTeacher(rawText, normalized, teacher, hints);
     if (blockIr) return { kind: 'ir', ir: blockIr, spec: specFromIR(blockIr, 'teacher_block_period', { teacher, period: extractPeriod(rawText, normalized) ?? 0 }) };
 
-    const onlyIr = tryParseOnlyTeacher(rawText, normalized, teacher, hints);
+    const onlyIr = tryParseOnlyTeacher(rawText, normalized, teacher, hints, maxPeriods);
     if (onlyIr) return { kind: 'ir', ir: onlyIr, spec: specFromIR(onlyIr, 'teacher_allowed_periods', { teacher, periods: extractPeriods(normalized) }) };
 
     const maxIr = tryParseMaxPerDayTeacher(rawText, normalized, teacher, hints);
@@ -347,12 +359,12 @@ export function parseIRFirst(
 
   if (klass) {
     const requireIr = tryParseRequireClass(rawText, normalized, klass, hints);
-    if (requireIr) return { kind: 'ir', ir: requireIr, spec: specFromIR(requireIr, 'class_required_period', { class: klass, period: extractPeriod(rawText, normalized) ?? 0, minCount: hints.extractedNumber ?? 1 }) };
+    if (requireIr) return { kind: 'ir', ir: requireIr, spec: specFromIR(requireIr, 'class_required_period', { class: klass, period: extractPeriod(rawText, normalized) ?? 0, minCount: resolveMinCount(hints) }) };
   }
 
   if (subject) {
     const requireIr = tryParseRequireSubject(rawText, normalized, subject, hints);
-    if (requireIr) return { kind: 'ir', ir: requireIr, spec: specFromIR(requireIr, 'subject_required_period', { subject, period: extractPeriod(rawText, normalized) ?? 0, minCount: hints.extractedNumber ?? 1 }) };
+    if (requireIr) return { kind: 'ir', ir: requireIr, spec: specFromIR(requireIr, 'subject_required_period', { subject, period: extractPeriod(rawText, normalized) ?? 0, minCount: resolveMinCount(hints) }) };
   }
 
   // Disambiguation table detected a row but no scope/period matched;
@@ -381,9 +393,10 @@ export function parseIRFirst(
  */
 export function parseIRFirstWithGuard(
   rawText: string,
-  hints: ConstraintResolverHints
+  hints: ConstraintResolverHints,
+  options?: IRFirstParseOptions
 ): IRFirstParseResult & { guardReason?: string } {
-  const result = parseIRFirst(rawText, hints);
+  const result = parseIRFirst(rawText, hints, options);
   if (result.kind !== 'ir') return result;
   const decision = evaluateNegativeGuard(result.spec, rawText);
   if (decision.kind === 'force_clarification') {

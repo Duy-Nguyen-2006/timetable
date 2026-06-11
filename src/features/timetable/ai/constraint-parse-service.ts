@@ -19,6 +19,15 @@ function toRawInputs(constraints: ConstraintItemInput[]): RawConstraintInput[] {
   }));
 }
 
+function ruleParseContext(input: AgentInputPayload) {
+  const labels = (values: string[]) => Array.from(new Set(values)).filter(Boolean);
+  return {
+    teachers: labels(input.assignments.map((assignment) => assignment.teacher.label)),
+    subjects: labels(input.assignments.map((assignment) => assignment.subject.label)),
+    classes: labels(input.assignments.map((assignment) => assignment.class.label)),
+  };
+}
+
 function specsForConstraintText(input: AgentInputPayload, text: string, type: 'required' | 'preferred', weight?: number): ConstraintSpec[] {
   const slice: AgentInputPayload = {
     ...input,
@@ -110,7 +119,7 @@ export async function parseConstraintDraftsWithRaws(
   // Phase 1: Rule parser fast-path — only for HIGH confidence, unambiguous constraints
   for (const raw of raws) {
     const specs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
-    const rule = inferRuleParseConfidence(raw.text, specs);
+    const rule = inferRuleParseConfidence(raw.text, specs, ruleParseContext(input));
 
     if (ruleParserIsSufficient(rule)) {
       // High confidence, simple pattern — use rule parser directly
@@ -155,7 +164,7 @@ export async function parseConstraintDraftsWithRaws(
     } else {
       // LLM failed or only produced custom_dsl — fall back to rule parser
       const ruleSpecs = specsForConstraintText(input, raw.text, raw.type, raw.weight);
-      const rule = inferRuleParseConfidence(raw.text, ruleSpecs);
+      const rule = inferRuleParseConfidence(raw.text, ruleSpecs, ruleParseContext(input));
       const specs = fromLlm.length > 0 ? fromLlm : ruleSpecs;
       const source: ParsedConstraintDraft['source'] = fromLlm.length > 0 ? 'translator' : 'rule';
       const confidence: ParsedConstraintDraft['confidence'] =

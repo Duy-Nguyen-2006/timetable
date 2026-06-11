@@ -15,10 +15,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
+import {
+  normalizeConstraintText,
+  extractFirstNumber,
+  extractCountNumber,
+  extractPeriodNumber,
+  extractDayId,
+  parseVietnameseNumberToken,
+} from './translator-text';
 import { matchKnownEntities, matchEntity, extractPeriodList } from './built-in-suggestion';
 import type { ConstraintResolverHints } from './constraint-retriever';
 import { normalizeConstraintText as norm } from './translator-text';
+import { resolveConstraintHints } from './constraint-resolver';
 
 function hintsFromText(text: string): ConstraintResolverHints {
   const normalized = norm(text);
@@ -106,6 +114,20 @@ test('extractFirstNumber extracts simple number', () => {
 
 test('extractFirstNumber returns first number only', () => {
   assert.equal(extractFirstNumber('tối đa 4 tiết cho 2 lớp'), 4);
+});
+
+test('extractCountNumber ignores period-only numbers', () => {
+  assert.equal(extractCountNumber('Thủy phải có tiết 4'), null);
+});
+
+test('extractCountNumber reads min markers and Vietnamese words', () => {
+  assert.equal(extractCountNumber('phải có ít nhất hai tiết 4'), 2);
+  assert.equal(extractCountNumber('tối đa 4 tiết mỗi ngày'), 4);
+});
+
+test('parseVietnameseNumberToken parses common words', () => {
+  assert.equal(parseVietnameseNumberToken('hai'), 2);
+  assert.equal(parseVietnameseNumberToken('4'), 4);
 });
 
 test('extractFirstNumber handles text with embedded numbers like "thầy ơn"', () => {
@@ -213,6 +235,30 @@ test('hintsFromText detects max phrase', () => {
 test('hintsFromText detects min phrase', () => {
   const hints = hintsFromText('Thầy Sơn dạy ít nhất 2 tiết mỗi ngày');
   assert.equal(hints.mentionsMin, true);
+});
+
+test('resolveConstraintHints strips vd and parenthetical illustrations', () => {
+  const withVd = resolveConstraintHints({
+    userText: 'Sơn không dạy thứ 2, vd tiết 4',
+    teachers: ['Sơn'],
+    subjects: [],
+    classes: [],
+    assignments: [],
+    days: DAYS,
+  });
+  assert.equal(withVd.droppedIllustrations.length, 1);
+  assert.equal(withVd.extractedNumber, null);
+
+  const withParen = resolveConstraintHints({
+    userText: 'Sơn không dạy thứ 2 (như tiết 4,5)',
+    teachers: ['Sơn'],
+    subjects: [],
+    classes: [],
+    assignments: [],
+    days: DAYS,
+  });
+  assert.equal(withParen.droppedIllustrations.length, 1);
+  assert.equal(withParen.extractedNumber, null);
 });
 
 test('hintsFromText handles the Dung example from REFACTOR_PLAN', () => {

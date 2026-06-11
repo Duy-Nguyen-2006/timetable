@@ -16,11 +16,18 @@
  */
 
 import {
+  extractCountNumber,
   extractDayId,
-  extractFirstNumber,
   extractPeriodNumber,
   normalizeConstraintText,
 } from './translator-text';
+import {
+  analyzeSemanticDirection,
+  mentionsConsecutiveMarker,
+  mentionsIfThenMarker,
+  mentionsMaxMarker,
+  mentionsMinMarker,
+} from './semantic-direction';
 import { matchEntity, matchKnownEntities } from './built-in-suggestion';
 import type { BuiltInConstraintScope } from './constraint-registry';
 import type { NormalizedAssignment } from './types';
@@ -75,16 +82,29 @@ function stripIllustrations(text: string): {
   droppedIllustrations: string[];
   illustrationSpans: Array<{ start: number; end: number; text: string }>;
 } {
-  const match = text.match(/\s*(?:,?\s*)(ví dụ|chẳng hạn|kiểu như|như là)\s+(.+)$/iu);
-  if (!match || match.index == null) {
-    return { trustedText: text, droppedIllustrations: [], illustrationSpans: [] };
+  const trailingMarker = text.match(
+    /\s*(?:,?\s*)(?:ví\s*dụ|vd\.?|chẳng\s*hạn|kiểu\s*như|như\s*là)\s+(.+)$/iu
+  );
+  if (trailingMarker?.index != null) {
+    const dropped = trailingMarker[0].replace(/^[,\s]+/u, '').trim();
+    return {
+      trustedText: text.slice(0, trailingMarker.index).trim(),
+      droppedIllustrations: [dropped],
+      illustrationSpans: [{ start: trailingMarker.index, end: text.length, text: dropped }],
+    };
   }
-  const dropped = match[0].replace(/^[,\s]+/u, '').trim();
-  return {
-    trustedText: text.slice(0, match.index).trim(),
-    droppedIllustrations: [dropped],
-    illustrationSpans: [{ start: match.index, end: text.length, text: dropped }],
-  };
+
+  const parenthetical = text.match(/\s*\(\s*(?:như|vd\.?|ví\s*dụ)\s+[^)]+\)\s*$/iu);
+  if (parenthetical?.index != null) {
+    const dropped = parenthetical[0].trim();
+    return {
+      trustedText: text.slice(0, parenthetical.index).trim(),
+      droppedIllustrations: [dropped],
+      illustrationSpans: [{ start: parenthetical.index, end: text.length, text: dropped }],
+    };
+  }
+
+  return { trustedText: text, droppedIllustrations: [], illustrationSpans: [] };
 }
 
 /** Run Stage 1: deterministic extraction of all hints. */
@@ -98,22 +118,20 @@ export function resolveConstraintHints(input: ResolverInput): ResolverHints {
   const teacherMatches = matchKnownEntities(trustedText, input.teachers);
   const classMatches = matchKnownEntities(trustedText, input.classes);
 
-  const extractedNumber = extractFirstNumber(trustedText);
+  const extractedNumber = extractCountNumber(trustedText);
   const periods: number[] = [];
   const day = input.days ? extractDayId(trustedText, input.days) : null;
   const period = extractPeriodNumber(trustedText);
   if (period !== null) periods.push(period);
-  if (day) {
-    // Day is already in extractedDays
-  }
 
-  const mentionsBlock = /\b(khong|cam|nghi|ko)\b/iu.test(normalized) && /\b(day|hoc)\b/iu.test(normalized);
-  const mentionsMax = /\b(toi\s*da|khong\s*qua|khong\s*hon|gioi\s*han|qua\s*\d|khong\s*day\s*qua|day\s*qua)\b/iu.test(normalized);
-  const mentionsMin = /\b(it\s*nhat|toi\s*thieu)\b/iu.test(normalized);
-  const mentionsConsecutive = /\b(lien\s*tiep|lien\s*tuc)\b/iu.test(normalized);
-  const mentionsOnly = /\b(chi)\b/iu.test(normalized) && /\b(day|hoc)\b/iu.test(normalized);
-  const mentionsPreferred = /\b(uu\s*tien|thich|\bnen)\b/iu.test(normalized);
-  const mentionsIfThen = /\b(neu)\b/iu.test(normalized) && /\b(thi)\b/iu.test(normalized);
+  const semantic = analyzeSemanticDirection(trustedText);
+  const mentionsBlock = semantic.matched.block.length > 0;
+  const mentionsMax = mentionsMaxMarker(trustedText);
+  const mentionsMin = mentionsMinMarker(trustedText);
+  const mentionsConsecutive = mentionsConsecutiveMarker(trustedText);
+  const mentionsOnly = semantic.matched.only.length > 0;
+  const mentionsPreferred = semantic.matched.prefer.length > 0;
+  const mentionsIfThen = mentionsIfThenMarker(trustedText);
 
   // Infer scope from entity match
   let inferredScope: BuiltInConstraintScope | null = null;

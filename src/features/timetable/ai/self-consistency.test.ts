@@ -18,15 +18,27 @@ test('canonicalSlotFillString uses exact canonical JSON vote', () => {
   }));
 });
 
-test('voteSlotFillResponses accepts only identical canonical responses', () => {
+test('voteSlotFillResponses accepts unanimous responses', () => {
   const accepted = voteSlotFillResponses([response, response, response]);
   assert.equal(accepted.accepted, true);
   assert.equal(accepted.calls, 3);
+});
 
-  const diverged = voteSlotFillResponses([
+test('voteSlotFillResponses accepts 2/3 majority', () => {
+  const majority = voteSlotFillResponses([
     response,
     response,
     { atoms: [{ ...response.atoms[0], params: { teacher: 'Sơn', day: 'monday', period: 5 } }] },
+  ]);
+  assert.equal(majority.accepted, true);
+  assert.equal(majority.winner?.atoms[0].params.day, 'tuesday');
+});
+
+test('voteSlotFillResponses rejects when no majority', () => {
+  const diverged = voteSlotFillResponses([
+    response,
+    { atoms: [{ ...response.atoms[0], params: { teacher: 'Sơn', day: 'monday', period: 5 } }] },
+    { atoms: [{ ...response.atoms[0], params: { teacher: 'Hương', day: 'wednesday', period: 2 } }] },
   ]);
   assert.equal(diverged.accepted, false);
 });

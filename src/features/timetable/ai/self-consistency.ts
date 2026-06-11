@@ -32,8 +32,9 @@ export function voteSlotFillResponses(responses: SlotFillResponse[]): SelfConsis
   for (const vote of canonicalVotes) counts.set(vote, (counts.get(vote) ?? 0) + 1);
   const [winnerKey, winnerCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
   const winnerIndex = winnerKey ? canonicalVotes.indexOf(winnerKey) : -1;
+  const majorityThreshold = Math.ceil(responses.length / 2);
   return {
-    accepted: responses.length > 0 && winnerCount === responses.length,
+    accepted: responses.length > 0 && (winnerCount ?? 0) >= majorityThreshold,
     calls: responses.length,
     canonicalVotes,
     winner: winnerIndex >= 0 ? responses[winnerIndex] : undefined,

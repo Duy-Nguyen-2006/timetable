@@ -306,3 +306,34 @@ export function hasPreferMarker(text: string): boolean {
 export function hasContradiction(text: string): boolean {
   return analyzeSemanticDirection(text).direction === 'contradictory';
 }
+
+function normalizeForMentions(text: string): string {
+  return text
+    .toLocaleLowerCase('vi')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Shared mention flags for resolver / retriever (single source of truth). */
+export function mentionsMaxMarker(text: string): boolean {
+  const normalized = normalizeForMentions(text);
+  return /\b(toi\s*da|khong\s*qua|khong\s*hon|gioi\s*han|qua\s*\d|khong\s*day\s*qua|day\s*qua)\b/iu.test(normalized);
+}
+
+export function mentionsMinMarker(text: string): boolean {
+  const normalized = normalizeForMentions(text);
+  return /\b(it\s*nhat|toi\s*thieu)\b/iu.test(normalized);
+}
+
+export function mentionsConsecutiveMarker(text: string): boolean {
+  const normalized = normalizeForMentions(text);
+  return /\b(lien\s*tiep|lien\s*tuc)\b/iu.test(normalized);
+}
+
+export function mentionsIfThenMarker(text: string): boolean {
+  const normalized = normalizeForMentions(text);
+  return /\b(neu)\b/iu.test(normalized) && /\b(thi)\b/iu.test(normalized);
+}
