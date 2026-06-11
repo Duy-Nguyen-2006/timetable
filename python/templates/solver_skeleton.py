@@ -1358,6 +1358,8 @@ def build_custom_constraints(model, slots, data):
 
 soft_terms, unsupported_soft_kinds = build_custom_constraints(model, slots, data)
 
+# <<< AI_FILL_HERE >>>
+
 # Warm-start: inject hints từ schedule cũ nếu có, giúp solver hội tụ nhanh hơn
 # khi user chỉnh sửa nhỏ và re-solve.
 _warm_schedule = data.get("warmStartSchedule") or []
