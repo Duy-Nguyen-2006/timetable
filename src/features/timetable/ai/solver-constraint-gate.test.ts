@@ -25,6 +25,12 @@ const baseInput: Omit<AgentInputPayload, 'constraints'> = {
   ],
 };
 
+test('validateConfirmedSolveRequest allows solve with zero user constraints', () => {
+  const gate = validateConfirmedSolveRequest([], [], { input: baseInput, confirmedConstraints: [] });
+  assert.equal(gate.ok, true);
+  if (gate.ok) assert.deepEqual(gate.preTranslatedSpecs, []);
+});
+
 test('validateConfirmedSolveRequest blocks unconfirmed hard raw', () => {
   const raw = constraintItemsToRaw([{ id: 'r1', type: 'required', text: 'Sơn không dạy thứ 2' }]);
   const gate = validateConfirmedSolveRequest(raw, [], { input: baseInput, confirmedConstraints: [] });

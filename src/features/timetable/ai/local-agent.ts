@@ -62,13 +62,13 @@ export async function runLocalAgent(
     emit(config, { type: 'status', message: 'Đang chuẩn bị dữ liệu xếp lịch...', iteration: 0, maxIterations: 1 });
     emit(config, { type: 'phase', phase: 'translator', message: 'Đã nạp ràng buộc đã duyệt', iteration: 0 });
 
-    const preTranslated = options?.preTranslatedConstraintSpecs;
-    if (!preTranslated?.length) {
-      const msg = 'Cần xác nhận (confirm) constraints trước khi chạy solver.';
+    if (options?.preTranslatedConstraintSpecs === undefined) {
+      const msg = 'Thiếu danh sách ràng buộc đã duyệt từ bước xác nhận.';
       emit(config, { type: 'error', message: msg, fatal: true });
       return { success: false, error: msg };
     }
-    const deduped = dedupeConstraintSpecs(preTranslated);
+    // Empty user constraints are valid: skeleton enforces weeklyPeriods and base rules from assignments.
+    const deduped = dedupeConstraintSpecs(options.preTranslatedConstraintSpecs);
     const eligibility = getDeterministicEligibility(deduped);
     if (!eligibility.ok) {
       emit(config, { type: 'error', message: eligibility.reason, fatal: true });

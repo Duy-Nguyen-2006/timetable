@@ -2170,7 +2170,7 @@ const handleDownloadExcel = useCallback(async () => {
                         Nhập ràng buộc cho thời khóa biểu
                       </h1>
                       <p className="mt-4 max-w-3xl text-sm text-white/40">
-                        Thêm câu ràng buộc, đọc «Hiểu là», bấm «Đúng rồi» hoặc «AI phân tích» nếu chưa đúng, rồi Tiếp tục. Mọi ràng buộc bắt buộc phải được duyệt rõ ràng trước khi sang bước xếp lịch — bước xếp lịch chạy tự động, không cần AI nữa.
+                        Ràng buộc là tùy chọn — có thể bỏ qua và Tiếp tục thẳng sang xếp lịch. Nếu thêm ràng buộc, đọc «Hiểu là», bấm «Đúng rồi» hoặc «AI phân tích» nếu chưa đúng. Bước xếp lịch chạy CP-SAT tự động, không cần AI.
                       </p>
                     </div>
                     <div className={`${panelClass} p-4 text-sm text-white/50 lg:max-w-md`}>

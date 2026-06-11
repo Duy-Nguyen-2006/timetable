@@ -163,6 +163,68 @@ test('runLocalAgent reject confirmed specs không eligible, fail-closed không g
   }
 });
 
+test('runLocalAgent cho phép xếp lịch khi không có ràng buộc người dùng (mảng rỗng)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {} as unknown as (Window & typeof globalThis);
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url.endsWith('/templates/solver_skeleton.py')) {
+      return new Response('def build_custom_constraints(model, slots, data):\n    # <<< AI_FILL_HERE >>>\n');
+    }
+    if (url.endsWith('/api/ai/python-execute')) {
+      return Response.json({
+        ok: true,
+        result: {
+          phase: 'run',
+          ok: true,
+          status: 'optimal',
+          durationMs: 1,
+          resultData: {
+            classes: ['6A'],
+            days: ['monday'],
+            periods: [2, 3],
+            schedule: [
+              { assignmentId: 'asg_1', class: '6A', day: 'monday', period: 2, subject: 'Toán', teacher: 'Sơn' },
+              { assignmentId: 'asg_1', class: '6A', day: 'monday', period: 3, subject: 'Toán', teacher: 'Sơn' },
+            ],
+          },
+        },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const result = await runLocalAgent(
+      {
+        days: [{ id: 'monday', label: 'Thứ 2' }],
+        sessions: [{ id: 'morning', label: 'Sáng' }],
+        periodCounts: { monday: 4 },
+        deletedPeriods: {},
+        assignments: [
+          {
+            id: 'asg_1',
+            teacher: { id: 't1', label: 'Sơn' },
+            subject: { id: 's1', label: 'Toán' },
+            class: { id: 'c1', label: '6A' },
+            weeklyPeriods: 2,
+          },
+        ],
+        constraints: [],
+      },
+      { baseURL: 'http://example.test', apiKey: 'test', model: 'test' },
+      { preTranslatedConstraintSpecs: [] }
+    );
+
+    assert.equal(result.success, true, result.error);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  }
+});
+
 test('runLocalAgent fail-closed khi thiếu preTranslatedConstraintSpecs', async () => {
   const originalFetch = globalThis.fetch;
   const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
@@ -200,7 +262,7 @@ test('runLocalAgent fail-closed khi thiếu preTranslatedConstraintSpecs', async
     );
 
     assert.equal(result.success, false);
-    assert.match(result.error ?? '', /Cần xác nhận/);
+    assert.match(result.error ?? '', /Thiếu danh sách ràng buộc/);
     assert.equal(chatCalls, 0, 'Không được gọi LLM khi fail-closed');
   } finally {
     globalThis.fetch = originalFetch;
