@@ -44,6 +44,16 @@ export type ExprShape =
   | { shape: 'after' }
   // Session
   | { shape: 'sessionAtom'; session: string; teacher?: string; class?: string; subject?: string }
+  // if_then
+  | {
+      shape: 'impliesIfThen';
+      ifTeacher: string;
+      ifDay: string;
+      ifPeriod: number;
+      thenTeacher: string;
+      thenDay: string;
+      thenPeriod: number;
+    }
   // Custom / clarify
   | { shape: 'customDSL' }
   | { shape: 'clarify' };
@@ -236,6 +246,26 @@ export const GOLDEN_EVAL_SET_V2: GoldenCaseV2[] = [
     severity: 'hard',
     isFrozen: false,
     notes: 'Just an entity, no constraint intent -> must clarify.',
+  },
+  // ─── if_then (two-teacher conditional) ───────────────────────────────────
+  {
+    id: 'G2-070',
+    text: 'Nếu Sơn dạy thứ 2 tiết 1 thì Hương không dạy thứ 3 tiết 3',
+    expectedScope: 'global',
+    expectedKind: 'if_then',
+    expectedParamKeys: ['if', 'then'],
+    expectedExprShape: {
+      shape: 'impliesIfThen',
+      ifTeacher: 'Sơn',
+      ifDay: 'monday',
+      ifPeriod: 1,
+      thenTeacher: 'Hương',
+      thenDay: 'tuesday',
+      thenPeriod: 3,
+    },
+    severity: 'hard',
+    isFrozen: false,
+    notes: 'Two-teacher if_then must stay in retriever top-k and convert to executable spec.',
   },
   // ─── Feedback loop (Phase 0.4) ──────────────────────────────────────────
   {

@@ -8,7 +8,7 @@ import {
   severityFromConstraintType,
 } from './custom-normalization-draft';
 import type { CustomConstraintNormalizationResult } from '../ai/custom-normalization-service';
-import type { AnalyzeConstraintResult } from '../ai/analyze-constraint-service';
+import { buildSpecsFromAnalyzeResult, type AnalyzeConstraintResult } from '../ai/analyze-constraint-service';
 import type { AgentInputPayload } from '../ai/types';
 
 export function finalizeAiDisplayText(
@@ -86,9 +86,9 @@ export function buildDraftFromAnalyzeResult(
   agentInput: AgentInputPayload,
   reparseCount: number
 ): ParsedConstraintDraft {
-  // mapped_builtin: has built-in specs
-  if (result.status === 'mapped_builtin' && result.specs.length > 0) {
-    const built = buildDraftFromSpecs(`draft_${raw.id}`, raw, result.specs, agentInput, {
+  const specs = buildSpecsFromAnalyzeResult(result, raw.text, raw.type, raw.weight);
+  if (specs.length > 0 && specs.every((spec) => spec.kind !== 'custom_dsl')) {
+    const built = buildDraftFromSpecs(`draft_${raw.id}`, raw, specs, agentInput, {
       source: 'ai_reparse',
       confidence: result.confidence,
       explanation: result.normalizedText,

@@ -24,9 +24,116 @@
  * here. Their IR is `atLeast` with a `teaches` body.
  */
 
-import type { ConstraintSpec } from './constraint-spec';
+import type { ConditionExpr, ConstraintSpec } from './constraint-spec';
 import type { BoolExpr, ConstraintIR, Domain } from './constraint-ir';
 import { humanizeConstraintSpec } from './constraint-humanizer';
+
+function buildTeacherAllowedPeriodsExpr(teacher: string, periods: number[]): BoolExpr {
+  const maxPeriod = Math.max(5, ...periods);
+  const disallowed = Array.from({ length: maxPeriod }, (_, index) => index + 1).filter(
+    (period) => !periods.includes(period)
+  );
+  if (disallowed.length === 0) {
+    return { const: true };
+  }
+  return {
+    forall: {
+      var: 'd',
+      in: makeDaysDomain(),
+      body: {
+        forall: {
+          var: 'p',
+          in: { list: disallowed },
+          body: {
+            not: { teaches: { teacher, day: '$$D$$', period: '$$P$$' } },
+          },
+        },
+      },
+    },
+  };
+}
+
+function conditionExprToIR(cond: unknown): BoolExpr | null {
+  if (!cond || typeof cond !== 'object' || !('op' in cond)) return null;
+  const expr = cond as ConditionExpr;
+  switch (expr.op) {
+    case 'teacher_teaches_at_slot':
+      return { teaches: { teacher: expr.teacher, day: expr.day, period: expr.period } };
+    case 'teacher_teaches_on_day':
+      return { teachesOnDay: { teacher: expr.teacher, day: expr.day } };
+    case 'and': {
+      const parts = expr.args.map(conditionExprToIR).filter((item): item is BoolExpr => item !== null);
+      return parts.length === expr.args.length ? (parts.length === 1 ? parts[0] : { and: parts }) : null;
+    }
+    case 'or': {
+      const parts = expr.args.map(conditionExprToIR).filter((item): item is BoolExpr => item !== null);
+      return parts.length === expr.args.length ? (parts.length === 1 ? parts[0] : { or: parts }) : null;
+    }
+    case 'not': {
+      const inner = conditionExprToIR(expr.arg);
+      return inner ? { not: inner } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function thenEntryToIR(entry: { kind: string; params: Record<string, unknown> }): BoolExpr | null {
+  switch (entry.kind) {
+    case 'teacher_block_slot':
+      if (
+        typeof entry.params.teacher !== 'string' ||
+        typeof entry.params.day !== 'string' ||
+        typeof entry.params.period !== 'number'
+      ) {
+        return null;
+      }
+      return {
+        not: {
+          teaches: {
+            teacher: entry.params.teacher,
+            day: entry.params.day,
+            period: entry.params.period,
+          },
+        },
+      };
+    case 'teacher_required_slot':
+      if (
+        typeof entry.params.teacher !== 'string' ||
+        typeof entry.params.day !== 'string' ||
+        typeof entry.params.period !== 'number'
+      ) {
+        return null;
+      }
+      return {
+        teaches: {
+          teacher: entry.params.teacher,
+          day: entry.params.day,
+          period: entry.params.period,
+        },
+      };
+    case 'teacher_block_day':
+      if (typeof entry.params.teacher !== 'string' || typeof entry.params.day !== 'string') return null;
+      return {
+        not: {
+          teachesOnDay: {
+            teacher: entry.params.teacher,
+            day: entry.params.day,
+          },
+        },
+      };
+    case 'teacher_required_day':
+      if (typeof entry.params.teacher !== 'string' || typeof entry.params.day !== 'string') return null;
+      return {
+        teachesOnDay: {
+          teacher: entry.params.teacher,
+          day: entry.params.day,
+        },
+      };
+    default:
+      return null;
+  }
+}
 
 function makeDaysDomain(): Domain {
   return 'days';
@@ -235,17 +342,21 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
       const periods = (p.periods as number[]) ?? [];
       return {
         ...base,
+        expr: buildTeacherAllowedPeriodsExpr(teacher, periods),
+      };
+    }
+    case 'if_then': {
+      const ifExpr = conditionExprToIR(p.if);
+      const thenList = Array.isArray(p.then)
+        ? (p.then as Array<{ kind: string; params: Record<string, unknown> }>)
+        : [];
+      const thenExprs = thenList.map(thenEntryToIR).filter((item): item is BoolExpr => item !== null);
+      if (!ifExpr || thenExprs.length === 0 || thenExprs.length !== thenList.length) return null;
+      const thenCombined = thenExprs.length === 1 ? thenExprs[0] : { and: thenExprs };
+      return {
+        ...base,
         expr: {
-          forall: {
-            var: 'd',
-            in: makeDaysDomain(),
-            body: {
-              implies: [
-                { teaches: { teacher, day: '$$D$$', period: '$$P$$' } },
-                { const: false }, // placeholder; allowed kinds are checked externally
-              ] as [BoolExpr, BoolExpr],
-            },
-          },
+          implies: [ifExpr, thenCombined] as [BoolExpr, BoolExpr],
         },
       };
     }

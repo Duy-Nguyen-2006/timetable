@@ -36,6 +36,9 @@ import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extra
 import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 import { evaluateNegativeGuardForSpecs } from './negative-guard';
 import { analyzeSemanticDirection } from './semantic-direction';
+import { semanticConstraintToSpecs } from './semantic-to-spec';
+import { validateIR } from './constraint-ir';
+import type { BoolExpr } from './constraint-ir';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -120,6 +123,7 @@ const analyzeResponseSchema = z.object({
   normalizedText: z.string(),
   specs: z.array(specSchema).nullable().optional().transform((value) => value ?? []),
   semantic: semanticSchema.nullable().optional().transform((value) => value ?? undefined),
+  expr: z.unknown().optional(),
   confidence: z.enum(['high', 'medium', 'low']),
   clarificationQuestions: z.array(z.string()).nullable().optional().transform((value) => value ?? []),
   assumptions: z.array(z.string()).nullable().optional().transform((value) => value ?? []),
@@ -436,10 +440,17 @@ function buildSmallSystemPrompt(
   const topKSection = buildTopKPromptSection(topKCandidates, hints.inferredScope);
 
   return `Bạn map MỘT câu ràng buộc tiếng Việt vào MỘT trong các kind được cung cấp.
-Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả "custom" kèm IR.
+Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả status "semantic_only" kèm semantic.
 KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
 Dùng các "extracted hints" cho param; chỉ map, không tự suy số.
-Output JSON: { kind | "custom", params, confidence, missingParams[] }
+Output JSON: { status, specs, semantic?, expr?, confidence, clarificationQuestions[] }
+
+## Semantic ops (khi status = semantic_only)
+Condition ops: teacher_teaching_at_slot, teacher_not_teaching_at_slot, teacher_teaching_on_day, teacher_not_teaching_on_day, class_has_subject_at_slot, and, or, not
+Action ops: teacher_block_slot, teacher_required_slot, teacher_block_day, teacher_required_day
+
+## IR expr (tuỳ chọn, khi custom)
+Ví dụ if-then: { "implies": [{ "teaches": { "teacher": "Sơn", "day": "monday", "period": 1 } }, { "not": { "teaches": { "teacher": "Hương", "day": "tuesday", "period": 3 } } }] }
 
 ## Top-k kind candidates (theo scope "${hints.inferredScope ?? 'all'}"):
 ${topKSection}
@@ -458,7 +469,8 @@ ${contextBlock}
   "status": "mapped_builtin" | "semantic_only" | "needs_clarification" | "unsupported",
   "normalizedText": "Câu tiếng Việt chuẩn hóa cho GUI",
   "specs": [{ "kind": "built_in_kind", "params": { ... } }],
-  "semantic": { "type": "if_then|all_of|unsupported_precise_text", ... },
+  "semantic": { "type": "if_then", "if": { "op": "teacher_teaching_at_slot", "teacher": "...", "day": "...", "period": 1 }, "then": [{ "op": "teacher_block_slot", "teacher": "...", "day": "...", "period": 3 }] },
+  "expr": { "implies": [{ "teaches": { "teacher": "...", "day": "...", "period": 1 } }, { "not": { "teaches": { "teacher": "...", "day": "...", "period": 3 } } }] },
   "confidence": "high" | "medium" | "low",
   "clarificationQuestions": ["Câu hỏi 1?"],
   "assumptions": [],
@@ -533,7 +545,7 @@ export async function analyzeConstraint(
     const validated = analyzeResponseSchema.parse(parsedJson);
 
     // Build specs from LLM response
-    const specs: ConstraintSpec[] = (validated.specs ?? []).map((s, i) => ({
+    let specs: ConstraintSpec[] = (validated.specs ?? []).map((s, i) => ({
       id: `ai_spec_${i}`,
       original: rawText,
       severity: constraintType === 'required' ? 'hard' : 'soft',
@@ -541,6 +553,45 @@ export async function analyzeConstraint(
       params: s.params || {},
       weight: constraintType === 'preferred' ? weight : undefined,
     }));
+
+    const semantic = validated.semantic as SemanticConstraint | undefined;
+    if (validated.status === 'semantic_only' && semantic) {
+      const converted = semanticConstraintToSpecs(semantic, {
+        rawText,
+        constraintType,
+        weight,
+        agentInput,
+      });
+      if (converted.length > 0) {
+        specs = converted;
+      }
+    }
+
+    if (specs.length === 0 && validated.expr && typeof validated.expr === 'object') {
+      const expr = validated.expr as BoolExpr;
+      const shapeOk = validateIR({
+        id: 'ai_expr_probe',
+        severity: constraintType === 'required' ? 'hard' : 'soft',
+        original: rawText,
+        expr,
+      }).length === 0;
+      if (shapeOk) {
+        specs = [
+          {
+            id: 'ai_custom_0',
+            original: rawText,
+            severity: constraintType === 'required' ? 'hard' : 'soft',
+            kind: 'custom_dsl',
+            params: {
+              normalizedText: validated.normalizedText,
+              semantic,
+              expr,
+            },
+            weight: constraintType === 'preferred' ? weight : undefined,
+          },
+        ];
+      }
+    }
 
     // Run negative-guard over the LLM-emitted specs FIRST. This catches silent
     // semantic flips (require→block, block→allowed) regardless of confidence.
@@ -556,6 +607,29 @@ export async function analyzeConstraint(
     let resolvedSpecs = specs;
     let resolvedConfidence: 'high' | 'medium' | 'low' = validated.confidence;
     let resolvedNormalizedText = validated.normalizedText;
+    let resolvedClarificationQuestions = validated.clarificationQuestions ?? [];
+
+    if (
+      validated.status === 'semantic_only' &&
+      specs.length > 0 &&
+      specs[0].kind === 'if_then'
+    ) {
+      resolvedStatus = 'mapped_builtin';
+      resolvedSpecs = specs;
+    } else if (
+      validated.status === 'semantic_only' &&
+      constraintType === 'required' &&
+      semantic &&
+      specs.length === 0
+    ) {
+      resolvedStatus = 'needs_clarification';
+      resolvedSpecs = [];
+      resolvedConfidence = 'low';
+      resolvedClarificationQuestions = [
+        'Hệ thống hiểu ý bạn nhưng chưa chuyển được thành luật máy thực thi. Hãy chọn mẫu có sẵn hoặc viết lại câu rõ hơn (nêu rõ giáo viên, ngày, tiết).',
+        ...(validated.clarificationQuestions ?? []),
+      ];
+    }
     // Phase 0 invariant (B1.4): needs_clarification, unsupported, and
     // semantic_only ALWAYS require user confirmation (the user must
     // respond to clarification / review the humanized semantic text /
@@ -605,11 +679,11 @@ export async function analyzeConstraint(
       status: resolvedStatus,
       normalizedText: resolvedNormalizedText,
       specs: resolvedSpecs,
-      semantic: validated.semantic as SemanticConstraint | undefined,
+      semantic,
       confidence: resolvedConfidence,
       requiresConfirmation: resolvedRequiresConfirmation,
       guardReasons,
-      clarificationQuestions: validated.clarificationQuestions ?? [],
+      clarificationQuestions: resolvedClarificationQuestions,
       assumptions: validated.assumptions ?? [],
       unresolvedQuestions: validated.unresolvedQuestions ?? [],
       rawResponse: content,
@@ -697,11 +771,21 @@ export function buildSpecsFromAnalyzeResult(
   constraintType: 'required' | 'preferred',
   weight?: number
 ): ConstraintSpec[] {
-  if (result.status === 'mapped_builtin' && result.specs.length > 0) {
+  if (result.specs.length > 0) {
     return result.specs;
   }
 
-  // For semantic_only, wrap in custom_dsl
+  if (result.semantic) {
+    const converted = semanticConstraintToSpecs(result.semantic, {
+      rawText,
+      constraintType,
+      weight,
+    });
+    if (converted.length > 0) {
+      return converted;
+    }
+  }
+
   if (result.status === 'semantic_only' && result.semantic) {
     return [
       {

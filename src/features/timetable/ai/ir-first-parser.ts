@@ -242,22 +242,33 @@ function tryParseOnlyTeacher(
   // Allowed: "chỉ dạy tiết 4" or "chỉ dạy các tiết 2, 3, 4"
   const periods = extractPeriods(normalized);
   if (periods.length === 0) return null;
+  const maxPeriod = Math.max(5, ...periods);
+  const disallowed = Array.from({ length: maxPeriod }, (_, index) => index + 1).filter(
+    (period) => !periods.includes(period)
+  );
+  const expr: BoolExpr =
+    disallowed.length === 0
+      ? { const: true }
+      : {
+          forall: {
+            var: 'd',
+            in: 'days',
+            body: {
+              forall: {
+                var: 'p',
+                in: { list: disallowed },
+                body: {
+                  not: { teaches: { teacher, day: '$$D$$', period: '$$P$$' } },
+                },
+              },
+            },
+          },
+        };
   return buildIR({
     id: 'ir_first_teacher_allowed_periods',
     original: rawText,
     severity: 'hard',
-    expr: {
-      forall: {
-        var: 'd',
-        in: 'days',
-        body: {
-          implies: [
-            { teaches: { teacher, day: '$$D$$', period: '$$P$$' } },
-            { const: false }, // sentinel; allowed_periods is a positive-set kind
-          ] as [BoolExpr, BoolExpr],
-        },
-      },
-    },
+    expr,
     explain: `Giáo viên ${teacher} chỉ dạy các tiết ${periods.join(', ')}`,
   });
 }

@@ -1251,8 +1251,27 @@ const CATALOG: CatalogEntry[] = [
     ],
     synonyms: ['nếu thì', 'nếu mà thì', 'khi nào thì', 'nếu điều kiện'],
     fewShots: [
-      { text: 'Nếu Giáo viên Dung dạy Thứ 2 thì Giáo viên Sơn phải dạy Thứ 4.', params: {} },
-      { text: 'Nếu Hiếu dạy thứ 2 tiết 2 thì Thủy không dạy thứ 5.', params: {} },
+      {
+        text: 'Nếu Giáo viên Dung dạy Thứ 2 thì Giáo viên Sơn phải dạy Thứ 4.',
+        params: {
+          if: { op: 'teacher_teaches_on_day', teacher: 'Dung', day: 'monday' },
+          then: [{ kind: 'teacher_required_day', params: { teacher: 'Sơn', day: 'wednesday' } }],
+        },
+      },
+      {
+        text: 'Nếu Hiếu dạy thứ 2 tiết 2 thì Thủy không dạy thứ 5.',
+        params: {
+          if: { op: 'teacher_teaches_at_slot', teacher: 'Hiếu', day: 'monday', period: 2 },
+          then: [{ kind: 'teacher_block_day', params: { teacher: 'Thủy', day: 'friday' } }],
+        },
+      },
+      {
+        text: 'Nếu Sơn dạy thứ 2 tiết 1 thì Hương không dạy thứ 3 tiết 3',
+        params: {
+          if: { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'monday', period: 1 },
+          then: [{ kind: 'teacher_block_slot', params: { teacher: 'Hương', day: 'tuesday', period: 3 } }],
+        },
+      },
     ],
     negativeFewShots: [],
     requiredParams: ['if', 'then'],
@@ -1466,6 +1485,20 @@ function lexicalScore(normalizedText: string, entry: CatalogEntry): number {
   return score;
 }
 
+/** Keep scope-local kinds plus global kinds and any trigger-matched entry. */
+function catalogCandidatesForScope(
+  text: string,
+  scope: BuiltInConstraintScope | null
+): CatalogEntry[] {
+  if (!scope) return CATALOG;
+  return CATALOG.filter(
+    (entry) =>
+      entry.scope === scope ||
+      entry.scope === SCOPE.global ||
+      entry.triggers.some((trigger) => trigger.test(text))
+  );
+}
+
 /** Retrieve top-k candidates within a scope (or all scopes if scope is null). */
 export function retrieveTopK(
   hints: ConstraintResolverHints,
@@ -1475,10 +1508,7 @@ export function retrieveTopK(
   const text = hints.normalizedText;
   if (!text) return [];
 
-  // Build a candidate list filtered by scope
-  const candidates = scope
-    ? CATALOG.filter((e) => e.scope === scope)
-    : CATALOG;
+  const candidates = catalogCandidatesForScope(text, scope);
 
   // Semantic direction analysis for scoring boosts
   const semanticAnalysis = analyzeSemanticDirection(text);
@@ -1624,9 +1654,7 @@ export function retrieveTopKWithEmbedding(
   scope: BuiltInConstraintScope | null,
   k = 5
 ): ConstraintRetrieverCandidate[] {
-  const candidates = scope
-    ? CATALOG.filter((e) => e.scope === scope)
-    : CATALOG;
+  const candidates = catalogCandidatesForScope(hints.normalizedText, scope);
 
   const textVec = computeTextEmbedding(hints.normalizedText);
 
