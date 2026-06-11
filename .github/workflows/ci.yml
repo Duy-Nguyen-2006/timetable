@@ -18,7 +18,8 @@ jobs:
           python-version: "3.12"
       - run: npm ci
       - run: python -m venv .venv
-      - run: ./.venv/bin/pip install -U pip pytest ortools
+      - run: ./.venv/bin/pip install -U pip pytest ortools pyinstaller
+      - run: PYTHON=.venv/bin/python npm run build:executor
       - run: npm run lint
       - run: npx tsx scripts/check_constraint_parity.ts --strict
       - run: npx tsx --test "src/**/*.test.ts"
