@@ -229,16 +229,10 @@ export function suggestBuiltInConstraint(input: BuiltInSuggestionInput): BuiltIn
     if (subjectMatch.status === 'matched') {
       const definition = supportedDefinition(definitions, 'subject_required_period');
       if (!definition) return customDecision(0.5, 'Loại ràng buộc không có trong registry.');
-      // If no class specified, user needs to clarify semantics (global vs per-class)
-      if (classMatch.status !== 'matched') {
-        return customDecision(0.7, 'Môn học cần làm rõ: toàn cục hay theo lớp?');
-      }
-      return suggest(
-        definition,
-        0.93,
-        { subject: subjectMatch.label, period, minCount },
-        'Khớp môn học phải có tiết cụ thể.'
-      );
+      // No class matched — subject-only requires clarification about scope (global vs per-class).
+      // (At this point classMatch.status is 'ambiguous' | 'missing' since the matched branch
+      // above already returned, so the check is unconditional.)
+      return customDecision(0.7, 'Môn học cần làm rõ: toàn cục hay theo lớp?');
     }
   }
   // ==================== END REQUIRE-FAMILY BRANCH ====================

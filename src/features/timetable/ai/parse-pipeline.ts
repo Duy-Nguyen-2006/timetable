@@ -32,7 +32,8 @@ import { getParserMode, isIRFirstAuthoritative } from './parser-mode';
 import type { ConstraintSegment } from './segment-types';
 import { shouldRunSelfConsistency } from './self-consistency';
 import { stripUnknownKindParams, verifyRoundTrip } from './ir-type-checker';
-import { buildInterpretationConfirm, type InterpretationCardDTO } from './constraint-clarification-builder';
+import { buildInterpretationConfirm } from './constraint-clarification-builder';
+import type { InterpretationCardDTO } from './constraint-clarification-types';
 import { humanizeConstraintSpec } from './constraint-humanizer';
 
 export type ParsePipelineInput = {
