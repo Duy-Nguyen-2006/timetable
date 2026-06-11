@@ -32,10 +32,22 @@ import { __translatorInternal } from './translator';
 import { matchKnownEntities, suggestBuiltInConstraint } from './built-in-suggestion';
 import { SOLVER_ENCODABLE_KIND_LIST, BUILT_IN_CONSTRAINT_DEFINITIONS, getConstraintMeta } from './constraint-registry';
 import type { BuiltInConstraintScope } from './constraint-registry';
-import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extractDayId } from './translator-text';
-import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
+import { normalizeConstraintText, extractCountNumber, extractPeriodNumber, extractDayId } from './translator-text';
+import { retrieveTopK, retrieverMarginFromScores, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 import { evaluateNegativeGuardForSpecs } from './negative-guard';
-import { analyzeSemanticDirection } from './semantic-direction';
+import {
+  resolveSemanticDirection,
+  mentionsConsecutiveMarker,
+  mentionsIfThenMarker,
+  mentionsMaxMarker,
+  mentionsMinMarker,
+} from './semantic-direction';
+import { calibrateParseConfidence } from './parse-confidence';
+import { runSemanticVerify } from './semantic-verify';
+import { backTranslateBatch } from './back-translation-check';
+import { semanticConstraintToSpecs } from './semantic-to-spec';
+import { validateIR } from './constraint-ir';
+import type { BoolExpr } from './constraint-ir';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -120,6 +132,7 @@ const analyzeResponseSchema = z.object({
   normalizedText: z.string(),
   specs: z.array(specSchema).nullable().optional().transform((value) => value ?? []),
   semantic: semanticSchema.nullable().optional().transform((value) => value ?? undefined),
+  expr: z.unknown().optional(),
   confidence: z.enum(['high', 'medium', 'low']),
   clarificationQuestions: z.array(z.string()).nullable().optional().transform((value) => value ?? []),
   assumptions: z.array(z.string()).nullable().optional().transform((value) => value ?? []),
@@ -270,6 +283,14 @@ ${sessionLines.length > 0 ? sessionLines.join('\n') : '  (chưa có)'}
 ${assignments.length > 0 ? assignments.join('\n') : '  (chưa có)'}`;
 }
 
+function isUnparsedHardSpec(spec: ConstraintSpec): boolean {
+  return (
+    spec.kind === 'custom_dsl' &&
+    spec.severity === 'hard' &&
+    (spec.notes?.includes('UNPARSED_HARD') || spec.notes === 'fallback_parser:UNPARSED_HARD')
+  );
+}
+
 function fallbackBuiltInSpecs(
   rawText: string,
   constraintType: 'required' | 'preferred',
@@ -281,9 +302,10 @@ function fallbackBuiltInSpecs(
     constraints: [{ type: constraintType, text: rawText, weight }],
   };
   const parsed = __translatorInternal.fallbackFromRuleParser(input);
-  return __translatorInternal
-    .sanitizeSpecs(input, parsed)
-    .filter((spec) => spec.kind !== 'custom_dsl');
+  const sanitized = __translatorInternal.sanitizeSpecs(input, parsed);
+  const hardUnparsed = sanitized.filter(isUnparsedHardSpec);
+  if (hardUnparsed.length > 0) return hardUnparsed;
+  return sanitized.filter((spec) => spec.kind !== 'custom_dsl');
 }
 
 function uniqueLabels(labels: string[]): string[] {
@@ -359,7 +381,16 @@ function hasTechnicalOrUnknownText(text: string): boolean {
   return /\b[a-z]+(?:_[a-z]+)+\b/u.test(text) || text.includes('điều kiện chưa xác định');
 }
 
-function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
+function clarifyAmbiguousIfThen(rawText: string, agentInput?: AgentInputPayload): AnalyzeConstraintResult {
+  const teachers = agentInput
+    ? matchKnownEntities(rawText, uniqueLabels(agentInput.assignments.map((assignment) => assignment.teacher.label)))
+    : [];
+  const classes = agentInput
+    ? matchKnownEntities(rawText, uniqueLabels(agentInput.assignments.map((assignment) => assignment.class.label)))
+    : [];
+  const teacherPair = teachers.length >= 2 ? `${teachers[0]} và ${teachers[1]}` : teachers[0] ?? 'các giáo viên được nhắc';
+  const classHint = classes[0] ?? 'lớp cụ thể';
+
   return {
     status: 'needs_clarification',
     normalizedText: 'AI chưa đủ thông tin để hiểu ràng buộc này một cách chắc chắn.',
@@ -368,9 +399,9 @@ function clarifyAmbiguousIfThen(rawText: string): AnalyzeConstraintResult {
     requiresConfirmation: true,
     guardReasons: [],
     clarificationQuestions: [
-      `Mình chưa rõ điều kiện trong câu “${rawText}”. “Hiếu và Thúy dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
-      '“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định Hiếu/Thúy không dạy tiết 4?',
-      'Ràng buộc này áp dụng cho tất cả lớp hay chỉ một lớp cụ thể?',
+      `Mình chưa rõ điều kiện trong câu “${rawText}”. “${teacherPair} dạy cùng ngày” là cùng bất kỳ ngày nào hay một ngày cụ thể?`,
+      `“1 người không được dạy tiết 4” nghĩa là nếu cả hai cùng dạy trong ngày đó thì chỉ một trong hai được dạy tiết 4, hay chọn cố định một giáo viên không dạy tiết 4?`,
+      `Ràng buộc này áp dụng cho tất cả lớp hay chỉ ${classHint}?`,
     ],
     assumptions: [],
     unresolvedQuestions: [
@@ -408,20 +439,19 @@ function buildResolverHints(
     resolvedSubjects,
     resolvedClass,
     resolvedClasses,
-    extractedNumber: extractFirstNumber(rawText),
+    extractedNumber: extractCountNumber(rawText),
     extractedPeriods: [],
     extractedDays: agentInput.days
       .map((d) => (normalized.includes(d.id) || normalized.includes(d.label.toLowerCase()) ? d.id : null))
       .filter(Boolean) as string[],
     inferredScope,
-    // M3.2: Use shared semantic-direction analyzer instead of duplicated regex
-    mentionsBlock: analyzeSemanticDirection(rawText).matched.block.length > 0,
-    mentionsMax: /tối\s*đa|tối\s*da|quá|không.*quá|khong.*qua/iu.test(normalized),
-    mentionsMin: /ít\s*nhất|tối\s*thiểu/iu.test(normalized),
-    mentionsConsecutive: /liên\s*tiếp|liên\s*tục/iu.test(normalized),
-    mentionsOnly: analyzeSemanticDirection(rawText).matched.only.length > 0,
-    mentionsPreferred: analyzeSemanticDirection(rawText).matched.prefer.length > 0,
-    mentionsIfThen: /nếu.*thì|neu.*thi/iu.test(normalized),
+    mentionsBlock: resolveSemanticDirection(rawText).matched.block.length > 0,
+    mentionsMax: mentionsMaxMarker(rawText),
+    mentionsMin: mentionsMinMarker(rawText),
+    mentionsConsecutive: mentionsConsecutiveMarker(rawText),
+    mentionsOnly: resolveSemanticDirection(rawText).matched.only.length > 0,
+    mentionsPreferred: resolveSemanticDirection(rawText).matched.prefer.length > 0,
+    mentionsIfThen: mentionsIfThenMarker(rawText),
   };
 }
 
@@ -436,10 +466,17 @@ function buildSmallSystemPrompt(
   const topKSection = buildTopKPromptSection(topKCandidates, hints.inferredScope);
 
   return `Bạn map MỘT câu ràng buộc tiếng Việt vào MỘT trong các kind được cung cấp.
-Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả "custom" kèm IR.
+Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả status "semantic_only" kèm semantic.
 KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
 Dùng các "extracted hints" cho param; chỉ map, không tự suy số.
-Output JSON: { kind | "custom", params, confidence, missingParams[] }
+Output JSON: { status, specs, semantic?, expr?, confidence, clarificationQuestions[] }
+
+## Semantic ops (khi status = semantic_only)
+Condition ops: teacher_teaching_at_slot, teacher_not_teaching_at_slot, teacher_teaching_on_day, teacher_not_teaching_on_day, class_has_subject_at_slot, and, or, not
+Action ops: teacher_block_slot, teacher_required_slot, teacher_block_day, teacher_required_day
+
+## IR expr (tuỳ chọn, khi custom)
+Ví dụ if-then: { "implies": [{ "teaches": { "teacher": "Sơn", "day": "monday", "period": 1 } }, { "not": { "teaches": { "teacher": "Hương", "day": "tuesday", "period": 3 } } }] }
 
 ## Top-k kind candidates (theo scope "${hints.inferredScope ?? 'all'}"):
 ${topKSection}
@@ -458,7 +495,8 @@ ${contextBlock}
   "status": "mapped_builtin" | "semantic_only" | "needs_clarification" | "unsupported",
   "normalizedText": "Câu tiếng Việt chuẩn hóa cho GUI",
   "specs": [{ "kind": "built_in_kind", "params": { ... } }],
-  "semantic": { "type": "if_then|all_of|unsupported_precise_text", ... },
+  "semantic": { "type": "if_then", "if": { "op": "teacher_teaching_at_slot", "teacher": "...", "day": "...", "period": 1 }, "then": [{ "op": "teacher_block_slot", "teacher": "...", "day": "...", "period": 3 }] },
+  "expr": { "implies": [{ "teaches": { "teacher": "...", "day": "...", "period": 1 } }, { "not": { "teaches": { "teacher": "...", "day": "...", "period": 3 } } }] },
   "confidence": "high" | "medium" | "low",
   "clarificationQuestions": ["Câu hỏi 1?"],
   "assumptions": [],
@@ -485,6 +523,26 @@ export async function analyzeConstraint(
 ): Promise<AnalyzeConstraintResult> {
   // Stage 1: Build resolver hints (CODE — no LLM)
   const hints = buildResolverHints(rawText, agentInput);
+  const semanticDirection = resolveSemanticDirection(rawText);
+  if (
+    semanticDirection.needsClarification ||
+    semanticDirection.direction === 'contradictory'
+  ) {
+    return {
+      status: 'needs_clarification',
+      normalizedText: rawText,
+      specs: [],
+      confidence: 'low',
+      requiresConfirmation: true,
+      guardReasons: [],
+      clarificationQuestions: [
+        semanticDirection.explanation,
+        'Bạn có thể diễn đạt lại rõ hơn ý định (bắt buộc / cấm / chỉ được / ưu tiên)?',
+      ],
+      assumptions: [],
+      unresolvedQuestions: ['Hướng ngữ nghĩa chưa rõ hoặc mâu thuẫn.'],
+    };
+  }
   // Stage 2: Retrieve top-k candidates (CODE)
   const topKCandidates = retrieveTopK(hints, hints.inferredScope, 5);
   // Stage 3: LLM slot-fill with small prompt
@@ -533,7 +591,7 @@ export async function analyzeConstraint(
     const validated = analyzeResponseSchema.parse(parsedJson);
 
     // Build specs from LLM response
-    const specs: ConstraintSpec[] = (validated.specs ?? []).map((s, i) => ({
+    let specs: ConstraintSpec[] = (validated.specs ?? []).map((s, i) => ({
       id: `ai_spec_${i}`,
       original: rawText,
       severity: constraintType === 'required' ? 'hard' : 'soft',
@@ -541,6 +599,55 @@ export async function analyzeConstraint(
       params: s.params || {},
       weight: constraintType === 'preferred' ? weight : undefined,
     }));
+
+    const semantic = validated.semantic as SemanticConstraint | undefined;
+    if (validated.status === 'semantic_only' && semantic) {
+      const converted = semanticConstraintToSpecs(semantic, {
+        rawText,
+        constraintType,
+        weight,
+        agentInput,
+      });
+      if (converted.length > 0) {
+        specs = converted;
+      }
+    }
+
+    if (specs.length === 0 && validated.expr && typeof validated.expr === 'object') {
+      const expr = validated.expr as BoolExpr;
+      const shapeOk = validateIR({
+        id: 'ai_expr_probe',
+        severity: constraintType === 'required' ? 'hard' : 'soft',
+        original: rawText,
+        expr,
+      }).length === 0;
+      if (shapeOk) {
+        specs = [
+          {
+            id: 'ai_custom_0',
+            original: rawText,
+            severity: constraintType === 'required' ? 'hard' : 'soft',
+            kind: 'custom_dsl',
+            params: {
+              normalizedText: validated.normalizedText,
+              semantic,
+              expr,
+            },
+            weight: constraintType === 'preferred' ? weight : undefined,
+          },
+        ];
+      }
+    }
+
+    const backTranslationScore = specs.length > 0
+      ? backTranslateBatch(specs, rawText).score
+      : 0;
+    const semanticVerify = await runSemanticVerify({
+      originalText: rawText,
+      specs,
+      config,
+      useLlm: true,
+    });
 
     // Run negative-guard over the LLM-emitted specs FIRST. This catches silent
     // semantic flips (require→block, block→allowed) regardless of confidence.
@@ -554,8 +661,38 @@ export async function analyzeConstraint(
     // was the root cause of bug "Thủy phải có tiết 4" being silently inverted.
     let resolvedStatus: AnalyzeConstraintStatus = validated.status;
     let resolvedSpecs = specs;
-    let resolvedConfidence: 'high' | 'medium' | 'low' = validated.confidence;
+    let resolvedConfidence: 'high' | 'medium' | 'low' = calibrateParseConfidence({
+      retrieverMargin: retrieverMarginFromScores(topKCandidates.map((candidate) => candidate.score)),
+      consensusRatio: 1,
+      backTranslationScore,
+      semanticVerifyScore: semanticVerify.score,
+      atomConfidenceHigh: validated.confidence === 'high',
+      directionNeedsClarification: semanticDirection.needsClarification,
+    });
     let resolvedNormalizedText = validated.normalizedText;
+    let resolvedClarificationQuestions = validated.clarificationQuestions ?? [];
+
+    if (
+      validated.status === 'semantic_only' &&
+      specs.length > 0 &&
+      specs[0].kind === 'if_then'
+    ) {
+      resolvedStatus = 'mapped_builtin';
+      resolvedSpecs = specs;
+    } else if (
+      validated.status === 'semantic_only' &&
+      constraintType === 'required' &&
+      semantic &&
+      specs.length === 0
+    ) {
+      resolvedStatus = 'needs_clarification';
+      resolvedSpecs = [];
+      resolvedConfidence = 'low';
+      resolvedClarificationQuestions = [
+        'Hệ thống hiểu ý bạn nhưng chưa chuyển được thành luật máy thực thi. Hãy chọn mẫu có sẵn hoặc viết lại câu rõ hơn (nêu rõ giáo viên, ngày, tiết).',
+        ...(validated.clarificationQuestions ?? []),
+      ];
+    }
     // Phase 0 invariant (B1.4): needs_clarification, unsupported, and
     // semantic_only ALWAYS require user confirmation (the user must
     // respond to clarification / review the humanized semantic text /
@@ -565,7 +702,8 @@ export async function analyzeConstraint(
     let resolvedRequiresConfirmation =
       resolvedStatus === 'needs_clarification' ||
       resolvedStatus === 'unsupported' ||
-      resolvedStatus === 'semantic_only';
+      resolvedStatus === 'semantic_only' ||
+      !semanticVerify.accepted;
     const guardReasons: string[] = [];
 
     // Apply guard demotions: any demoted spec caps confidence at `medium` and
@@ -593,7 +731,7 @@ export async function analyzeConstraint(
       (hasUnknownIfThenCondition(resolvedSpecs) || hasTechnicalOrUnknownText(resolvedNormalizedText))
     ) {
       return {
-        ...clarifyAmbiguousIfThen(rawText),
+        ...clarifyAmbiguousIfThen(rawText, agentInput),
         requiresConfirmation: true,
         guardReasons,
         rawResponse: content,
@@ -605,11 +743,11 @@ export async function analyzeConstraint(
       status: resolvedStatus,
       normalizedText: resolvedNormalizedText,
       specs: resolvedSpecs,
-      semantic: validated.semantic as SemanticConstraint | undefined,
+      semantic,
       confidence: resolvedConfidence,
       requiresConfirmation: resolvedRequiresConfirmation,
       guardReasons,
-      clarificationQuestions: validated.clarificationQuestions ?? [],
+      clarificationQuestions: resolvedClarificationQuestions,
       assumptions: validated.assumptions ?? [],
       unresolvedQuestions: validated.unresolvedQuestions ?? [],
       rawResponse: content,
@@ -623,6 +761,25 @@ export async function analyzeConstraint(
     // confidence `medium` and REQUIRES explicit user confirmation. This is the
     // ONLY place where the rule parser may produce an auto-mapped result.
     const deterministic = mergedDeterministicFallbackSpecs(rawText, constraintType, weight, agentInput);
+    if (deterministic.some(isUnparsedHardSpec)) {
+      return {
+        status: 'needs_clarification',
+        normalizedText: rawText,
+        specs: [],
+        confidence: 'low',
+        requiresConfirmation: true,
+        guardReasons: [],
+        clarificationQuestions: [
+          'Rule parser chưa hiểu ràng buộc bắt buộc này — bạn có thể diễn đạt lại rõ hơn hoặc chọn mẫu có sẵn?',
+        ],
+        assumptions: [
+          `AI phân tích lỗi và rule parser chỉ trả custom_dsl cho ràng buộc hard. Lỗi gốc: ${
+            error instanceof Error ? error.message : 'unknown'
+          }`,
+        ],
+        unresolvedQuestions: ['Ràng buộc bắt buộc chưa được map sang kind máy hiểu.'],
+      };
+    }
     if (deterministic.length > 0) {
       // Run the negative-guard on fallback specs too — the rule parser is
       // exactly where silent flips originate.
@@ -697,11 +854,21 @@ export function buildSpecsFromAnalyzeResult(
   constraintType: 'required' | 'preferred',
   weight?: number
 ): ConstraintSpec[] {
-  if (result.status === 'mapped_builtin' && result.specs.length > 0) {
+  if (result.specs.length > 0) {
     return result.specs;
   }
 
-  // For semantic_only, wrap in custom_dsl
+  if (result.semantic) {
+    const converted = semanticConstraintToSpecs(result.semantic, {
+      rawText,
+      constraintType,
+      weight,
+    });
+    if (converted.length > 0) {
+      return converted;
+    }
+  }
+
   if (result.status === 'semantic_only' && result.semantic) {
     return [
       {

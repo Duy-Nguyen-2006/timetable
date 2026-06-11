@@ -3,6 +3,12 @@ import type { ConstraintParseIssue } from './constraint-review-types';
 import { isRoomConstraintText } from './constraint-draft-validator';
 import { normalizeConstraintText } from './translator-text';
 
+export type RuleParseContext = {
+  teachers?: string[];
+  classes?: string[];
+  subjects?: string[];
+};
+
 export type RuleParseResult = {
   specs: ConstraintSpec[];
   confidence: 'high' | 'medium' | 'low';
@@ -24,8 +30,37 @@ function isIgnoredRoomSpec(spec: ConstraintSpec): boolean {
   return spec.notes === 'ignored:room_constraint' || spec.params?.ignoredReason === 'room_constraints_ignored';
 }
 
+function entityExistsInContext(
+  kind: 'teacher' | 'class' | 'subject',
+  label: unknown,
+  context?: RuleParseContext
+): boolean {
+  if (typeof label !== 'string' || !label.trim()) return true;
+  const pool = kind === 'teacher' ? context?.teachers : kind === 'class' ? context?.classes : context?.subjects;
+  if (!pool?.length) return true;
+  return pool.includes(label);
+}
+
+function specsReferenceKnownEntities(specs: ConstraintSpec[], context?: RuleParseContext): boolean {
+  if (!context) return true;
+  for (const spec of specs) {
+    if (!entityExistsInContext('teacher', spec.params.teacher, context)) return false;
+    if (!entityExistsInContext('class', spec.params.class, context)) return false;
+    if (!entityExistsInContext('subject', spec.params.subject, context)) return false;
+    const teachers = spec.params.teachers;
+    if (Array.isArray(teachers) && teachers.some((t) => !entityExistsInContext('teacher', t, context))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Heuristic confidence for deterministic rule-parser output (per constraint text). */
-export function inferRuleParseConfidence(text: string, specs: ConstraintSpec[]): RuleParseResult {
+export function inferRuleParseConfidence(
+  text: string,
+  specs: ConstraintSpec[],
+  context?: RuleParseContext
+): RuleParseResult {
   const issues: ConstraintParseIssue[] = [];
   const normalized = normalizeConstraintText(text);
 
@@ -85,6 +120,14 @@ export function inferRuleParseConfidence(text: string, specs: ConstraintSpec[]):
       specs,
       confidence: 'medium',
       issues: [{ code: 'scope_too_broad', message: 'Phạm vi rộng — cần user xác nhận.' }],
+    };
+  }
+
+  if (!specsReferenceKnownEntities(specs, context)) {
+    return {
+      specs,
+      confidence: 'low',
+      issues: [{ code: 'unknown_entity', message: 'Rule parser khớp giáo viên/lớp/môn không có trong dữ liệu.' }],
     };
   }
 

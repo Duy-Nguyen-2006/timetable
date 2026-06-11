@@ -154,6 +154,24 @@ export const CONFIDENCE_AUDIT: ConfidenceAuditEntry[] = [
     rationale: 'Same as CA-050: explicit user choice.',
     addedInPhase: '0.7',
   },
+  {
+    id: 'CA-070',
+    file: 'src/features/timetable/ai/parse-pipeline.ts',
+    location: 'runParsePipeline: calibrateParseConfidence',
+    assignment: 'confidence from retriever margin + verify + back-translation',
+    verdict: 'safe-default',
+    rationale: 'Multi-signal calibration; low confidence and failed verify force requiresConfirmation.',
+    addedInPhase: '0.8',
+  },
+  {
+    id: 'CA-071',
+    file: 'src/features/timetable/ai/analyze-constraint-service.ts',
+    location: 'analyzeConstraint: calibrateParseConfidence',
+    assignment: 'confidence from retriever margin + semantic verify + back-translation',
+    verdict: 'safe-default',
+    rationale: 'Replaces hardcoded LLM confidence; never auto-confirms when verify fails.',
+    addedInPhase: '0.8',
+  },
 ];
 
 /** Summary stats. */

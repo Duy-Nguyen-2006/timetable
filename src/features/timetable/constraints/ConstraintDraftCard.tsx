@@ -4,6 +4,7 @@ import { AlertCircle, Check, Circle, Info, Sparkles, Loader2 } from 'lucide-reac
 
 import { humanizeDraft } from '../ai/constraint-humanizer';
 import { getConstraintCapability } from '../ai/constraint-capabilities';
+import { checkHardConstraintMechanism } from '../ai/constraint-ir';
 import type { ConfirmedConstraint, ParsedConstraintDraft } from '../ai/constraint-review-types';
 import { constraintTypes } from '../constants';
 import type { ConstraintItem } from '../types';
@@ -93,11 +94,17 @@ export function ConstraintDraftCard({
   );
   const entityLossIssue = draft?.issues.find((i) => i.code === 'possible_entity_loss');
   const status = draft?.status ?? 'unparsed';
+  const hardSpecsExecutable =
+    constraint.type !== 'required' ||
+    !draft?.proposedSpecs.length ||
+    draft.proposedSpecs.every((spec) => checkHardConstraintMechanism(spec).ok);
+  const hasNonExecutableHard = Boolean(draft?.proposedSpecs.length) && !hardSpecsExecutable;
   const canConfirm =
     Boolean(draft?.proposedSpecs.length) &&
     status !== 'unsupported' &&
     !confirmed &&
-    !needsClarification;
+    !needsClarification &&
+    hardSpecsExecutable;
 
   const hasAiAnalyzed = Boolean(draft?.reparseCount && draft.reparseCount > 0);
   const aiAttempts = draft?.reparseCount ?? 0;
@@ -175,6 +182,21 @@ export function ConstraintDraftCard({
       ) : (
         <p className="text-xs text-white/45">{constraint.text}</p>
       )}
+
+      {hasNonExecutableHard && !confirmed ? (
+        <div
+          data-testid="non-executable-warning"
+          className="mt-2 flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/[0.08] px-3 py-2 text-xs text-amber-200"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">Máy chưa chuyển được thành luật thực thi</p>
+            <p className="mt-0.5 text-[11px] text-amber-200/80">
+              Ràng buộc bắt buộc này sẽ bị chặn khi xếp lịch. Hãy chọn mẫu có sẵn hoặc sửa lại câu cho rõ hơn.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {entityLossIssue ? (
         <div

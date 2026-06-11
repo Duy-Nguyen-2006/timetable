@@ -75,6 +75,31 @@ test('specToIR: teacher_block_period -> not(forall(teaches))', () => {
   assert.equal(issues.length, 0, JSON.stringify(issues));
 });
 
+test('specToIR: if_then -> implies(if, then)', () => {
+  const ir = specToIR(
+    spec(
+      'if_then',
+      {
+        if: { op: 'teacher_teaches_at_slot', teacher: 'Sơn', day: 'monday', period: 1 },
+        then: [{ kind: 'teacher_block_slot', params: { teacher: 'Hương', day: 'tuesday', period: 3 } }],
+      },
+      'if-then'
+    )
+  );
+  assert.ok(ir);
+  assert.ok('implies' in ir!.expr);
+  const issues = validateIR(ir);
+  assert.equal(issues.length, 0, JSON.stringify(issues));
+});
+
+test('specToIR: teacher_allowed_periods forbids disallowed periods', () => {
+  const ir = specToIR(spec('teacher_allowed_periods', { teacher: 'Thủy', periods: [2, 4] }));
+  assert.ok(ir);
+  assert.ok('forall' in ir!.expr);
+  const issues = validateIR(ir);
+  assert.equal(issues.length, 0, JSON.stringify(issues));
+});
+
 test('specToIR: teacher_max_per_day -> forall(compare(count, <=, N))', () => {
   const ir = specToIR(spec('teacher_max_per_day', { teacher: 'Thủy', maxPerDay: 3 }));
   assert.ok(ir);

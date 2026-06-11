@@ -25,9 +25,27 @@ const sampleInput: AgentInputPayload = {
 
 test('inferRuleParseConfidence high for teacher_block_day', () => {
   const specs = __translatorInternal.fallbackFromRuleParser(sampleInput);
-  const rule = inferRuleParseConfidence('Sơn không dạy thứ 2', specs);
+  const rule = inferRuleParseConfidence('Sơn không dạy thứ 2', specs, {
+    teachers: ['Sơn'],
+    subjects: ['Toán'],
+    classes: ['6A'],
+  });
   assert.equal(rule.confidence, 'high');
   assert.ok(rule.specs.some((s) => s.kind === 'teacher_block_day'));
+});
+
+test('inferRuleParseConfidence low when teacher is unknown in agentInput', () => {
+  const specs = __translatorInternal.fallbackFromRuleParser(sampleInput).map((spec) => ({
+    ...spec,
+    params: { ...spec.params, teacher: 'Lan' },
+  }));
+  const rule = inferRuleParseConfidence('Lan không dạy thứ 2', specs, {
+    teachers: ['Sơn'],
+    subjects: ['Toán'],
+    classes: ['6A'],
+  });
+  assert.equal(rule.confidence, 'low');
+  assert.ok(rule.issues.some((issue) => issue.code === 'unknown_entity'));
 });
 
 test('parseConstraintDrafts returns one draft per constraint (rule only)', async () => {

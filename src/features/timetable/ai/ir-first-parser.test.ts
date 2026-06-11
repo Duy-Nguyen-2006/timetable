@@ -39,8 +39,38 @@ test('parseIRFirst: "Thủy phải có tiết 4" returns required-period IR and 
   assert.equal(result.spec.kind, 'teacher_required_period');
   assert.equal(result.spec.params.teacher, 'Thủy');
   assert.equal(result.spec.params.period, 4);
+  assert.equal(result.spec.params.minCount, 1);
   assert.deepEqual(validateIRFirstResult(result), []);
   assert.ok('atLeast' in result.ir.expr);
+});
+
+test('parseIRFirst: "phải có ít nhất hai tiết 4" uses written count', () => {
+  const result = parseIRFirst(
+    'Thủy phải có ít nhất hai tiết 4',
+    hints({
+      resolvedTeacher: 'Thủy',
+      resolvedTeachers: ['Thủy'],
+      inferredScope: 'teacher',
+      extractedNumber: 2,
+      mentionsMin: true,
+    })
+  );
+  assert.equal(result.kind, 'ir');
+  if (result.kind !== 'ir') return;
+  assert.equal(result.spec.params.minCount, 2);
+  assert.equal(result.spec.params.period, 4);
+});
+
+test('parseIRFirst: "chỉ dạy tiết 4" blocks periods beyond schedule max', () => {
+  const result = parseIRFirst(
+    'Thủy chỉ dạy tiết 4',
+    hints({ resolvedTeacher: 'Thủy', resolvedTeachers: ['Thủy'], inferredScope: 'teacher', mentionsOnly: true }),
+    { maxPeriods: 8 }
+  );
+  assert.equal(result.kind, 'ir');
+  if (result.kind !== 'ir') return;
+  assert.equal(result.spec.kind, 'teacher_allowed_periods');
+  assert.match(result.ir.explain ?? '', /4/);
 });
 
 test('parseIRFirst: "Thủy chỉ dạy tiết 2 tiết 4" preserves allowed periods in legacy spec', () => {

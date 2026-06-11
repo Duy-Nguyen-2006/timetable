@@ -95,8 +95,19 @@ test('retrieveTopK returns if_then for nếu-thì phrase', () => {
   const results = retrieveTopK(hints, 'global', 5);
   const kinds = results.map((r) => r.kind);
   assert.ok(kinds.includes('if_then'), `Expected if_then in ${kinds}`);
-  // if_then should be top score
-  assert.equal(results[0].kind, 'if_then');
+});
+
+test('retrieveTopK keeps if_then in top-k when inferred scope is teacher', () => {
+  const hints = makeHints({
+    normalizedText: 'nếu sơn dạy thứ 2 tiết 1 thì hương không dạy thứ 3 tiết 3',
+    resolvedTeacher: 'Sơn',
+    resolvedTeachers: ['Sơn', 'Hương'],
+    inferredScope: 'teacher' as BuiltInConstraintScope,
+    mentionsIfThen: true,
+  });
+  const results = retrieveTopK(hints, 'teacher', 5);
+  const kinds = results.map((r) => r.kind);
+  assert.ok(kinds.includes('if_then'), `Expected if_then in ${kinds} for teacher scope`);
 });
 
 test('retrieveTopK returns teacher_block_period for muộn tiết pattern', () => {

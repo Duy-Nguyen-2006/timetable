@@ -15,6 +15,19 @@ test('parseSlotFillJson strips fields outside known kind schema', () => {
   assert.deepEqual(parsed.atoms[0].params, { teachers: ['Thúy', 'Yên'], scope: { day: 'friday' } });
 });
 
+test('parseSlotFillJson strips unknown params for registry kinds', () => {
+  const parsed = parseSlotFillJson(JSON.stringify({
+    atoms: [{
+      kind: 'teacher_block_day',
+      params: { teacher: 'Sơn', day: 'monday', scope: { day: 'monday' }, bogus: true },
+      confidence: 'high',
+      missingParams: [],
+    }],
+  }));
+  assert.deepEqual(parsed.atoms[0].params, { teacher: 'Sơn', day: 'monday', scope: { day: 'monday' } });
+  assert.equal('bogus' in parsed.atoms[0].params, false);
+});
+
 test('parseSlotFillJson converts unknown/custom kind to custom', () => {
   const parsed = parseSlotFillJson(JSON.stringify({
     atoms: [{ kind: 'custom', params: { expr: {} }, confidence: 'high', missingParams: [] }],

@@ -284,6 +284,22 @@ export function getConstraintMeta(kind: ConstraintKind): ConstraintMeta | undefi
   return CONSTRAINT_REGISTRY.find((m) => m.kind === kind);
 }
 
+const ALLOWED_PARAMS_BY_KIND: Record<string, Set<string>> = Object.fromEntries(
+  BUILT_IN_CONSTRAINT_DEFINITIONS.map((definition) => {
+    const allowed = new Set([
+      ...definition.paramsSchema.required,
+      ...(definition.paramsSchema.optional ?? []),
+      'scope',
+    ]);
+    return [definition.kind, allowed];
+  })
+);
+
+/** Param whitelist for a built-in kind (required + optional + scope). */
+export function getAllowedParamsForKind(kind: string): Set<string> {
+  return ALLOWED_PARAMS_BY_KIND[kind] ?? new Set<string>();
+}
+
 export function isSolverEncodableKind(kind: ConstraintKind): boolean {
   return SOLVER_ENCODABLE_KINDS.has(kind);
 }

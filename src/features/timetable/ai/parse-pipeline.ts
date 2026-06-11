@@ -16,13 +16,16 @@
  */
 
 import { resolveConstraintHints, type ResolverHints } from './constraint-resolver';
-import { retrieveTopK, type ConstraintRetrieverCandidate } from './constraint-retriever';
+import { retrieveTopK, retrieverMarginFromScores, type ConstraintRetrieverCandidate } from './constraint-retriever';
 import { evaluateAmbiguity, runAmbiguityGate, type AmbiguityGateResult } from './ambiguity-gate';
 import { buildSlotFillPrompt } from './slot-fill-prompt';
 import { segmentConstraint } from './constraint-segmenter';
 import { parseSlotFillJson, sanitizeSlotFillResponse } from './slot-fill-parser';
-import { voteSlotFillResponses } from './self-consistency';
-import { backTranslateBatch, type BackTranslationCheck } from './back-translation-check';
+
+import { backTranslateBatch } from './back-translation-check';
+import { calibrateParseConfidence } from './parse-confidence';
+import { resolveSemanticDirection } from './semantic-direction';
+import { runSemanticVerify } from './semantic-verify';
 import { logRetrievalMiss } from './synonym-miss-log';
 import type { AgentInputPayload, AIProviderConfig } from './types';
 import type { ConstraintSpec, ConstraintKind } from './constraint-spec';
@@ -30,6 +33,7 @@ import type { SlotFillResponse } from './slot-fill-types';
 import { BUILT_IN_CONSTRAINT_KINDS, type BuiltInConstraintScope } from './constraint-registry';
 import { invokeAnalyzeChat } from './analyze-constraint-service';
 import { parseIRFirstWithGuard } from './ir-first-parser';
+import { buildTranslatorPeriodsByDay } from './translator-periods';
 import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
 import { getParserMode, isIRFirstAuthoritative } from './parser-mode';
 import { buildInterpretationConfirm } from './constraint-clarification-builder';
@@ -230,6 +234,35 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   });
   diagnostics.push({ stage: 'resolver', message: `scope=${hints.inferredScope} teachers=${hints.resolvedTeachers.length} subjects=${hints.resolvedSubjects.length}` });
 
+  const semanticDirection = resolveSemanticDirection(rawText);
+  if (
+    semanticDirection.needsClarification ||
+    semanticDirection.direction === 'contradictory'
+  ) {
+    diagnostics.push({
+      stage: 'resolver',
+      message: `semantic_direction=${semanticDirection.direction} clarify=yes`,
+    });
+    return {
+      status: 'needs_clarification',
+      hints,
+      candidates: [],
+      ambiguityGate: {
+        status: 'ambiguous',
+        options: [],
+        delta: 0,
+        reason: semanticDirection.explanation,
+      },
+      specs: [],
+      normalizedText: rawText,
+      backTranslation: { score: 0, needsConfirmation: true, perSpec: [] },
+      confidence: 'low',
+      requiresConfirmation: true,
+      diagnostics,
+      clarificationReasonCode: 'unsupported_semantics',
+    };
+  }
+
   // Entity disambiguation gate (Section 13.5)
   if (hints.ambiguousEntity) {
     return {
@@ -263,23 +296,18 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   const prompt = buildSlotFillPrompt(rawText, hints, candidates, { previousAttempts });
   let response: { content?: string; usage?: { total_tokens?: number } } = { content: '' };
   let slotFillResponse: SlotFillResponse | null = null;
-  const slotFillCalls = segment.shape === 'if_then' || segment.atoms.length > 1 ? 3 : 1;
+  let consensusRatio = 1;
+  const complexSegment = segment.shape === 'if_then' || segment.atoms.length > 1;
   const slotFillResponses: SlotFillResponse[] = [];
   try {
-    for (let index = 0; index < slotFillCalls; index += 1) {
-      response = await invokeAnalyzeChat(config, [
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ]);
-      slotFillResponses.push(parseSlotFillJson(response.content));
-    }
-    const vote = voteSlotFillResponses(slotFillResponses);
-    slotFillResponse = vote.accepted ? vote.winner ?? null : null;
-    if (!vote.accepted) {
-      diagnostics.push({ stage: 'slot_fill', message: `self_consistency=diverged calls=${vote.calls}` });
-    } else {
-      diagnostics.push({ stage: 'slot_fill', message: `self_consistency=accepted calls=${vote.calls}` });
-    }
+    response = await invokeAnalyzeChat(config, [
+      { role: 'system', content: prompt.system },
+      { role: 'user', content: prompt.user },
+    ]);
+    const parsed = parseSlotFillJson(response.content);
+    slotFillResponses.push(parsed);
+    slotFillResponse = parsed;
+    diagnostics.push({ stage: 'slot_fill', message: 'parse=single_call' });
   } catch (err) {
     diagnostics.push({ stage: 'slot_fill', message: `error: ${err instanceof Error ? err.message : String(err)}` });
   }
@@ -292,27 +320,56 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
 
   // Parse slot-fill response
   const specs: ConstraintSpec[] = slotFillResponse ? slotFillToSpecs(rawText, slotFillResponse) : [];
-  let normalizedText = rawText;
-  let confidence: 'high' | 'medium' | 'low' = slotFillResponse?.atoms.every((atom) => atom.confidence === 'high' && atom.missingParams.length === 0 && atom.kind !== 'custom')
-    ? 'high'
-    : slotFillResponse ? 'low' : 'medium';
+  const normalizedText = rawText;
 
-  // ── Stage 5: Back-translation check (code) ──────────────────────────────
+  // ── Stage 5: Back-translation + semantic verify (1 parse + 1 verify) ─────
   const backTranslation = backTranslateBatch(specs, rawText);
-  const mustConfirmInterpretation = segment.shape === 'if_then' || segment.atoms.length > 1;
+  const semanticVerify = await runSemanticVerify({
+    originalText: rawText,
+    specs,
+    config,
+    useLlm: complexSegment,
+  });
+  const atomConfidenceHigh = Boolean(
+    slotFillResponse?.atoms.every(
+      (atom) => atom.confidence === 'high' && atom.missingParams.length === 0 && atom.kind !== 'custom'
+    )
+  );
+  const confidence = calibrateParseConfidence({
+    retrieverMargin: retrieverMarginFromScores(candidates.map((candidate) => candidate.score)),
+    consensusRatio,
+    backTranslationScore: backTranslation.score,
+    semanticVerifyScore: semanticVerify.score,
+    atomConfidenceHigh,
+    directionNeedsClarification: semanticDirection.needsClarification,
+  });
+  const mustConfirmInterpretation = complexSegment;
   const hasCustom = specs.some((spec) => spec.kind === 'custom_dsl');
-  const requiresConfirmation = backTranslation.needsConfirmation || specs.length === 0 || mustConfirmInterpretation || confidence !== 'high' || hasCustom;
+  const requiresConfirmation =
+    !semanticVerify.accepted ||
+    backTranslation.needsConfirmation ||
+    specs.length === 0 ||
+    mustConfirmInterpretation ||
+    confidence !== 'high' ||
+    hasCustom;
 
   diagnostics.push({
     stage: 'back_translation',
-    message: `score=${backTranslation.score.toFixed(2)} needsConfirm=${requiresConfirmation}`,
+    message: `score=${backTranslation.score.toFixed(2)} verify=${semanticVerify.score.toFixed(2)} method=${semanticVerify.method}`,
+  });
+  diagnostics.push({
+    stage: 'done',
+    message: `confidence=${confidence} needsConfirm=${requiresConfirmation}`,
   });
   diagnostics.push({ stage: 'done', message: `status=${specs.length > 0 ? 'mapped' : 'unmapped'}` });
 
   const legacyStatus = specs.length > 0 ? (specs[0].kind === 'custom_dsl' ? 'semantic_only' : 'mapped_builtin') : 'needs_clarification';
   const parserMode = getParserMode();
   const runIrFirst = parserMode !== 'legacy';
-  const irFirstResult = runIrFirst ? parseIRFirstWithGuard(rawText, hints) : undefined;
+  const periodsByDay = buildTranslatorPeriodsByDay(agentInput);
+  const allActivePeriods = Object.values(periodsByDay).flat();
+  const maxPeriods = allActivePeriods.length > 0 ? Math.max(...allActivePeriods) : 5;
+  const irFirstResult = runIrFirst ? parseIRFirstWithGuard(rawText, hints, { maxPeriods }) : undefined;
 
   if (runIrFirst && irFirstResult) {
     const shadowNew = irFirstResult.kind === 'ir'
