@@ -27,6 +27,8 @@
 
 import type { AgentInputPayload } from './types';
 import type { BoolExpr, IntExpr, Domain, ConstraintIR } from './constraint-ir';
+import { validateIR } from './constraint-ir';
+import { humanizeIR } from './ir-humanizer-v2';
 import { buildTranslatorPeriodsByDay } from './translator-periods';
 
 export type IRTypeCheckSeverity = 'hard' | 'soft';
@@ -516,5 +518,186 @@ export function typeCheckIR(
     issues,
     hardIssues: issues.filter((i) => i.severity === 'hard'),
     softIssues: issues.filter((i) => i.severity === 'soft'),
+  };
+}
+
+// -----------------------------------------------------------------------------------------
+// Field stripping (2nd illustration trap layer)
+// -----------------------------------------------------------------------------------------
+
+/**
+ * Strip unknown/extra fields from an IR's atom params that don't belong
+ * to the atom's kind. This is the 2nd illustration trap layer:
+ * e.g., `period` should NOT be in `teacher_pair_not_same_slot` params.
+ *
+ * Known param fields per kind are defined here. Any field not in the
+ * known set for the kind is stripped and reported.
+ */
+
+type KindParamSpec = Record<string, Set<string>>;
+
+const KNOWN_PARAMS_BY_KIND: KindParamSpec = {
+  teacher_block_day: new Set(['teacher', 'day']),
+  teacher_block_period: new Set(['teacher', 'period']),
+  teacher_block_slot: new Set(['teacher', 'day', 'period']),
+  teacher_max_per_day: new Set(['teacher', 'maxPerDay']),
+  teacher_max_consecutive: new Set(['teacher', 'maxConsecutive']),
+  teacher_max_working_days: new Set(['teacher', 'maxDays']),
+  teacher_min_per_day: new Set(['teacher', 'minPerDay']),
+  teacher_no_gaps: new Set(['teacher']),
+  teacher_allowed_days: new Set(['teacher', 'days']),
+  teacher_allowed_periods: new Set(['teacher', 'periods']),
+  teacher_min_working_days: new Set(['teacher', 'minDays']),
+  teacher_max_gaps: new Set(['teacher', 'maxGaps']),
+  teacher_min_consecutive: new Set(['teacher', 'minConsecutive']),
+  teacher_balanced_load: new Set(['teacher']),
+  teacher_max_subjects_per_day: new Set(['teacher', 'maxSubjects']),
+  teacher_max_consecutive_days: new Set(['teacher', 'maxConsecutiveDays']),
+  teacher_min_off_days: new Set(['teacher', 'minOffDays']),
+  teacher_preferred_periods: new Set(['teacher', 'periods']),
+  teacher_max_classes_per_day: new Set(['teacher', 'maxClasses']),
+  teacher_pair_not_same_slot: new Set(['teachers', 'scope']),
+  teacher_pair_not_same_day: new Set(['teachers', 'scope']),
+  teacher_homeroom_first_period: new Set(['teacher', 'class']),
+  teacher_required_day: new Set(['teacher', 'day', 'scope']),
+  teacher_required_slot: new Set(['teacher', 'day', 'period', 'scope']),
+  teacher_required_period: new Set(['teacher', 'period', 'minCount', 'scope']),
+  teacher_pair_required_same_day: new Set(['teachers', 'scope']),
+  teacher_pair_required_same_slot: new Set(['teachers', 'scope']),
+  subject_pin_period: new Set(['subject', 'day', 'period']),
+  subject_preferred_periods: new Set(['subject', 'periods']),
+  subject_not_last_period: new Set(['subject']),
+  subject_consecutive: new Set(['subject']),
+  subject_max_consecutive: new Set(['subject', 'maxConsecutive']),
+  subject_allowed_days: new Set(['subject', 'days']),
+  subject_min_gap_days: new Set(['subject', 'minGapDays']),
+  subject_daily_max_periods: new Set(['subject', 'maxPerDay']),
+  subject_block_period: new Set(['subject', 'period']),
+  subject_block_days: new Set(['subject', 'days']),
+  subject_not_consecutive: new Set(['subject']),
+  subject_min_days: new Set(['subject', 'minDays']),
+  subject_spread_evenly: new Set(['subject']),
+  subject_order_before: new Set(['subject', 'beforeSubject']),
+  subject_not_after_subject: new Set(['subject', 'afterSubject']),
+  subject_required_period: new Set(['subject', 'period', 'minCount', 'scope']),
+  class_block_day: new Set(['class', 'day']),
+  class_block_period: new Set(['class', 'period']),
+  class_block_slot: new Set(['class', 'day', 'period']),
+  class_max_per_day: new Set(['class', 'maxPerDay']),
+  class_min_per_day: new Set(['class', 'minPerDay']),
+  class_no_gaps: new Set(['class']),
+  class_no_double_subject_day: new Set(['class']),
+  class_subjects_not_same_day: new Set(['class', 'subjects']),
+  class_fixed_period: new Set(['class', 'day', 'period']),
+  class_allowed_days: new Set(['class', 'days']),
+  class_allowed_periods: new Set(['class', 'periods']),
+  class_max_consecutive: new Set(['class', 'maxConsecutive']),
+  class_max_subjects_per_day: new Set(['class', 'maxSubjects']),
+  class_balanced_load: new Set(['class']),
+  class_subjects_same_day: new Set(['class', 'subjects']),
+  class_min_working_days: new Set(['class', 'minDays']),
+  class_required_period: new Set(['class', 'period', 'minCount', 'scope']),
+  assignment_pin_slot: new Set(['assignmentId', 'day', 'period']),
+  assignment_block_slot: new Set(['assignmentId', 'day', 'period']),
+  assignment_allowed_slots: new Set(['assignmentId', 'slots']),
+  assignment_spread_days: new Set(['assignmentId']),
+  weekly_periods_exact: new Set(['assignmentId', 'weeklyPeriods']),
+  assignment_consecutive: new Set(['assignmentId']),
+  assignment_max_per_day: new Set(['assignmentId', 'maxPerDay']),
+  assignment_same_day: new Set(['assignmentIds']),
+  assignment_not_same_day: new Set(['assignmentIds']),
+  if_then: new Set(['if', 'then']),
+};
+
+export type StripResult = {
+  /** The params with unknown fields stripped */
+  stripped: Record<string, unknown>;
+  /** Fields that were stripped (for audit/clarify) */
+  strippedFields: string[];
+  /** Whether any fields were stripped */
+  hadStrippedFields: boolean;
+};
+
+export function stripUnknownKindParams(
+  kind: string,
+  params: Record<string, unknown>
+): StripResult {
+  const known = KNOWN_PARAMS_BY_KIND[kind];
+  if (!known) {
+    // Unknown kind — don't strip (could be custom_dsl etc.)
+    return { stripped: params, strippedFields: [], hadStrippedFields: false };
+  }
+
+  const stripped: Record<string, unknown> = {};
+  const strippedFields: string[] = [];
+
+  for (const [key, value] of Object.entries(params)) {
+    if (known.has(key)) {
+      stripped[key] = value;
+    } else {
+      strippedFields.push(key);
+    }
+  }
+
+  return {
+    stripped,
+    strippedFields,
+    hadStrippedFields: strippedFields.length > 0,
+  };
+}
+
+// -----------------------------------------------------------------------------------------
+// Round-trip verification
+// -----------------------------------------------------------------------------------------
+
+/**
+ * Round-trip verification: humanize IR → re-parse → compare IR ≡ IR
+ *
+ * This catches cases where the humanized text doesn't faithfully
+ * represent the IR (e.g., lost scope, wrong entity order).
+ *
+ * Note: This is a structural comparison, not token-level.
+ * The comparison normalizes both IRs before comparing.
+ */
+
+export type RoundTripResult = {
+  /** Whether the round-trip check passed */
+  ok: boolean;
+  /** Humanized text from the IR */
+  humanizedText: string;
+  /** Any issues found */
+  issues: string[];
+};
+
+/**
+ * Verify that an IR can be humanized and the humanized text
+ * is structurally consistent. This does NOT re-parse the humanized
+ * text (that would require the full LLM pipeline), but checks:
+ * 1. The IR passes shape validation
+ * 2. The humanizer produces a non-empty, non-fallback text
+ * 3. No "unmatched" patterns in the humanizer output
+ */
+export function verifyRoundTrip(ir: ConstraintIR): RoundTripResult {
+  const issues: string[] = [];
+
+  // Step 1: Shape validation
+  const shapeIssues = validateIR(ir);
+  if (shapeIssues.length > 0) {
+    issues.push(...shapeIssues.map(i => `IR shape issue: ${i.message}`));
+  }
+
+  // Step 2: Humanize
+  const { text, unmatched } = humanizeIR(ir);
+  if (!text.trim()) {
+    issues.push('Humanizer produced empty text');
+  }
+  if (unmatched) {
+    issues.push(`Humanizer could not fully render IR (unmatched pattern). Text: "${text}"`);
+  }
+
+  return {
+    ok: issues.length === 0,
+    humanizedText: text,
+    issues,
   };
 }

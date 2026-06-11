@@ -405,3 +405,111 @@ export function shouldMarkWeeklyAutoBase(
   if (!assignment) return false;
   return assignment.weeklyPeriods === weeklyPeriods;
 }
+
+/** Compute Levenshtein distance between two strings. */
+export function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+/** Negation keywords in Vietnamese (normalized, no diacritics) */
+const NEGATION_KEYWORDS = ['khong', 'ko', 'kh', 'cam', 'tranh', 'chang', 'khongduoc'];
+
+/** 
+ * Check if a normalized word is a fuzzy match for any negation keyword.
+ * Uses Levenshtein distance ≤ 2 for fuzzy matching.
+ * E.g. "khogn" matches "khong" (distance 2).
+ */
+export function isFuzzyNegation(word: string, maxDistance: number = 2): { match: boolean; matchedKeyword: string | null } {
+  const normalized = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!normalized) return { match: false, matchedKeyword: null };
+  
+  // Exact match first (fast path)
+  if (NEGATION_KEYWORDS.includes(normalized)) {
+    return { match: true, matchedKeyword: normalized };
+  }
+  
+  // Fuzzy match
+  for (const keyword of NEGATION_KEYWORDS) {
+    if (levenshtein(normalized, keyword) <= maxDistance) {
+      return { match: true, matchedKeyword: keyword };
+    }
+  }
+  
+  return { match: false, matchedKeyword: null };
+}
+
+/**
+ * Detect negation in text using fuzzy matching.
+ * Returns true if any word in the text fuzzy-matches a negation keyword.
+ */
+export function hasFuzzyNegation(text: string): boolean {
+  const words = normalizeConstraintText(text).split(/\s+/);
+  return words.some(w => isFuzzyNegation(w).match);
+}
+
+/**
+ * Match an entity label with fuzzy tolerance.
+ * If exact match fails, try Levenshtein ≤ 1 on normalized text.
+ * Returns the original (correctly-cased) label if matched, null otherwise.
+ */
+export function fuzzyMatchEntity(
+  text: string,
+  labels: string[],
+  maxDistance: number = 1
+): string | null {
+  const normalized = normalizeConstraintText(text);
+  
+  // Exact match first
+  for (const label of labels) {
+    if (includesLabel(normalized, label)) return label;
+  }
+  
+  // Fuzzy: check each word in text against each label
+  const words = normalized.split(/\s+/);
+  for (const word of words) {
+    for (const label of labels) {
+      const normalizedLabel = normalizeConstraintText(label);
+      if (levenshtein(word, normalizedLabel) <= maxDistance) {
+        return label;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/** Patterns that indicate an illustration/example span */
+const ILLUSTRATION_MARKERS = /(?:ví dụ|chẳng hạn|kiểu như|như là|vd)[,\s]*/giu;
+
+/**
+ * Detect illustration spans in text.
+ * Returns the spans that are likely illustrations (to be marked, not deleted).
+ */
+export function detectIllustrationSpans(text: string): string[] {
+  const spans: string[] = [];
+  let match: RegExpExecArray | null;
+  const re = new RegExp(ILLUSTRATION_MARKERS.source, ILLUSTRATION_MARKERS.flags);
+  while ((match = re.exec(text)) !== null) {
+    // Capture from the marker to the end of the clause (comma, period, or end)
+    const rest = text.slice(match.index);
+    const endMatch = rest.match(/^[^,.]*[,.]?/);
+    if (endMatch) {
+      spans.push(endMatch[0].trim());
+    }
+  }
+  return spans;
+}

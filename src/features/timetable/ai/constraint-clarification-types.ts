@@ -54,7 +54,8 @@ export type ClarificationQuestion = {
     | 'missing_period'
     | 'missing_scope'
     | 'unsupported_semantics'
-    | 'contradictory_markers';
+    | 'contradictory_markers'
+    | 'confirm_interpretation';
 };
 
 /**
@@ -70,6 +71,25 @@ export const REASON_CODE_LABEL_VI: Record<ClarificationQuestion['reasonCode'], s
   missing_scope: 'Thiếu phạm vi',
   unsupported_semantics: 'Chưa hỗ trợ',
   contradictory_markers: 'Mâu thuẫn trong câu',
+  confirm_interpretation: 'Xác nhận cách hiểu',
+};
+
+/**
+ * DTO for rendering an interpretation confirmation card in the UI.
+ * Shows the user how the system understood their constraint,
+ * broken down into Scope / IF / THEN-atoms with notes.
+ */
+export type InterpretationCardDTO = {
+  /** Scope in Vietnamese, e.g. "Vào thứ 6" */
+  scopeVi?: string;
+  /** IF clause in Vietnamese, e.g. "nếu Thúy và Yên đều có dạy" */
+  ifAtomVi?: string;
+  /** THEN atoms in Vietnamese, e.g. ["không được dạy trùng cùng một tiết"] */
+  thenAtomsVi: string[];
+  /** Notes/audit trail, e.g. ["'tiết 2' được hiểu là ví dụ minh hoạ"] */
+  notesVi: string[];
+  /** Atom IDs that the user can edit individually */
+  editableAtomIds: string[];
 };
 
 // ─── Helpers used by the pipeline to build DTOs deterministically ─────

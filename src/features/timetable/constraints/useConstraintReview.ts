@@ -1,6 +1,142 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useState, useCallback } from 'react';
+import type { InterpretationCardDTO, ClarificationQuestion } from '../ai/constraint-clarification-types';
+
+export type ConstraintReviewState = {
+  /** Current interpretation being reviewed */
+  currentInterpretation: InterpretationCardDTO | null;
+  /** Whether we're in confirmation mode */
+  isConfirming: boolean;
+  /** Whether a reparse is in progress */
+  isReparsing: boolean;
+  /** Number of reparse attempts (max 3) */
+  reparseAttempts: number;
+  /** Whether max reparse attempts reached */
+  maxAttemptsReached: boolean;
+  /** Clarification question if any */
+  clarificationQuestion: ClarificationQuestion | null;
+};
+
+export type ConstraintReviewActions = {
+  /** Start reviewing an interpretation */
+  startReview: (interpretation: InterpretationCardDTO, isCompound: boolean) => void;
+  /** Confirm the current interpretation */
+  confirmInterpretation: () => void;
+  /** Edit a specific atom */
+  editAtom: (atomId: string, newValue: string) => void;
+  /** Submit free-text feedback for reparse */
+  submitFeedback: (feedback: string) => void;
+  /** Cancel the review */
+  cancelReview: () => void;
+  /** Set clarification question */
+  setClarification: (question: ClarificationQuestion | null) => void;
+};
+
+const MAX_REPARSE_ATTEMPTS = 3;
+
+export function useConstraintReview(options?: {
+  onConfirm?: (interpretation: InterpretationCardDTO) => void;
+  onEditAtom?: (atomId: string, newValue: string) => void;
+  onReparse?: (feedback: string) => void;
+  onCancel?: () => void;
+}): [ConstraintReviewState, ConstraintReviewActions] {
+  const { onConfirm, onEditAtom, onReparse, onCancel } = options ?? {};
+  
+  const [state, setState] = useState<ConstraintReviewState>({
+    currentInterpretation: null,
+    isConfirming: false,
+    isReparsing: false,
+    reparseAttempts: 0,
+    maxAttemptsReached: false,
+    clarificationQuestion: null,
+  });
+  
+  const startReview = useCallback((interpretation: InterpretationCardDTO, _isCompound: boolean) => {
+    setState(prev => ({
+      ...prev,
+      currentInterpretation: interpretation,
+      isConfirming: true,
+      reparseAttempts: 0,
+      maxAttemptsReached: false,
+      clarificationQuestion: null,
+    }));
+  }, []);
+  
+  const confirmInterpretation = useCallback(() => {
+    if (state.currentInterpretation) {
+      onConfirm?.(state.currentInterpretation);
+    }
+    setState(prev => ({
+      ...prev,
+      isConfirming: false,
+      currentInterpretation: null,
+    }));
+  }, [state.currentInterpretation, onConfirm]);
+  
+  const editAtom = useCallback((atomId: string, newValue: string) => {
+    onEditAtom?.(atomId, newValue);
+    // Update the interpretation in place
+    setState(prev => {
+      if (!prev.currentInterpretation) return prev;
+      const idx = prev.currentInterpretation.editableAtomIds.indexOf(atomId);
+      if (idx === -1) return prev;
+      const newThenAtoms = [...prev.currentInterpretation.thenAtomsVi];
+      newThenAtoms[idx] = newValue;
+      return {
+        ...prev,
+        currentInterpretation: {
+          ...prev.currentInterpretation,
+          thenAtomsVi: newThenAtoms,
+        },
+      };
+    });
+  }, [onEditAtom]);
+  
+  const submitFeedback = useCallback((feedback: string) => {
+    if (state.reparseAttempts >= MAX_REPARSE_ATTEMPTS) {
+      setState(prev => ({ ...prev, maxAttemptsReached: true }));
+      return;
+    }
+    setState(prev => ({
+      ...prev,
+      isReparsing: true,
+      reparseAttempts: prev.reparseAttempts + 1,
+    }));
+    onReparse?.(feedback);
+  }, [state.reparseAttempts, onReparse]);
+  
+  const cancelReview = useCallback(() => {
+    onCancel?.();
+    setState({
+      currentInterpretation: null,
+      isConfirming: false,
+      isReparsing: false,
+      reparseAttempts: 0,
+      maxAttemptsReached: false,
+      clarificationQuestion: null,
+    });
+  }, [onCancel]);
+  
+  const setClarification = useCallback((question: ClarificationQuestion | null) => {
+    setState(prev => ({ ...prev, clarificationQuestion: question }));
+  }, []);
+  
+  return [state, {
+    startReview,
+    confirmInterpretation,
+    editAtom,
+    submitFeedback,
+    cancelReview,
+    setClarification,
+  }];
+}
+
+export default useConstraintReview;
+
+// ─── Legacy backward-compatible export (full constraint review hook) ─────
+
+import { useEffect, useMemo, useRef } from 'react';
 
 import { parseConstraintDraftsWithRaws } from '../ai/constraint-parse-service';
 import { buildDraftFromSpecs } from '../ai/constraint-draft-validator';
@@ -24,14 +160,18 @@ import { preferCanonicalNormalizedText } from '../ai/constraint-canonical-text';
 import { humanizeConstraintSpec } from '../ai/constraint-humanizer';
 import { MAX_AI_ANALYSIS_ATTEMPTS } from './constraint-review-ui';
 
-const MAX_REPARSE_ATTEMPTS = MAX_AI_ANALYSIS_ATTEMPTS;
+const LEGACY_MAX_REPARSE_ATTEMPTS = MAX_AI_ANALYSIS_ATTEMPTS;
 
 export type ConstraintReviewHydration = {
   constraintDrafts?: ParsedConstraintDraft[];
   confirmedConstraints?: ConfirmedConstraint[];
 };
 
-export function useConstraintReview(initial?: ConstraintReviewHydration) {
+/**
+ * Legacy constraint review hook (used by TimetableApp).
+ * Kept for backward compatibility.
+ */
+export function useConstraintReviewLegacy(initial?: ConstraintReviewHydration) {
   const [constraintDrafts, setConstraintDrafts] = useState<ParsedConstraintDraft[]>(
     () => initial?.constraintDrafts ?? []
   );
@@ -135,11 +275,6 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
     return canonical;
   }
 
-  /**
-   * AI-only re-parse after user rejects rule/built-in interpretation (no rule fallback).
-   * Phase 0.4: accepts an optional userFeedback (correction text) which takes
-   * priority over the raw input in the LLM prompt.
-   */
   const rejectAndReparse = useCallback(
     async (
       rawConstraint: { id: string; text: string; type: 'required' | 'preferred'; weight?: number },
@@ -149,7 +284,7 @@ export function useConstraintReview(initial?: ConstraintReviewHydration) {
       options?: { userFeedback?: string }
     ): Promise<ParsedConstraintDraft | null> => {
       const attempts = currentDraft.reparseCount ?? 0;
-      if (attempts >= MAX_REPARSE_ATTEMPTS) {
+      if (attempts >= LEGACY_MAX_REPARSE_ATTEMPTS) {
         return null;
       }
 

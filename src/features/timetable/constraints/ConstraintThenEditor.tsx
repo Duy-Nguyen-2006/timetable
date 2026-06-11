@@ -1,12 +1,62 @@
 'use client';
 
-/**
- * ConstraintThenEditor — visual editor for the `then` array of an if_then spec.
- * Used when parsing dropped teacher entities (issue `possible_entity_loss`).
- * Each entry is one row with teacher/day/(period) dropdowns; +/− buttons to add/remove.
- */
+import { useState } from 'react';
 
-import { useMemo, useState } from 'react';
+export type ConstraintThenEditorProps = {
+  /** The atom ID being edited */
+  atomId: string;
+  /** Current text of the atom */
+  currentText: string;
+  /** Save the edited atom */
+  onSave: (atomId: string, newValue: string) => void;
+  /** Cancel editing */
+  onCancel: () => void;
+};
+
+export function ConstraintThenEditor({
+  atomId,
+  currentText,
+  onSave,
+  onCancel,
+}: ConstraintThenEditorProps) {
+  const [value, setValue] = useState(currentText);
+  
+  return (
+    <div className="space-y-2 border rounded-md p-3 bg-accent/30">
+      <div className="text-xs font-medium text-muted-foreground">
+        Sửa ràng buộc:
+      </div>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-full text-sm border rounded px-2 py-1.5"
+        autoFocus
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={() => onSave(atomId, value)}
+          disabled={!value.trim()}
+          className="px-3 py-1 text-sm font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
+        >
+          Lưu
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-3 py-1 text-sm border rounded hover:bg-accent"
+        >
+          Huỷ
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default ConstraintThenEditor;
+
+// ─── Legacy backward-compatible export (dialog-based THEN editor) ─────
+
+import { useMemo } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 
 import {
@@ -28,16 +78,6 @@ type ThenEntry = {
   period: number | null;
 };
 
-type ConstraintThenEditorProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  spec: ConstraintSpec;
-  agentInput: AgentInputPayload;
-  /** Optional list of teacher labels the parser dropped, shown as quick-add chips. */
-  suggestedTeachers?: string[];
-  onSave: (updatedSpec: ConstraintSpec) => void;
-};
-
 function toEntry(value: unknown): ThenEntry | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as { kind?: unknown; params?: { teacher?: unknown; day?: unknown; period?: unknown } };
@@ -50,14 +90,25 @@ function toEntry(value: unknown): ThenEntry | null {
   return { kind, teacher, day, period: kind === 'teacher_block_day' ? null : period };
 }
 
-export function ConstraintThenEditor({
+/**
+ * Legacy dialog-based THEN array editor (used by ConstraintReviewPanelLegacy).
+ * Kept for backward compatibility.
+ */
+export function ConstraintThenEditorDialog({
   open,
   onOpenChange,
   spec,
   agentInput,
   suggestedTeachers = [],
   onSave,
-}: ConstraintThenEditorProps) {
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  spec: ConstraintSpec;
+  agentInput: AgentInputPayload;
+  suggestedTeachers?: string[];
+  onSave: (updatedSpec: ConstraintSpec) => void;
+}) {
   const teacherLabels = useMemo(() => {
     const set = new Set<string>();
     for (const a of agentInput.assignments) set.add(a.teacher.label);
@@ -129,7 +180,6 @@ export function ConstraintThenEditor({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        // Force a fresh state when the dialog reopens with a different spec.
         key={`${open}-${spec.id}-${initialEntries.length}`}
         className="max-h-[90vh] overflow-y-auto border-white/10 bg-[#141414] text-white sm:max-w-lg"
       >
@@ -159,7 +209,7 @@ export function ConstraintThenEditor({
 
           {entries.length === 0 ? (
             <p className="rounded border border-white/[0.08] bg-[#0a0a0a] p-3 text-xs text-white/40">
-              Chưa có ràng buộc THEN nào. Bấm “+ Thêm” để thêm.
+              Chưa có ràng buộc THEN nào. Bấm "+ Thêm" để thêm.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -262,5 +312,3 @@ export function ConstraintThenEditor({
     </Dialog>
   );
 }
-
-export default ConstraintThenEditor;

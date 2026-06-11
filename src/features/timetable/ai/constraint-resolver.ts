@@ -20,6 +20,9 @@ import {
   extractFirstNumber,
   extractPeriodNumber,
   normalizeConstraintText,
+  levenshtein,
+  hasFuzzyNegation,
+  detectIllustrationSpans,
 } from './translator-text';
 import { matchEntity, matchKnownEntities } from './built-in-suggestion';
 import type { BuiltInConstraintScope } from './constraint-registry';
@@ -56,6 +59,8 @@ export type ResolverHints = {
   mentionsIfThen: boolean;
   /** Any entity that was ambiguous (e.g., "Lan" matches "Lan Anh" and "Lan An"). */
   ambiguousEntity: { kind: 'teacher' | 'subject' | 'class'; candidates: string[] } | null;
+  /** Illustration spans detected in text (e.g., "ví dụ tiết 2"). Marked, not deleted. */
+  illustrationSpans: string[];
 };
 
 export type ResolverInput = {
@@ -86,13 +91,15 @@ export function resolveConstraintHints(input: ResolverInput): ResolverHints {
     // Day is already in extractedDays
   }
 
-  const mentionsBlock = /\b(khong|cam|nghi|ko)\b/iu.test(normalized) && /\b(day|hoc)\b/iu.test(normalized);
+  const mentionsBlock = (hasFuzzyNegation(normalized) || /\b(cam|nghi)\b/iu.test(normalized)) && /\b(day|hoc)\b/iu.test(normalized);
   const mentionsMax = /\b(toi\s*da|khong\s*qua|khong\s*hon|gioi\s*han|qua\s*\d|khong\s*day\s*qua|day\s*qua)\b/iu.test(normalized);
   const mentionsMin = /\b(it\s*nhat|toi\s*thieu)\b/iu.test(normalized);
   const mentionsConsecutive = /\b(lien\s*tiep|lien\s*tuc)\b/iu.test(normalized);
   const mentionsOnly = /\b(chi)\b/iu.test(normalized) && /\b(day|hoc)\b/iu.test(normalized);
   const mentionsPreferred = /\b(uu\s*tien|thich|\bnen)\b/iu.test(normalized);
-  const mentionsIfThen = /\b(neu)\b/iu.test(normalized) && /\b(thi)\b/iu.test(normalized);
+  const hasNeu = normalized.split(/\s+/).some(w => levenshtein(w, 'neu') <= 1);
+  const hasThi = normalized.split(/\s+/).some(w => levenshtein(w, 'thi') <= 1);
+  const mentionsIfThen = hasNeu && hasThi;
 
   // Infer scope from entity match
   let inferredScope: BuiltInConstraintScope | null = null;
@@ -133,5 +140,6 @@ export function resolveConstraintHints(input: ResolverInput): ResolverHints {
     mentionsPreferred,
     mentionsIfThen,
     ambiguousEntity,
+    illustrationSpans: detectIllustrationSpans(input.userText),
   };
 }

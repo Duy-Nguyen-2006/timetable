@@ -31,15 +31,15 @@ import {
   validateConfirmedSolveRequest,
 } from './ai/solver-constraint-gate'
 import { ConstraintInputPanel, type PendingAiPreview } from './constraints/ConstraintInputPanel'
-import { ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
+import { ConstraintReviewPanelLegacy as ConstraintReviewPanel } from './constraints/ConstraintReviewPanel'
 import { fetchConstraintIntakeAiAnalysis } from './constraints/constraint-intake-service'
 import { buildDraftFromReparseResult, buildDraftFromCustomNormalization, buildDraftFromAnalyzeResult, rawInputFromText } from './constraints/constraint-intake-ai'
 import { constraintItemFromPending } from './constraints/import-pending-constraint'
 import {
-  ConstraintInterpretationCard,
+  ConstraintInterpretationCardLegacy as ConstraintInterpretationCard,
   type InterpretationCandidate,
 } from './constraints/ConstraintInterpretationCard'
-import { useConstraintReview } from './constraints/useConstraintReview'
+import { useConstraintReviewLegacy as useConstraintReview } from './constraints/useConstraintReview'
 import {
   buildDatasetSignature,
   readConstraintWorkspace,

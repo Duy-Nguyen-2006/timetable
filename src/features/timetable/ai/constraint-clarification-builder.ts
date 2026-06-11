@@ -15,6 +15,7 @@ import type { ConstraintSpec } from './constraint-spec';
 import {
   type ClarificationOption,
   type ClarificationQuestion,
+  type InterpretationCardDTO,
   clarificationOptionFromBuiltIn,
 } from './constraint-clarification-types';
 
@@ -178,4 +179,52 @@ export function buildConfirmationPreview(
     // never returned as a ClarificationQuestion (no reasonCode, no
     // allowFreeText needed). Callers wrap this in a confirmation step.
   } as unknown as { questionVi: string; options: ClarificationOption[] };
+}
+
+/**
+ * Build an interpretation confirmation question for compound constraints.
+ * This is triggered when:
+ *   - self-consistency detected divergence
+ *   - atom confidence < high
+ *   - LLM-verify found semantic mismatch
+ *   - type-check failed
+ *   - ALWAYS for if-then multi-clause constraints
+ *
+ * The question shows the user the system's understanding (from IR, humanized)
+ * and asks for confirmation or correction.
+ */
+export function buildInterpretationConfirm(
+  interpretation: InterpretationCardDTO,
+  rawText: string
+): ClarificationQuestion {
+  const parts: string[] = [];
+
+  if (interpretation.scopeVi) {
+    parts.push(`Phạm vi: ${interpretation.scopeVi}`);
+  }
+  if (interpretation.ifAtomVi) {
+    parts.push(`Điều kiện: ${interpretation.ifAtomVi}`);
+  }
+  parts.push(...interpretation.thenAtomsVi.map((a, i) => `Ràng buộc ${i + 1}: ${a}`));
+
+  const notesSection = interpretation.notesVi.length > 0
+    ? `\n\nGhi chú: ${interpretation.notesVi.join('; ')}`
+    : '';
+
+  return {
+    id: 'confirm_interpretation',
+    questionVi: `Mình hiểu câu "${rawText}" như sau:\n${parts.join('\n')}${notesSection}\n\nCách hiểu này đúng không?`,
+    options: [
+      {
+        id: 'confirm_ok',
+        labelVi: 'Đúng, lưu ràng buộc này',
+      },
+      {
+        id: 'confirm_edit',
+        labelVi: 'Sửa lại cách hiểu',
+      },
+    ],
+    allowFreeText: true,
+    reasonCode: 'confirm_interpretation',
+  };
 }

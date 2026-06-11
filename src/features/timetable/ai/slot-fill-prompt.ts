@@ -19,11 +19,66 @@ import type { ConstraintRetrieverCandidate, ConstraintResolverHints } from './co
 import { getConstraintMeta } from './constraint-registry';
 import { buildTopKPromptSection } from './constraint-retriever';
 
-export const SMALL_SYSTEM_PROMPT = `Bạn map MỘT câu ràng buộc tiếng Việt vào MỘT trong các kind được cung cấp.
-Chỉ chọn từ danh sách kind dưới đây. Nếu không kind nào khớp → trả "custom" kèm IR.
-KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
-Dùng các "extracted hints" cho param; chỉ map, không tự suy số.
-Output JSON: { kind | "custom", params, confidence, missingParams[] }`;
+export const SMALL_SYSTEM_PROMPT = `Bạn map MỘT atom ràng buộc tiếng Việt vào MỘT kind trong danh sách cung cấp.
+Quy tắc:
+- Chỉ chọn kind trong danh sách. Không có kind khớp → "custom" kèm IR.
+- KHÔNG bịa giáo viên/lớp/môn ngoài entity đã resolve.
+- CHỈ map; không tự suy số. Không thêm field ngoài schema của kind.
+- "2 giáo viên không được cùng 1 tiết" → teacher_pair_not_same_slot (KHÔNG phải block tiết).
+- Scope ngày/lớp đặt vào params.scope, áp cho toàn atom.
+- Điều kiện đã hàm chứa trong ngữ nghĩa kind → KHÔNG bọc if_then thỡ.
+Trả JSON đúng schema SlotFillResponse (atoms[].kind/params/confidence/missingParams).`;
+
+/** Structured output schema for LLM Lượt-2. */
+export type SlotFillAtom = {
+  kind: string;
+  params: Record<string, unknown>;
+  confidence: 'high' | 'medium' | 'low';
+  missingParams: string[];
+};
+
+export type SlotFillResponse = {
+  atoms: SlotFillAtom[];
+  /** If shape=if_then, condition is separate */
+  condition?: {
+    op: string;
+    teachers?: string[];
+    teacher?: string;
+    day?: string;
+    period?: number;
+  };
+};
+
+/** JSON Schema for structured output validation */
+export const SLOT_FILL_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    atoms: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string' },
+          params: { type: 'object' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          missingParams: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['kind', 'params', 'confidence'],
+      },
+    },
+    condition: {
+      type: 'object',
+      properties: {
+        op: { type: 'string' },
+        teachers: { type: 'array', items: { type: 'string' } },
+        teacher: { type: 'string' },
+        day: { type: 'string' },
+        period: { type: 'number' },
+      },
+    },
+  },
+  required: ['atoms'],
+} as const;
 
 /** Build the dynamic user message with resolved entities + top-k candidates. */
 export function buildSlotFillUserMessage(
@@ -75,6 +130,36 @@ export function buildSlotFillUserMessage(
   lines.push(`- Nếu câu có 2 môn trở lên (vd "Toán và Văn"), PHẢI trả đủ một spec cho từng môn.`);
   lines.push(`- Nếu câu có "1 người" / "ngày bất kỳ" / "cùng ngày" mà chưa rõ áp dụng cho ai → trả "clarify".`);
   lines.push(`- Nếu câu if-then → trả kind: "if_then" với params.if và params.then[] (KHÔNG trả needs_clarification).`);
+
+  // Add mandatory few-shot examples (§4.3)
+  lines.push(``);
+  lines.push(`## Few-shot bắt buộc`);
+  lines.push(``);
+  lines.push(`# FS1 — If-then đa atom`);
+  lines.push(`Input: "Nếu cô A dạy thứ 3 tiết 4 thì thứ 5 thầy B không dạy tiết 2 và thầy C phải dạy thứ 2"`);
+  lines.push(`Output: {`);
+  lines.push(`  "condition": {"op":"teacher_teaches_at_slot","teacher":"A","day":"thu3","period":4},`);
+  lines.push(`  "atoms":[`);
+  lines.push(`    {"kind":"teacher_block_slot","params":{"teacher":"B","day":"thu5","period":2},"confidence":"high","missingParams":[]},`);
+  lines.push(`    {"kind":"teacher_required_day","params":{"teacher":"C","day":"thu2"},"confidence":"high","missingParams":[]}`);
+  lines.push(`  ]}`);
+  lines.push(``);
+  lines.push(`# FS2 — Bẫy minh hoạ (PHẢI bỏ "tiết 2")`);
+  lines.push(`Input: "Vào thứ 6, nếu Thúy và Yên đều có tiết dạy thì họ không được cùng 1 tiết, ví dụ cùng tiết 2"`);
+  lines.push(`Output: {`);
+  lines.push(`  "atoms":[`);
+  lines.push(`    {"kind":"teacher_pair_not_same_slot",`);
+  lines.push(`     "params":{"teachers":["Thúy","Yên"],"scope":{"day":"thu6"}},`);
+  lines.push(`     "confidence":"high","missingParams":[]}`);
+  lines.push(`  ]}`);
+  lines.push(`# Lưu ý: KHÔNG có field period. "tiết 2" là minh hoạ.`);
+  lines.push(``);
+  lines.push(`# FS3 — Phủ định + typo`);
+  lines.push(`Input: "thầy Sơn khogn day thu 3 tiet 5"`);
+  lines.push(`Output: {`);
+  lines.push(`  "atoms":[`);
+  lines.push(`    {"kind":"teacher_block_slot","params":{"teacher":"Sơn","day":"thu3","period":5},"confidence":"high","missingParams":[]}`);
+  lines.push(`  ]}`);
 
   return lines.join('\n');
 }

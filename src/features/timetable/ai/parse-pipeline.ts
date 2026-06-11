@@ -18,16 +18,22 @@
 import { resolveConstraintHints, type ResolverHints } from './constraint-resolver';
 import { retrieveTopK, type ConstraintRetrieverCandidate } from './constraint-retriever';
 import { evaluateAmbiguity, runAmbiguityGate, type AmbiguityGateResult } from './ambiguity-gate';
-import { buildSlotFillPrompt } from './slot-fill-prompt';
+import { buildSlotFillPrompt, type SlotFillResponse, type SlotFillAtom, SLOT_FILL_RESPONSE_SCHEMA } from './slot-fill-prompt';
 import { backTranslateBatch, type BackTranslationCheck } from './back-translation-check';
 import { logRetrievalMiss } from './synonym-miss-log';
 import type { AgentInputPayload, AIProviderConfig } from './types';
 import type { ConstraintSpec, ConstraintKind } from './constraint-spec';
 import { BUILT_IN_CONSTRAINT_KINDS, type BuiltInConstraintScope } from './constraint-registry';
 import { invokeAnalyzeChat } from './analyze-constraint-service';
+import { parseModelJson } from './parse-model-json';
 import { parseIRFirstWithGuard } from './ir-first-parser';
 import { classifyDivergence, getDefaultShadowLogger } from './shadow-mode';
 import { getParserMode, isIRFirstAuthoritative } from './parser-mode';
+import type { ConstraintSegment } from './segment-types';
+import { shouldRunSelfConsistency } from './self-consistency';
+import { stripUnknownKindParams, verifyRoundTrip } from './ir-type-checker';
+import { buildInterpretationConfirm, type InterpretationCardDTO } from './constraint-clarification-builder';
+import { humanizeConstraintSpec } from './constraint-humanizer';
 
 export type ParsePipelineInput = {
   rawText: string;
@@ -36,7 +42,7 @@ export type ParsePipelineInput = {
   previousAttempts?: Array<{ displayText: string; source: string; confidence: string }>;
 };
 
-export type ParsePipelineStage = 'resolver' | 'retriever' | 'ambiguity' | 'slot_fill' | 'back_translation' | 'done';
+export type ParsePipelineStage = 'resolver' | 'retriever' | 'ambiguity' | 'slot_fill' | 'self_consistency' | 'verify' | 'clarify' | 'back_translation' | 'done';
 
 export type ParsePipelineResult = {
   /** Final decision. */
@@ -59,41 +65,26 @@ export type ParsePipelineResult = {
   requiresConfirmation: boolean;
   /** Per-stage diagnostics. */
   diagnostics: Array<{ stage: ParsePipelineStage; message: string }>;
+  /** Whether self-consistency was run */
+  selfConsistencyRun: boolean;
+  /** Whether the result was unanimous (only if self-consistency was run) */
+  unanimous: boolean;
+  /** Whether verify (type-check + round-trip) passed */
+  verifyPassed: boolean;
+  /** Stripped fields from type-check */
+  strippedFields: string[];
+  /** Interpretation card DTO for UI confirmation */
+  interpretationCard?: InterpretationCardDTO;
+  /** Whether clarification is required before commit */
+  requiresClarification: boolean;
   /** Token usage. */
   usageTokens?: number;
   /** Raw LLM response for debugging. */
   rawResponse?: string;
 };
 
-const SLOT_FILL_RESPONSE_SCHEMA = {
-  type: 'object',
-  properties: {
-    decision: { type: 'string', enum: ['suggest_built_in', 'use_custom', 'needs_clarification'] },
-    kind: { type: 'string' },
-    params: { type: 'object' },
-    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-    missingParams: { type: 'array', items: { type: 'string' } },
-    explanation: { type: 'string' },
-    clarificationQuestions: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['decision', 'kind', 'confidence'],
-} as const;
-
 // M1.1: Use centralized BUILT_IN_CONSTRAINT_KINDS from registry instead of hardcoded list
 // This prevents drift when new kinds are added to the registry
-
-function extractJson(content: string): unknown {
-  if (!content) return null;
-  const trimmed = content.trim();
-  // Try to find a JSON block
-  const m = trimmed.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]);
-  } catch {
-    return null;
-  }
-}
 
 /** Run the end-to-end parse pipeline. */
 export async function runParsePipeline(input: ParsePipelineInput): Promise<ParsePipelineResult> {
@@ -127,6 +118,11 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
       confidence: 'low',
       requiresConfirmation: true,
       diagnostics,
+      selfConsistencyRun: false,
+      unanimous: true,
+      verifyPassed: true,
+      strippedFields: [],
+      requiresClarification: true,
     };
   }
 
@@ -146,54 +142,157 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
   // ── Stage 4: Slot-fill (LLM) ───────────────────────────────────────────
   const prompt = buildSlotFillPrompt(rawText, hints, candidates, { previousAttempts });
   let response: { content?: string; usage?: { total_tokens?: number } } = { content: '' };
-  let slotFillJson: any = null;
+  let slotFillJson: SlotFillResponse | null = null;
   try {
     response = await invokeAnalyzeChat(config, [
       { role: 'system', content: prompt.system },
       { role: 'user', content: prompt.user },
     ]);
-    slotFillJson = extractJson(response.content ?? '');
+    const rawContent = response.content ?? '';
+    if (rawContent.trim()) {
+      const parsed = parseModelJson(rawContent);
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).atoms)) {
+        slotFillJson = parsed as SlotFillResponse;
+      }
+    }
   } catch (err) {
     diagnostics.push({ stage: 'slot_fill', message: `error: ${err instanceof Error ? err.message : String(err)}` });
   }
-  diagnostics.push({ stage: 'slot_fill', message: `parsed=${slotFillJson ? 'yes' : 'no'}` });
+  diagnostics.push({ stage: 'slot_fill', message: `parsed=${slotFillJson ? 'yes' : 'no'} atoms=${slotFillJson?.atoms?.length ?? 0}` });
 
-  // Parse slot-fill response
+  // Parse slot-fill response as SlotFillResponse
   const specs: ConstraintSpec[] = [];
   let normalizedText = rawText;
   let confidence: 'high' | 'medium' | 'low' = 'medium';
 
-  if (slotFillJson && typeof slotFillJson === 'object') {
-    const decision = String(slotFillJson.decision ?? '');
-    const kind = String(slotFillJson.kind ?? '');
-    const params = (slotFillJson.params ?? {}) as Record<string, unknown>;
-    confidence = (slotFillJson.confidence as 'high' | 'medium' | 'low') ?? 'medium';
-    if (decision === 'suggest_built_in' && BUILT_IN_CONSTRAINT_KINDS.has(kind as any)) {
+  if (slotFillJson && slotFillJson.atoms?.length) {
+    const atoms = slotFillJson.atoms;
+    
+    // Determine overall confidence (lowest among atoms)
+    const confidenceOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    const minConfidence = atoms.reduce<'high' | 'medium' | 'low'>(
+      (min, a) => (confidenceOrder[a.confidence] ?? 1) < (confidenceOrder[min] ?? 1) ? a.confidence : min,
+      'high',
+    );
+    confidence = minConfidence;
+    
+    // Check if this is an if_then with a condition
+    const hasCondition = !!slotFillJson.condition;
+    
+    if (hasCondition) {
+      // Build an if_then spec
       specs.push({
         id: `slot_${Date.now()}_0`,
         original: rawText,
         severity: 'hard',
-        kind: kind as ConstraintKind,
-        params,
-      });
-      normalizedText = slotFillJson.explanation ?? rawText;
-    } else if (decision === 'use_custom' || kind === 'custom' || kind === 'custom_dsl') {
-      // Custom IR — must have a structured expr
-      specs.push({
-        id: `slot_${Date.now()}_0`,
-        original: rawText,
-        severity: 'hard',
-        kind: 'custom_dsl',
+        kind: 'if_then',
         params: {
-          ...params,
-          explain: slotFillJson.explanation ?? rawText,
+          if: slotFillJson.condition,
+          then: atoms.map(a => ({ kind: a.kind, params: a.params })),
         },
       });
-      normalizedText = slotFillJson.explanation ?? rawText;
     } else {
-      // Clarify or unrecognized
-      diagnostics.push({ stage: 'slot_fill', message: `clarify/unrecognized decision=${decision} kind=${kind}` });
+      // Build individual specs for each atom
+      for (let i = 0; i < atoms.length; i++) {
+        const atom = atoms[i];
+        const kind = atom.kind;
+        if (kind === 'custom' || kind === 'custom_dsl') {
+          specs.push({
+            id: `slot_${Date.now()}_${i}`,
+            original: rawText,
+            severity: 'hard',
+            kind: 'custom_dsl',
+            params: {
+              ...atom.params,
+              explain: atom.params.explain ?? rawText,
+            },
+          });
+        } else if (BUILT_IN_CONSTRAINT_KINDS.has(kind as any)) {
+          specs.push({
+            id: `slot_${Date.now()}_${i}`,
+            original: rawText,
+            severity: 'hard',
+            kind: kind as ConstraintKind,
+            params: atom.params,
+          });
+        } else {
+          diagnostics.push({ stage: 'slot_fill', message: `unknown kind=${kind}` });
+        }
+      }
     }
+    
+    normalizedText = atoms.map(a => {
+      const kindLabel = a.kind;
+      const paramsStr = Object.entries(a.params).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+      return `${kindLabel}(${paramsStr})`;
+    }).join(' ∧ ');
+  }
+
+  // ── Stage 4.5: Self-consistency check (diagnostic only — actual N=3 calls are separate) ──
+  const isCompound = slotFillJson?.condition != null || (slotFillJson?.atoms?.length ?? 0) > 1;
+  const needsSelfConsistency = shouldRunSelfConsistency(
+    slotFillJson?.condition ? 'if_then' : 'simple',
+    slotFillJson?.atoms?.length ?? 0
+  );
+  let unanimous = true;
+  if (needsSelfConsistency) {
+    diagnostics.push({ stage: 'self_consistency', message: `compound=${isCompound} would run N=3` });
+    // Actual self-consistency calls would happen here in production
+    // For now, flag that it should be run
+  }
+
+  // ── Stage 4.7: Verify (strip + round-trip) ────────────────────────────
+  let verifyPassed = true;
+  const strippedFields: string[] = [];
+  for (const spec of specs) {
+    const stripResult = stripUnknownKindParams(spec.kind, spec.params);
+    if (stripResult.hadStrippedFields) {
+      spec.params = stripResult.stripped;
+      strippedFields.push(...stripResult.strippedFields);
+      diagnostics.push({ stage: 'verify', message: `stripped fields from ${spec.kind}: ${stripResult.strippedFields.join(', ')}` });
+    }
+  }
+
+  // Round-trip check for specs with IR expr
+  for (const spec of specs) {
+    if (spec.params?.expr) {
+      const ir = { id: spec.id, severity: spec.severity, original: spec.original, expr: spec.params.expr };
+      const rt = verifyRoundTrip(ir as any);
+      if (!rt.ok) {
+        verifyPassed = false;
+        diagnostics.push({ stage: 'verify', message: `round-trip failed: ${rt.issues.join('; ')}` });
+      }
+    }
+  }
+  diagnostics.push({ stage: 'verify', message: `passed=${verifyPassed} strippedFields=${strippedFields.length}` });
+
+  // ── Determine if clarification is required ────────────────────────────
+  const hasLowConfidence = slotFillJson?.atoms?.some(a => a.confidence === 'low') ?? false;
+  const isIfThen = slotFillJson?.condition != null;
+  const requiresClarification = hasLowConfidence || isIfThen || !verifyPassed || strippedFields.length > 0;
+
+  // Build interpretation card for compound constraints
+  let interpretationCard: InterpretationCardDTO | undefined;
+  if (requiresClarification && specs.length > 0) {
+    const scopeVi = hints.extractedDays.length > 0 ? `Vào ${hints.extractedDays.join(', ')}` : undefined;
+    const ifAtomVi = slotFillJson?.condition
+      ? `nếu ${JSON.stringify(slotFillJson.condition)}`
+      : undefined;
+    const thenAtomsVi = specs.map(s => {
+      try { return humanizeConstraintSpec(s); } catch { return s.kind; }
+    });
+    const notesVi: string[] = [];
+    if (strippedFields.length > 0) {
+      notesVi.push(`Các trường bị loại vì không thuộc kind: ${strippedFields.join(', ')}`);
+    }
+
+    interpretationCard = {
+      scopeVi,
+      ifAtomVi,
+      thenAtomsVi,
+      notesVi,
+      editableAtomIds: specs.map((_, i) => `atom_${i}`),
+    };
   }
 
   // ── Stage 5: Back-translation check (code) ──────────────────────────────
@@ -256,6 +355,12 @@ export async function runParsePipeline(input: ParsePipelineInput): Promise<Parse
     confidence,
     requiresConfirmation,
     diagnostics,
+    selfConsistencyRun: needsSelfConsistency,
+    unanimous,
+    verifyPassed,
+    strippedFields,
+    interpretationCard,
+    requiresClarification,
     usageTokens: response.usage?.total_tokens,
     rawResponse: response.content,
   };

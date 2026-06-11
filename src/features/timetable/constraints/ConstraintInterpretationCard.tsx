@@ -1,15 +1,108 @@
 'use client';
 
-/**
- * ConstraintInterpretationCard — Tier 4 (VAL-T4-000..006, 011..016)
- *
- * Hiển thị 2-3 cách hiểu khác nhau của một constraint khi parse không chắc chắn
- * (confidence='low' hoặc custom_dsl hard). Pure function of props, không state.
- *
- * Props: draft, candidates, onConfirm, onEdit, onDismiss, className
- * Test IDs: interpretation-card, interpretation-card-edit, interpretation-card-editor, cache-hit-badge
- * A11y: role=radiogroup, keyboard nav (Tab/Arrow/Enter/Space), aria-live=polite
- */
+import type { InterpretationCardDTO } from '../ai/constraint-clarification-types';
+
+export type ConstraintInterpretationCardProps = {
+  interpretation: InterpretationCardDTO;
+  /** Raw user text for display */
+  rawText: string;
+  /** Callback when user confirms */
+  onConfirm: () => void;
+  /** Callback when user wants to edit an atom */
+  onEditAtom: (atomId: string) => void;
+  /** Callback when user wants to edit everything */
+  onEditAll: () => void;
+};
+
+export function ConstraintInterpretationCard({
+  interpretation,
+  rawText,
+  onConfirm,
+  onEditAtom,
+  onEditAll,
+}: ConstraintInterpretationCardProps) {
+  return (
+    <div className="rounded-lg border bg-card p-4 space-y-3">
+      {/* Header */}
+      <div className="text-sm font-medium text-muted-foreground">
+        Cách hiểu của hệ thống:
+      </div>
+      
+      {/* Scope */}
+      {interpretation.scopeVi && (
+        <div className="flex items-start gap-2">
+          <span className="text-xs font-semibold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+            Phạm vi
+          </span>
+          <span className="text-sm">{interpretation.scopeVi}</span>
+        </div>
+      )}
+      
+      {/* IF clause */}
+      {interpretation.ifAtomVi && (
+        <div className="flex items-start gap-2">
+          <span className="text-xs font-semibold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
+            Điều kiện
+          </span>
+          <span className="text-sm">{interpretation.ifAtomVi}</span>
+        </div>
+      )}
+      
+      {/* THEN atoms */}
+      <div className="space-y-2">
+        {interpretation.thenAtomsVi.map((atom, idx) => (
+          <div key={idx} className="flex items-start gap-2">
+            <span className="text-xs font-semibold bg-green-100 text-green-800 px-1.5 py-0.5 rounded">
+              Ràng buộc {idx + 1}
+            </span>
+            <span className="text-sm flex-1">{atom}</span>
+            {interpretation.editableAtomIds[idx] && (
+              <button
+                onClick={() => onEditAtom(interpretation.editableAtomIds[idx])}
+                className="text-xs text-primary hover:underline"
+              >
+                Sửa
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      
+      {/* Notes */}
+      {interpretation.notesVi.length > 0 && (
+        <div className="bg-muted/50 rounded p-2 space-y-1">
+          <div className="text-xs font-semibold text-muted-foreground">Ghi chú:</div>
+          {interpretation.notesVi.map((note, idx) => (
+            <div key={idx} className="text-xs text-muted-foreground flex items-start gap-1">
+              <span>•</span>
+              <span>{note}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Actions */}
+      <div className="flex gap-2 pt-2">
+        <button
+          onClick={onConfirm}
+          className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+        >
+          Xác nhận
+        </button>
+        <button
+          onClick={onEditAll}
+          className="px-4 py-2 text-sm font-medium border rounded-md hover:bg-accent"
+        >
+          Sửa lại
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default ConstraintInterpretationCard;
+
+// ─── Legacy backward-compatible exports (used by TimetableApp.tsx) ─────
 
 import { useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
@@ -25,25 +118,27 @@ export type InterpretationCandidate = {
   description: string;
 };
 
-export type ConstraintInterpretationCardProps = {
-  draft: ParsedConstraintDraft;
-  candidates: InterpretationCandidate[];
-  onConfirm: (spec: ConstraintSpec) => void;
-  onEdit: (spec: ConstraintSpec, editedPredicate?: string) => void;
-  onDismiss: () => void;
-  className?: string;
-};
-
 const MAX_CANDIDATES = 3;
 
-export function ConstraintInterpretationCard({
+/**
+ * Legacy multi-candidate interpretation card (used by TimetableApp's
+ * AmbiguousConstraintsSection). Kept for backward compatibility.
+ */
+export function ConstraintInterpretationCardLegacy({
   draft,
   candidates,
   onConfirm,
   onEdit,
   onDismiss,
   className,
-}: ConstraintInterpretationCardProps) {
+}: {
+  draft: ParsedConstraintDraft;
+  candidates: InterpretationCandidate[];
+  onConfirm: (spec: ConstraintSpec) => void;
+  onEdit: (spec: ConstraintSpec, editedPredicate?: string) => void;
+  onDismiss: () => void;
+  className?: string;
+}) {
   // Collapse to ≤3 candidates silently.
   const visibleCandidates = candidates.slice(0, MAX_CANDIDATES);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -222,5 +317,3 @@ export function ConstraintInterpretationCard({
     </div>
   );
 }
-
-export default ConstraintInterpretationCard;

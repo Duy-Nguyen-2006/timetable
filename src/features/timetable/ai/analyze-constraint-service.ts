@@ -36,6 +36,8 @@ import { normalizeConstraintText, extractFirstNumber, extractPeriodNumber, extra
 import { retrieveTopK, buildTopKPromptSection, type ConstraintResolverHints } from './constraint-retriever';
 import { evaluateNegativeGuardForSpecs } from './negative-guard';
 import { analyzeSemanticDirection } from './semantic-direction';
+import type { ConstraintSegment } from './segment-types';
+import { buildSegmentPrompt } from './segment-prompt';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -719,4 +721,55 @@ export function buildSpecsFromAnalyzeResult(
   }
 
   return [];
+}
+
+// ─── Segment Constraint (LLM Lượt-1) ──────────────────────────────────
+
+export async function segmentConstraint(
+  rawText: string,
+  config: AIProviderConfig,
+  illustrationSpans?: string[]
+): Promise<ConstraintSegment> {
+  const { system, user } = buildSegmentPrompt(rawText, illustrationSpans);
+  const response = await invokeAnalyzeChat(config, [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ]);
+  
+  const content = response.content?.trim() ?? '';
+  if (!content) {
+    // Fallback: return a simple segment with the raw text
+    return {
+      normalizedVi: rawText,
+      shape: 'simple',
+      atoms: [rawText],
+      droppedIllustrations: [],
+    };
+  }
+  
+  try {
+    const parsed = parseModelJson(content);
+    // Validate basic shape
+    if (parsed && typeof parsed === 'object') {
+      const seg = parsed as Record<string, unknown>;
+      const shape = seg.shape === 'if_then' ? 'if_then' : 'simple';
+      return {
+        normalizedVi: typeof seg.normalizedVi === 'string' ? seg.normalizedVi : rawText,
+        scope: seg.scope ?? undefined,
+        shape,
+        ifClause: shape === 'if_then' && typeof seg.ifClause === 'string' ? seg.ifClause : undefined,
+        atoms: Array.isArray(seg.atoms) ? seg.atoms.filter((a: unknown) => typeof a === 'string') : [rawText],
+        droppedIllustrations: Array.isArray(seg.droppedIllustrations) ? seg.droppedIllustrations.filter((a: unknown) => typeof a === 'string') : [],
+      };
+    }
+  } catch {
+    // parse failed, fallback
+  }
+  
+  return {
+    normalizedVi: rawText,
+    shape: /nếu.*thì|neu.*thi/iu.test(rawText) ? 'if_then' : 'simple',
+    atoms: [rawText],
+    droppedIllustrations: [],
+  };
 }
