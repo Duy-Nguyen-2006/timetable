@@ -12,61 +12,12 @@ and protects the core path from regressions.
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SKELETON = ROOT / "templates" / "solver_skeleton.py"
-FIXTURES = ROOT.parent / "tests" / "fixtures" / "solver"
+from skeleton_runner import run_skeleton as _run_skeleton
 
-
-def _run_skeleton(workspace: Path, input_payload: dict, custom_body: str = "pass") -> dict:
-    """Execute solver_skeleton.py in `workspace` and return parsed result.json."""
-    workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / "input.json").write_text(json.dumps(input_payload), encoding="utf-8")
-
-    # Inject custom_body at the AI_FILL_HERE marker instead of relying on a
-    # real LLM to generate code. We do this by string-replacement rather than
-    # importing the module so the test exercises the same code path as the
-    # bundled executor.
-    skeleton = SKELETON.read_text(encoding="utf-8")
-    marker_line = None
-    for line in skeleton.splitlines():
-        if line.strip() == "# <<< AI_FILL_HERE >>>":
-            marker_line = line
-            break
-    if marker_line is None:
-        raise AssertionError("AI_FILL_HERE marker not found in solver_skeleton.py")
-    indent = marker_line[: len(marker_line) - len(marker_line.lstrip())]
-    injected_body = "\n".join(indent + ln if ln.strip() else "" for ln in custom_body.splitlines())
-    solver_src = skeleton.replace(marker_line, injected_body)
-    (workspace / "solver.py").write_text(solver_src, encoding="utf-8")
-
-    env = os.environ.copy()
-    env.setdefault("PYTHONHASHSEED", "0")
-    completed = subprocess.run(
-        [sys.executable, "solver.py"],
-        cwd=str(workspace),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if completed.returncode != 0 and completed.returncode is not None:
-        # Treat non-zero exit as a test failure with the stderr surfaced.
-        raise AssertionError(
-            f"solver exited with {completed.returncode}\n"
-            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-        )
-    result_path = workspace / "result.json"
-    if not result_path.exists():
-        raise AssertionError(
-            f"solver did not write result.json\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-        )
-    return json.loads(result_path.read_text(encoding="utf-8"))
+FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "solver"
 
 
 def test_tiny_dataset_solves_to_optimal_with_no_llm() -> None:

@@ -12,16 +12,14 @@ Run with: pytest python/tests/test_ir_parity.py -v
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-SKELETON = ROOT / "templates" / "solver_skeleton.py"
+from skeleton_runner import ROOT, run_skeleton
+
 TESTS_DIR = ROOT / "tests"
 FIXTURES = TESTS_DIR.parent / "tests" / "fixtures" / "solver"
 
@@ -31,39 +29,7 @@ def _run_skeleton(
     input_payload: dict,
     custom_body: str = "pass",
 ) -> dict:
-    workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / "input.json").write_text(json.dumps(input_payload), encoding="utf-8")
-    skeleton = SKELETON.read_text(encoding="utf-8")
-    marker_line = None
-    for line in skeleton.splitlines():
-        if line.strip() == "# <<< AI_FILL_HERE >>>":
-            marker_line = line
-            break
-    if marker_line is None:
-        raise AssertionError("AI_FILL_HERE marker not found")
-    indent = marker_line[: len(marker_line) - len(marker_line.lstrip())]
-    injected_body = "\n".join(
-        indent + ln if ln.strip() else "" for ln in custom_body.splitlines()
-    )
-    solver_src = skeleton.replace(marker_line, injected_body)
-    (workspace / "solver.py").write_text(solver_src, encoding="utf-8")
-    env = os.environ.copy()
-    env.setdefault("PYTHONHASHSEED", "0")
-    env["TT_DETERMINISTIC"] = "1"
-    completed = subprocess.run(
-        [sys.executable, "solver.py"],
-        cwd=str(workspace),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if completed.returncode != 0 and completed.returncode is not None:
-        raise AssertionError(
-            f"solver exited {completed.returncode}\n"
-            f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-        )
-    return json.loads((workspace / "result.json").read_text(encoding="utf-8"))
+    return run_skeleton(workspace, input_payload, custom_body, deterministic=True)
 
 
 def _eval_ir_on_schedule(
