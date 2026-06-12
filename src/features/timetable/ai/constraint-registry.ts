@@ -115,6 +115,10 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'teacher_count_relative', label: 'Teacher count relative', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'op', 'value'] },
   { kind: 'teacher_total_periods', label: 'Teacher total periods', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'op', 'value'] },
   { kind: 'teacher_argmax_weekly', label: 'Teacher argmax weekly', group: 'teacher', hasChecker: true, requiredParams: ['teacher'] },
+  // Phase 3 quick wins: order/distance between 2 teachers (nhóm 6).
+  { kind: 'teacher_pair_period_order', label: 'Teacher pair period order', group: 'teacher', hasChecker: true, requiredParams: ['teacherA', 'teacherB', 'relation', 'minGap'] },
+  { kind: 'teacher_pair_not_adjacent', label: 'Teacher pair not adjacent', group: 'teacher', hasChecker: true, requiredParams: ['teacherA', 'teacherB'] },
+  { kind: 'teacher_pair_day_distance', label: 'Teacher pair day distance', group: 'teacher', hasChecker: true, requiredParams: ['teacherA', 'teacherB', 'direction', 'distance'] },
   { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: [] },
 ];
 
@@ -263,6 +267,10 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
   'teacher_count_relative',
   'teacher_total_periods',
   'teacher_argmax_weekly',
+  // Phase 3 quick wins: order/distance between 2 teachers (nhóm 6).
+  'teacher_pair_period_order',
+  'teacher_pair_not_adjacent',
+  'teacher_pair_day_distance',
 ] as const satisfies readonly ConstraintKind[];
 
 export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);

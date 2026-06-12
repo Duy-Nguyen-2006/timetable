@@ -48,6 +48,10 @@ export type ParsedConstraint =
   | { kind: 'teacher_count_relative'; teacherLabels: string[]; otherTeacherLabels: string[]; op: 'gt' | 'lt' | 'eq' | 'gte' | 'lte' | 'pct' | 'factor'; value: number }
   | { kind: 'teacher_total_periods'; teacherLabels: string[]; op: 'min' | 'max' | 'exact'; value: number }
   | { kind: 'teacher_argmax_weekly'; teacherLabels: string[] }
+  // Phase 3 quick wins: order/distance pair constraints (nhóm 6).
+  | { kind: 'teacher_pair_period_order'; teacherALabels: string[]; teacherBLabels: string[]; relation: 'before' | 'after' | 'adjacent_before' | 'adjacent_after'; minGap: number }
+  | { kind: 'teacher_pair_not_adjacent'; teacherALabels: string[]; teacherBLabels: string[] }
+  | { kind: 'teacher_pair_day_distance'; teacherALabels: string[]; teacherBLabels: string[]; direction: 'before' | 'after' | 'either'; distance: number }
   | { kind: 'teacher_max_gaps'; teacherLabels: string[]; maxGaps: number }
   | { kind: 'teacher_min_consecutive'; teacherLabels: string[]; minConsecutive: number }
   | { kind: 'subject_min_gap_days'; subjectLabels: string[]; minGapDays: number; classFilter?: string[] }
@@ -698,6 +702,73 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     !/(và|va|,)/iu.test(raw)
   ) {
     return { kind: 'teacher_argmax_weekly', teacherLabels: teachers };
+  }
+
+  // ─── Phase 3 quick wins: order/distance pair constraints (nhóm 6) ─────
+
+  // teacher_pair_day_distance: "A dạy cách B đúng N ngày" / "A dạy trước B đúng N ngày" / "A dạy sau B đúng N ngày"
+  // Also handles "A dạy trước B đúng 1 ngày" (no "cách" keyword).
+  if (teachers.length >= 2 && /(ngày|ngay)/iu.test(raw)) {
+    const exactMatch = raw.match(/(?:đúng|dung|chính\s*xác|chinh\s*xac|=\s*)\s*(\d+)\s*(?:ngày|ngay)/iu);
+    if (exactMatch) {
+      const [primary, other] = teachers;
+      const distance = Number(exactMatch[1]);
+      // Direction: "trước" / "sau" / unspecified (either)
+      let direction: 'before' | 'after' | 'either' = 'either';
+      const hasTruoc = /(trước|truoc)/iu.test(raw);
+      const hasSau = /\bsau\b/iu.test(raw);
+      if (hasTruoc && !hasSau) direction = 'before';
+      else if (hasSau && !hasTruoc) direction = 'after';
+      // If both trước and sau present, default to 'before' (first wins).
+      return { kind: 'teacher_pair_day_distance', teacherALabels: [primary], teacherBLabels: [other], direction, distance };
+    }
+  }
+
+  // teacher_pair_not_adjacent: MUST be checked BEFORE teacher_pair_period_order
+  // because "không dạy ngay trước hoặc ngay sau" can be matched by the "ngay sau"
+  // pattern in period_order (which would mis-classify it as adjacent_after).
+  if (teachers.length >= 2) {
+    const mentionsNotAdjacent =
+      /(không|khong)\s*(?:dạy|day)\s*liên\s*tiếp|lien\s*tiep/iu.test(raw) ||
+      /(không|khong)\s*(?:dạy|day)\s*liền\s*kề|lien\s*ke/iu.test(raw) ||
+      /(không|khong)\s*(?:dạy|day)\s*ngay\s*trước|ngay\s*truoc.*ngay\s*sau/iu.test(raw) ||
+      /(không|khong)\s*(?:dạy|day)\s*ngay\s*sau|ngay\s*truoc.*ngay\s*sau/iu.test(raw) ||
+      /(không|khong)\s*(?:dạy|day)\s*ngay\s*trước.*hoặc.*ngay\s*sau|ngay\s*truoc.*hoac.*ngay\s*sau/iu.test(raw) ||
+      /(không|khong)\s*(?:dạy|day)\s*ngay\s*sau.*hoặc.*ngay\s*trước|ngay\s*sau.*hoac.*ngay\s*truoc/iu.test(raw) ||
+      /(các|cac)\s*tiết\s*liên\s*tiếp|cac\s*tiet\s*lien\s*tiep/iu.test(raw);
+
+    if (mentionsNotAdjacent) {
+      const [primary, other] = teachers;
+      return { kind: 'teacher_pair_not_adjacent', teacherALabels: [primary], teacherBLabels: [other] };
+    }
+  }
+
+  // teacher_pair_period_order: "A dạy trước/sau B [ít nhất N] tiết" / "A dạy ngay trước/sau B"
+  if (teachers.length >= 2) {
+    const [primary, other] = teachers;
+    // Detect "ngay" / "liền" / "liên tiếp" / "kế tiếp" → adjacent
+    const isAdjacent = /(ngay\s*(?:sau|trước|truoc)|ngay\b|liền\s*(?:kề|ke)|liền\b|lien\s*ke|liên\s*tiếp|lien\s*tiep|kế\s*tiếp|ke\s*tiep|adjacent)/iu.test(raw);
+
+    // Pattern: "A dạy trước B" / "A dạy sau B" / "A phải dạy trước B" / "A dạy ... trước B" / "A dạy ... sau B"
+    // Allow optional "ngay"/other adverbs between "dạy" and "trước/sau".
+    const beforeMatch = /(?:dạy|day)\s+(?:[a-zà-ỹ]+\s+)*?(?:trước|truoc)\b/iu.test(raw)
+                        || /\btrước\s+(?:thầy|cô|giáo\s*viên|gv|teacher\s+)/iu.test(raw);
+    const afterMatch = /(?:dạy|day)\s+(?:[a-zà-ỹ]+\s+)*?sau\b/iu.test(raw)
+                       || /\bsau\s+(?:thầy|cô|giáo\s*viên|gv|teacher\s+)/iu.test(raw);
+
+    if (isAdjacent && (afterMatch || beforeMatch)) {
+      // Adjacent order: ngay sau / ngay trước
+      const relation: 'adjacent_before' | 'adjacent_after' = afterMatch ? 'adjacent_after' : 'adjacent_before';
+      return { kind: 'teacher_pair_period_order', teacherALabels: [primary], teacherBLabels: [other], relation, minGap: 1 };
+    }
+
+    if (beforeMatch || afterMatch) {
+      // "A dạy trước/sau B [ít nhất N tiết]"
+      const minGapMatch = raw.match(/(?:ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|>=?|≥)\s*(\d+)\s*(?:tiết|tiet)?/iu);
+      const minGap = minGapMatch ? Number(minGapMatch[1]) : 1;
+      const relation: 'before' | 'after' = afterMatch ? 'after' : 'before';
+      return { kind: 'teacher_pair_period_order', teacherALabels: [primary], teacherBLabels: [other], relation, minGap };
+    }
   }
 
   // teacher_allow_only_days (range): "Minh dạy từ thứ 2 đến thứ 5" → expand range and emit allow-only.

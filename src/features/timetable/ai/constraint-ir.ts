@@ -113,6 +113,14 @@ const AtomSchema = z.union([
 const IntExprSchema: z.ZodType<IntExpr> = z.lazy(() =>
   z.union([
     z.number().int(),
+    // Phase 3: reference a forall/exists variable name in the IR env.
+    // The compiler and evaluator resolve this against the current
+    // `env` (a dict mapping var name → current value). For example,
+    // { var: 'p1' } inside a forall: { var: 'p1', in: 'periods' }
+    // body returns the value of p1 in the current iteration.
+    z.object({
+      var: z.string(),
+    }),
     z.object({
       count: z.object({
         var: z.string(),
@@ -276,6 +284,12 @@ export type Atom =
 
 export type IntExpr =
   | number
+  // Phase 3: reference a forall/exists variable name in the IR env.
+  // The compiler and evaluator resolve this against the current
+  // `env` (a dict mapping var name → current value). For example,
+  // { var: 'p1' } inside a forall: { var: 'p1', in: 'periods' }
+  // body returns the value of p1 in the current iteration.
+  | { var: string }
   | { count: { var: string; in: Domain; body: BoolExpr } }
   | { sum: IntExpr[] }
   | { scale: { factor: number; of: IntExpr } };

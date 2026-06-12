@@ -502,6 +502,13 @@ def compile_int_expr(
         return int_expr
 
     if isinstance(int_expr, dict):
+        # Phase 3: { var: "<name>" } — resolve against current env.
+        if "var" in int_expr and len(int_expr) == 1:
+            name = int_expr["var"]
+            if name in env and isinstance(env[name], (int, float)):
+                return int(env[name])
+            return 0  # fail-safe: unknown var → 0 (constraint becomes vacuous)
+
         if "count" in int_expr:
             c = int_expr["count"]
             var = c["var"]

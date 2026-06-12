@@ -92,6 +92,10 @@ export type ConstraintKind =
   | 'teacher_count_relative'
   | 'teacher_total_periods'
   | 'teacher_argmax_weekly'
+  // Phase 3 quick wins: order/distance between 2 teachers (nhóm 6).
+  | 'teacher_pair_period_order'
+  | 'teacher_pair_not_adjacent'
+  | 'teacher_pair_day_distance'
   | 'custom_dsl';
 
 export type ConditionExpr =

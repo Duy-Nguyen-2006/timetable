@@ -387,9 +387,19 @@ def eval_int_expr(
 ) -> int:
     """Evaluate an IntExpr to an integer."""
     if isinstance(int_expr, int):
-        return int_expr
+        return int(int_expr)
 
     if isinstance(int_expr, dict):
+        # Phase 3: { var: "<name>" } — resolve against current env.
+        if "var" in int_expr and len(int_expr) == 1:
+            name = int_expr["var"]
+            if name in env:
+                try:
+                    return int(env[name])
+                except (TypeError, ValueError):
+                    return 0
+            return 0  # fail-safe: unknown var → 0
+
         if "count" in int_expr:
             c = int_expr["count"]
             var = c["var"]

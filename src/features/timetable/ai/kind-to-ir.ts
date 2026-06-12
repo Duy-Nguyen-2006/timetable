@@ -25,7 +25,7 @@
  */
 
 import type { ConditionExpr, ConstraintSpec } from './constraint-spec';
-import type { BoolExpr, ConstraintIR, Domain } from './constraint-ir';
+import type { BoolExpr, ConstraintIR, Domain, IntExpr } from './constraint-ir';
 import { humanizeConstraintSpec } from './constraint-humanizer';
 
 function buildTeacherAllowedPeriodsExpr(teacher: string, periods: number[]): BoolExpr {
@@ -543,6 +543,166 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
                   },
                 },
               ],
+            },
+          },
+        },
+      };
+    }
+    // ─── Phase 3 quick wins: order/distance pair constraints (nhóm 6) ─────
+    case 'teacher_pair_period_order': {
+      // Encoded as: forall d, p1, p2:
+      //   if teaches(A, d, p1) AND teaches(B, d, p2):
+      //     compare p1, p2 per relation
+      //
+      // relation='before', minGap=N:           p1 + N <= p2
+      // relation='after',  minGap=N:           p2 + N <= p1
+      // relation='adjacent_before' (minGap=1): p1 + 1 == p2
+      // relation='adjacent_after'  (minGap=1): p2 + 1 == p1
+      const teacherA = String(p.teacherA ?? '');
+      const teacherB = String(p.teacherB ?? '');
+      const relation = String(p.relation ?? 'before') as
+        | 'before' | 'after' | 'adjacent_before' | 'adjacent_after';
+      const minGap = Number(p.minGap ?? 1);
+      let compareOp: '<=' | '<' | '==' | '!=' | '>=' | '>';
+      let lhs: IntExpr;
+      let rhs: IntExpr;
+      if (relation === 'before') {
+        compareOp = '>=';
+        lhs = { sum: [{ var: 'p1' }, minGap] };
+        rhs = { var: 'p2' };
+      } else if (relation === 'after') {
+        compareOp = '>=';
+        lhs = { sum: [{ var: 'p2' }, minGap] };
+        rhs = { var: 'p1' };
+      } else if (relation === 'adjacent_before') {
+        compareOp = '==';
+        lhs = { sum: [{ var: 'p1' }, 1] };
+        rhs = { var: 'p2' };
+      } else {
+        // adjacent_after
+        compareOp = '==';
+        lhs = { sum: [{ var: 'p2' }, 1] };
+        rhs = { var: 'p1' };
+      }
+      return {
+        ...base,
+        expr: {
+          forall: {
+            var: 'd',
+            in: makeDaysDomain(),
+            body: {
+              forall: {
+                var: 'p1',
+                in: makePeriodsDomain(),
+                body: {
+                  forall: {
+                    var: 'p2',
+                    in: makePeriodsDomain(),
+                    body: {
+                      implies: [
+                        {
+                          and: [
+                            { teaches: { teacher: teacherA, day: '$$D$$', period: '$$P1$$' } },
+                            { teaches: { teacher: teacherB, day: '$$D$$', period: '$$P2$$' } },
+                          ],
+                        },
+                        { compare: { op: compareOp, lhs, rhs } },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+    }
+    case 'teacher_pair_not_adjacent': {
+      // Forall d, p1, p2: if both teach on day d, |p1 - p2| != 1.
+      // Encoded as: NOT(p1 + 1 == p2) AND NOT(p2 + 1 == p1).
+      const teacherA = String(p.teacherA ?? '');
+      const teacherB = String(p.teacherB ?? '');
+      return {
+        ...base,
+        expr: {
+          forall: {
+            var: 'd',
+            in: makeDaysDomain(),
+            body: {
+              forall: {
+                var: 'p1',
+                in: makePeriodsDomain(),
+                body: {
+                  forall: {
+                    var: 'p2',
+                    in: makePeriodsDomain(),
+                    body: {
+                      implies: [
+                        {
+                          and: [
+                            { teaches: { teacher: teacherA, day: '$$D$$', period: '$$P1$$' } },
+                            { teaches: { teacher: teacherB, day: '$$D$$', period: '$$P2$$' } },
+                          ],
+                        },
+                        {
+                          and: [
+                            { not: { compare: { op: '==', lhs: { sum: [{ var: 'p1' }, 1] }, rhs: { var: 'p2' } } } },
+                            { not: { compare: { op: '==', lhs: { sum: [{ var: 'p2' }, 1] }, rhs: { var: 'p1' } } } },
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+    }
+    case 'teacher_pair_day_distance': {
+      // There exists a pair of days (d1, d2) such that A teaches on d1, B teaches on d2,
+      // and the day distance equals `distance` (signed per direction).
+      const teacherA = String(p.teacherA ?? '');
+      const teacherB = String(p.teacherB ?? '');
+      const direction = String(p.direction ?? 'either') as 'before' | 'after' | 'either';
+      const distance = Number(p.distance ?? 1);
+      // Build the day_compare body based on direction.
+      let dayCompare: BoolExpr;
+      if (direction === 'before') {
+        // d1 + distance == d2  (A teaches d1, B teaches d2, d2 is later)
+        dayCompare = { compare: { op: '==', lhs: { sum: [{ var: 'd1' }, distance] }, rhs: { var: 'd2' } } };
+      } else if (direction === 'after') {
+        // d2 + distance == d1  (A teaches d1, B teaches d2, d1 is later)
+        dayCompare = { compare: { op: '==', lhs: { sum: [{ var: 'd2' }, distance] }, rhs: { var: 'd1' } } };
+      } else {
+        // 'either' — exists d1, d2 with |d1 - d2| == distance.
+        // Encoded as OR of the two directional cases.
+        dayCompare = {
+          or: [
+            { compare: { op: '==', lhs: { sum: [{ var: 'd1' }, distance] }, rhs: { var: 'd2' } } },
+            { compare: { op: '==', lhs: { sum: [{ var: 'd2' }, distance] }, rhs: { var: 'd1' } } },
+          ],
+        };
+      }
+      return {
+        ...base,
+        expr: {
+          exists: {
+            var: 'd1',
+            in: makeDaysDomain(),
+            body: {
+              exists: {
+                var: 'd2',
+                in: makeDaysDomain(),
+                body: {
+                  and: [
+                    { teachesOnDay: { teacher: teacherA, day: '$$D1$$' } },
+                    { teachesOnDay: { teacher: teacherB, day: '$$D2$$' } },
+                    dayCompare,
+                  ],
+                },
+              },
             },
           },
         },

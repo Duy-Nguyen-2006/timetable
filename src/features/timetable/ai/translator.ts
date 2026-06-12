@@ -124,6 +124,9 @@ const constraintSpecSchema = z.object({
     'teacher_count_relative',
     'teacher_total_periods',
     'teacher_argmax_weekly',
+    'teacher_pair_period_order',
+    'teacher_pair_not_adjacent',
+    'teacher_pair_day_distance',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -1073,6 +1076,62 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         severity,
         kind: 'teacher_argmax_weekly',
         params: { teacher: parsed.teacherLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+
+    // ─── Phase 3 quick wins: order/distance pair constraints (nhóm 6) ─────
+    if (
+      parsed.kind === 'teacher_pair_period_order' &&
+      parsed.teacherALabels[0] &&
+      parsed.teacherBLabels[0]
+    ) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_pair_period_order',
+        params: {
+          teacherA: parsed.teacherALabels[0],
+          teacherB: parsed.teacherBLabels[0],
+          relation: parsed.relation,
+          minGap: parsed.minGap,
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (
+      parsed.kind === 'teacher_pair_not_adjacent' &&
+      parsed.teacherALabels[0] &&
+      parsed.teacherBLabels[0]
+    ) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_pair_not_adjacent',
+        params: {
+          teacherA: parsed.teacherALabels[0],
+          teacherB: parsed.teacherBLabels[0],
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (
+      parsed.kind === 'teacher_pair_day_distance' &&
+      parsed.teacherALabels[0] &&
+      parsed.teacherBLabels[0]
+    ) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_pair_day_distance',
+        params: {
+          teacherA: parsed.teacherALabels[0],
+          teacherB: parsed.teacherBLabels[0],
+          direction: parsed.direction,
+          distance: parsed.distance,
+        },
       } satisfies ConstraintSpec;
     }
 

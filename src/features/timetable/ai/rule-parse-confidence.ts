@@ -175,6 +175,18 @@ export function inferRuleParseConfidence(
     return { specs, confidence: 'high', issues };
   }
 
+  // Phase 3 quick wins: order/distance pair constraints (nhóm 6). Parser fully
+  // resolves teacher_pair_period_order, teacher_pair_not_adjacent,
+  // teacher_pair_day_distance from common Vietnamese patterns, so high
+  // confidence is appropriate.
+  if (specs.every((s) =>
+    s.kind === 'teacher_pair_period_order' ||
+    s.kind === 'teacher_pair_not_adjacent' ||
+    s.kind === 'teacher_pair_day_distance'
+  )) {
+    return { specs, confidence: 'high', issues };
+  }
+
   if (specs.every((s) => s.kind === 'subject_max_consecutive')) {
     return {
       specs,

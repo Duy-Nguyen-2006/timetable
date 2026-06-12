@@ -1590,6 +1590,170 @@ const checkTeacherArgmaxWeekly: CheckFn = (spec, schedule) => {
   return [];
 };
 
+// ─── Phase 3 quick wins: order/distance pair constraints (nhóm 6) ─────────
+
+/**
+ * teacher_pair_period_order: on every day, when both teachers teach, the period
+ * ordering between teacherA and teacherB must satisfy the relation.
+ *
+ * Relations:
+ *   - 'before'           → period_A + minGap <= period_B
+ *   - 'after'            → period_B + minGap <= period_A
+ *   - 'adjacent_before'  → period_A + 1 == period_B
+ *   - 'adjacent_after'   → period_B + 1 == period_A
+ *
+ * If one teacher doesn't teach on a day, the constraint is vacuous.
+ */
+const checkTeacherPairPeriodOrder: CheckFn = (spec, schedule) => {
+  const teacherA = String(spec.params.teacherA ?? '');
+  const teacherB = String(spec.params.teacherB ?? '');
+  const relation = String(spec.params.relation ?? 'before') as
+    | 'before' | 'after' | 'adjacent_before' | 'adjacent_after';
+  const minGap = Number(spec.params.minGap ?? 1);
+  if (!teacherA || !teacherB) return [];
+
+  // Group entries by day, then by teacher.
+  const periodByDay: Map<string, Map<string, Set<number>>> = new Map();
+  for (const e of schedule) {
+    if (e.teacher !== teacherA && e.teacher !== teacherB) continue;
+    const period = toPeriod(e.period);
+    if (period === null) continue;
+    const slot = e.teacher === teacherA ? 'A' : 'B';
+    if (!periodByDay.has(e.day)) periodByDay.set(e.day, new Map());
+    const inner = periodByDay.get(e.day)!;
+    if (!inner.has(slot)) inner.set(slot, new Set());
+    inner.get(slot)!.add(period);
+  }
+
+  // Iterate days where both teachers teach.
+  const violations: Violation[] = [];
+  for (const [day, slotMap] of periodByDay) {
+    const aPeriods = slotMap.get('A');
+    const bPeriods = slotMap.get('B');
+    if (!aPeriods || !bPeriods) continue;
+    for (const pA of aPeriods) {
+      for (const pB of bPeriods) {
+        let violated = false;
+        if (relation === 'before') violated = pA + minGap > pB;
+        else if (relation === 'after') violated = pB + minGap > pA;
+        else if (relation === 'adjacent_before') violated = pA + 1 !== pB;
+        else if (relation === 'adjacent_after') violated = pB + 1 !== pA;
+        if (violated) {
+          const expectedLabel =
+            relation === 'before' ? `${teacherA} dạy trước ${teacherB} ít nhất ${minGap} tiết`
+            : relation === 'after' ? `${teacherA} dạy sau ${teacherB} ít nhất ${minGap} tiết`
+            : relation === 'adjacent_before' ? `${teacherA} dạy ngay trước ${teacherB}`
+            : `${teacherA} dạy ngay sau ${teacherB}`;
+          const entries = schedule.filter((e) => e.day === day && (e.teacher === teacherA || e.teacher === teacherB));
+          violations.push({
+            constraintId: spec.id,
+            kind: spec.kind,
+            message: `${expectedLabel} trong cùng ngày ${day}, thực tế ${teacherA} tiết ${pA}, ${teacherB} tiết ${pB}.`,
+            offendingEntries: entries,
+          });
+        }
+      }
+    }
+  }
+  return violations;
+};
+
+/**
+ * teacher_pair_not_adjacent: on every day, when both teachers teach,
+ * their periods must not be adjacent (|period_A - period_B| != 1).
+ */
+const checkTeacherPairNotAdjacent: CheckFn = (spec, schedule) => {
+  const teacherA = String(spec.params.teacherA ?? '');
+  const teacherB = String(spec.params.teacherB ?? '');
+  if (!teacherA || !teacherB) return [];
+
+  const periodByDay: Map<string, Map<string, Set<number>>> = new Map();
+  for (const e of schedule) {
+    if (e.teacher !== teacherA && e.teacher !== teacherB) continue;
+    const period = toPeriod(e.period);
+    if (period === null) continue;
+    if (!periodByDay.has(e.day)) periodByDay.set(e.day, new Map());
+    const inner = periodByDay.get(e.day)!;
+    const slot = e.teacher === teacherA ? 'A' : 'B';
+    if (!inner.has(slot)) inner.set(slot, new Set());
+    inner.get(slot)!.add(period);
+  }
+
+  const violations: Violation[] = [];
+  for (const [day, slotMap] of periodByDay) {
+    const aPeriods = slotMap.get('A');
+    const bPeriods = slotMap.get('B');
+    if (!aPeriods || !bPeriods) continue;
+    for (const pA of aPeriods) {
+      for (const pB of bPeriods) {
+        if (Math.abs(pA - pB) === 1) {
+          const entries = schedule.filter((e) => e.day === day && (e.teacher === teacherA || e.teacher === teacherB));
+          violations.push({
+            constraintId: spec.id,
+            kind: spec.kind,
+            message: `${teacherA} và ${teacherB} không được dạy liên tiếp trong cùng ngày ${day}, thực tế ${teacherA} tiết ${pA}, ${teacherB} tiết ${pB}.`,
+            offendingEntries: entries,
+          });
+        }
+      }
+    }
+  }
+  return violations;
+};
+
+/**
+ * teacher_pair_day_distance: there must exist a pair of days where teacherA
+ * teaches on day dA and teacherB teaches on day dB, with |dA - dB| == distance
+ * (or dB - dA == distance for 'before', or dA - dB == distance for 'after').
+ */
+const checkTeacherPairDayDistance: CheckFn = (spec, schedule) => {
+  const teacherA = String(spec.params.teacherA ?? '');
+  const teacherB = String(spec.params.teacherB ?? '');
+  const direction = String(spec.params.direction ?? 'either') as 'before' | 'after' | 'either';
+  const distance = Number(spec.params.distance ?? 1);
+  if (!teacherA || !teacherB) return [];
+
+  // Collect days when each teacher teaches.
+  const daysA = new Set<string>();
+  const daysB = new Set<string>();
+  for (const e of schedule) {
+    if (e.teacher === teacherA) daysA.add(e.day);
+    if (e.teacher === teacherB) daysB.add(e.day);
+  }
+  if (daysA.size === 0 || daysB.size === 0) return [];
+
+  // Get ordered list of day ids from input (use any from schedule).
+  const allDays = Array.from(new Set(schedule.map((e) => e.day)));
+  const dayIndex = new Map<string, number>();
+  allDays.forEach((d, i) => dayIndex.set(d, i));
+
+  let foundValidPair = false;
+  outer: for (const dA of daysA) {
+    for (const dB of daysB) {
+      const iA = dayIndex.get(dA) ?? -1;
+      const iB = dayIndex.get(dB) ?? -1;
+      if (iA < 0 || iB < 0 || iA === iB) continue;
+      const diff = iB - iA;
+      if (direction === 'before' && diff === distance) { foundValidPair = true; break outer; }
+      if (direction === 'after' && diff === -distance) { foundValidPair = true; break outer; }
+      if (direction === 'either' && Math.abs(diff) === distance) { foundValidPair = true; break outer; }
+    }
+  }
+  if (!foundValidPair) {
+    const entries = schedule.filter((e) => e.teacher === teacherA || e.teacher === teacherB);
+    const dirLabel = direction === 'before' ? `trước ${teacherB} đúng ${distance} ngày`
+                  : direction === 'after' ? `sau ${teacherB} đúng ${distance} ngày`
+                  : `cách ${teacherB} đúng ${distance} ngày`;
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `${teacherA} phải dạy ${dirLabel}, thực tế không tìm thấy cặp ngày phù hợp.`,
+      offendingEntries: entries,
+    }];
+  }
+  return [];
+};
+
 const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
@@ -2016,6 +2180,10 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_count_relative: checkTeacherCountRelative,
   teacher_total_periods: checkTeacherTotalPeriods,
   teacher_argmax_weekly: checkTeacherArgmaxWeekly,
+  // Phase 3 quick wins: order/distance pair constraints (nhóm 6).
+  teacher_pair_period_order: checkTeacherPairPeriodOrder,
+  teacher_pair_not_adjacent: checkTeacherPairNotAdjacent,
+  teacher_pair_day_distance: checkTeacherPairDayDistance,
 };
 
 export function validateSchedule(

@@ -204,6 +204,17 @@ IR_CONSTRAINT_SCHEMA = {
         "IntExpr": {
             "anyOf": [
                 {"type": "integer"},
+                # Phase 3: { var: "<name>" } — reference a forall/exists
+                # variable name in the IR env. Resolved at compile/eval time
+                # against the current env (a dict mapping var name → value).
+                {
+                    "type": "object",
+                    "required": ["var"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "var": {"type": "string"},
+                    },
+                },
                 {
                     "type": "object",
                     "required": ["count"],
