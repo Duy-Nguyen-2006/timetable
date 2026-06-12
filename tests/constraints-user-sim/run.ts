@@ -25,7 +25,7 @@ type TestResult = {
   ruleSpecsCount: number;
   ruleHasCustomDsl: boolean;
   ruleSpecs: any[];
-  finalSource: 'rule' | 'translator' | 'rule+translator-fallback';
+  finalSource: string;
   finalConfidence: string;
   finalSpecsCount: number;
   finalSpecs: any[];

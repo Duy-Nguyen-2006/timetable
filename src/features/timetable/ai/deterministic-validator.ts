@@ -16,7 +16,7 @@ type CheckFn = (
   ctx: DeterministicValidationContext
 ) => Violation[];
 
-const checkTeacherBlockDay: CheckFn = (spec, schedule) => {
+const checkTeacherBlockDay: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
   const offendingEntries = schedule.filter((entry) => entry.teacher === teacher && entry.day === day);
@@ -31,7 +31,7 @@ const checkTeacherBlockDay: CheckFn = (spec, schedule) => {
   ];
 };
 
-const checkTeacherBlockPeriod: CheckFn = (spec, schedule) => {
+const checkTeacherBlockPeriod: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const period = Number(spec.params.period ?? NaN);
   const offendingEntries = schedule.filter(
@@ -48,7 +48,7 @@ const checkTeacherBlockPeriod: CheckFn = (spec, schedule) => {
   ];
 };
 
-const checkTeacherBlockSlot: CheckFn = (spec, schedule) => {
+const checkTeacherBlockSlot: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
   const period = Number(spec.params.period ?? NaN);
@@ -67,7 +67,7 @@ const checkTeacherBlockSlot: CheckFn = (spec, schedule) => {
   ];
 };
 
-const checkTeacherMaxPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherMaxPerDay: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const maxPerDay = Number(spec.params.maxPerDay ?? NaN);
   const violations: Violation[] = [];
@@ -91,7 +91,7 @@ const checkTeacherMaxPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherMaxConsecutive: CheckFn = (spec, schedule) => {
+const checkTeacherMaxConsecutive: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const maxConsecutive = Number(spec.params.maxConsecutive ?? NaN);
   const violations: Violation[] = [];
@@ -132,7 +132,7 @@ const checkTeacherMaxConsecutive: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectPinPeriod: CheckFn = (spec, schedule) => {
+const checkSubjectPinPeriod: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const classes = Array.isArray(spec.params.classes)
     ? spec.params.classes.map((value) => String(value))
@@ -158,7 +158,7 @@ const checkSubjectPinPeriod: CheckFn = (spec, schedule) => {
   ];
 };
 
-const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
+const checkSubjectConsecutive: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const length = Number(spec.params.length ?? 2);
   const classes = Array.isArray(spec.params.classes)
@@ -224,7 +224,7 @@ const checkSubjectConsecutive: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
+const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const subjectFilter = spec.params.subject ? String(spec.params.subject) : null;
   // maxPerDay: số tiết cùng môn tối đa/ngày. Mặc định 1 (giữ tương thích cũ),
@@ -254,7 +254,7 @@ const checkClassNoDoubleSubjectDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassSubjectsNotSameDay: CheckFn = (spec, schedule) => {
+const checkClassSubjectsNotSameDay: CheckFn = (spec, schedule, ctx) => {
   const subjects = Array.isArray(spec.params.subjects)
     ? spec.params.subjects.map((value) => String(value))
     : [];
@@ -289,7 +289,7 @@ const checkClassSubjectsNotSameDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherMaxWorkingDays: CheckFn = (spec, schedule) => {
+const checkTeacherMaxWorkingDays: CheckFn = (spec, schedule, ctx) => {
   const teacher = spec.params.teacher ? String(spec.params.teacher) : null;
   const totalDays = new Set(schedule.map((entry) => entry.day)).size;
   let maxDays: number;
@@ -320,7 +320,7 @@ const checkTeacherMaxWorkingDays: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectMaxConsecutive: CheckFn = (spec, schedule) => {
+const checkSubjectMaxConsecutive: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const parsedMax = Number(spec.params.maxConsecutive);
   const maxConsecutive = Number.isFinite(parsedMax) && parsedMax >= 1 ? parsedMax : 1;
@@ -397,7 +397,7 @@ const checkWeeklyPeriodsExact: CheckFn = (spec, schedule, ctx) => {
   ];
 };
 
-const checkPairNotSameSlot: CheckFn = (spec, schedule) => {
+const checkPairNotSameSlot: CheckFn = (spec, schedule, ctx) => {
   const teachers = Array.isArray(spec.params.teachers)
     ? spec.params.teachers.map((value) => String(value))
     : [];
@@ -468,7 +468,7 @@ const checkIfThen: CheckFn = (spec, schedule, ctx) => {
   return violations;
 };
 
-const checkSessionLimit: CheckFn = (spec, schedule) => {
+const checkSessionLimit: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const maxPeriods = Number(spec.params.maxPeriods ?? 1);
   const violations: Violation[] = [];
@@ -501,7 +501,7 @@ const checkSessionLimit: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectSessionMaxPeriods: CheckFn = (spec, schedule) => {
+const checkSubjectSessionMaxPeriods: CheckFn = (spec, schedule, ctx) => {
   const subject = spec.params.subject ? String(spec.params.subject) : null;
   const klass = spec.params.class ? String(spec.params.class) : null;
   const maxPeriods = Number(spec.params.maxPeriods ?? NaN);
@@ -543,7 +543,7 @@ const checkSubjectSessionMaxPeriods: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectGroupDailyLimit: CheckFn = (spec, schedule) => {
+const checkSubjectGroupDailyLimit: CheckFn = (spec, schedule, ctx) => {
   const groupName = String(spec.params.groupName ?? '');
   const maxPerDay = Number(spec.params.maxPerDay ?? 1);
   const targetClass = spec.params.class ? String(spec.params.class) : null;
@@ -576,7 +576,7 @@ const checkSubjectGroupDailyLimit: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassBlockDay: CheckFn = (spec, schedule) => {
+const checkClassBlockDay: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const day = String(spec.params.day ?? '');
   const offending = schedule.filter((e) => e.class === klass && e.day === day);
@@ -584,7 +584,7 @@ const checkClassBlockDay: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} không được học ${day} nhưng có ${offending.length} entry.`, offendingEntries: offending }];
 };
 
-const checkClassBlockPeriod: CheckFn = (spec, schedule) => {
+const checkClassBlockPeriod: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const period = Number(spec.params.period ?? NaN);
   const offending = schedule.filter((e) => e.class === klass && toPeriod(e.period) === period);
@@ -592,7 +592,7 @@ const checkClassBlockPeriod: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} không được học tiết ${period}.`, offendingEntries: offending }];
 };
 
-const checkClassBlockSlot: CheckFn = (spec, schedule) => {
+const checkClassBlockSlot: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const day = String(spec.params.day ?? '');
   const period = Number(spec.params.period ?? NaN);
@@ -601,7 +601,7 @@ const checkClassBlockSlot: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} không được học ${day} tiết ${period}.`, offendingEntries: offending }];
 };
 
-const checkClassMaxPerDay: CheckFn = (spec, schedule) => {
+const checkClassMaxPerDay: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const maxPerDay = Number(spec.params.maxPerDay ?? NaN);
   const violations: Violation[] = [];
@@ -618,7 +618,7 @@ const checkClassMaxPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassMinPerDay: CheckFn = (spec, schedule) => {
+const checkClassMinPerDay: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const minPerDay = Number(spec.params.minPerDay ?? NaN);
   const violations: Violation[] = [];
@@ -635,7 +635,7 @@ const checkClassMinPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassNoGaps: CheckFn = (spec, schedule) => {
+const checkClassNoGaps: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();
@@ -655,7 +655,7 @@ const checkClassNoGaps: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherMinPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherMinPerDay: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const minPerDay = Number(spec.params.minPerDay ?? NaN);
   const violations: Violation[] = [];
@@ -672,7 +672,7 @@ const checkTeacherMinPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherNoGaps: CheckFn = (spec, schedule) => {
+const checkTeacherNoGaps: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const violations: Violation[] = [];
   const byDay = new Map<string, ScheduleEntry[]>();
@@ -692,7 +692,7 @@ const checkTeacherNoGaps: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherAllowedDays: CheckFn = (spec, schedule) => {
+const checkTeacherAllowedDays: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const allowedDays = new Set((Array.isArray(spec.params.days) ? spec.params.days : []).map(String));
   const offending = schedule.filter((e) => e.teacher === teacher && !allowedDays.has(e.day));
@@ -700,7 +700,7 @@ const checkTeacherAllowedDays: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `${teacher} chỉ được dạy các ngày ${[...allowedDays].join(', ')} nhưng có entry ngoài danh sách.`, offendingEntries: offending }];
 };
 
-const checkTeacherAllowedPeriods: CheckFn = (spec, schedule) => {
+const checkTeacherAllowedPeriods: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const allowedPeriods = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
   const offending = schedule.filter((e) => {
@@ -712,7 +712,7 @@ const checkTeacherAllowedPeriods: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `${teacher} chỉ được dạy các tiết ${[...allowedPeriods].join(', ')} nhưng có entry ngoài danh sách.`, offendingEntries: offending }];
 };
 
-const checkSubjectAllowedDays: CheckFn = (spec, schedule) => {
+const checkSubjectAllowedDays: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const allowedDays = new Set((Array.isArray(spec.params.days) ? spec.params.days : []).map(String));
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -725,7 +725,7 @@ const checkSubjectAllowedDays: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Môn ${subject} chỉ được xếp các ngày ${[...allowedDays].join(', ')}.`, offendingEntries: offending }];
 };
 
-const checkSubjectMinGapDays: CheckFn = (spec, schedule) => {
+const checkSubjectMinGapDays: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const minGap = Number(spec.params.minGapDays ?? 1);
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -759,7 +759,7 @@ const checkSubjectMinGapDays: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectDailyMaxPeriods: CheckFn = (spec, schedule) => {
+const checkSubjectDailyMaxPeriods: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const maxPerDay = Number(spec.params.maxPerDay ?? NaN);
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -780,7 +780,7 @@ const checkSubjectDailyMaxPeriods: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkAssignmentPinSlot: CheckFn = (spec, schedule) => {
+const checkAssignmentPinSlot: CheckFn = (spec, schedule, ctx) => {
   const assignmentId = String(spec.params.assignmentId ?? '');
   const day = String(spec.params.day ?? '');
   const period = Number(spec.params.period ?? NaN);
@@ -792,7 +792,7 @@ const checkAssignmentPinSlot: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkAssignmentBlockSlot: CheckFn = (spec, schedule) => {
+const checkAssignmentBlockSlot: CheckFn = (spec, schedule, ctx) => {
   const assignmentId = String(spec.params.assignmentId ?? '');
   const day = String(spec.params.day ?? '');
   const period = Number(spec.params.period ?? NaN);
@@ -801,7 +801,7 @@ const checkAssignmentBlockSlot: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} không được xếp vào ${day} tiết ${period}.`, offendingEntries: offending }];
 };
 
-const checkAssignmentAllowedSlots: CheckFn = (spec, schedule) => {
+const checkAssignmentAllowedSlots: CheckFn = (spec, schedule, ctx) => {
   const assignmentId = String(spec.params.assignmentId ?? '');
   const allowedSlots = (Array.isArray(spec.params.slots) ? spec.params.slots : []) as Array<{ day: string; period: number }>;
   const slotSet = new Set(allowedSlots.map((s) => `${s.day}::${s.period}`));
@@ -813,7 +813,7 @@ const checkAssignmentAllowedSlots: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Assignment ${assignmentId} có entry ngoài các slot cho phép.`, offendingEntries: offending }];
 };
 
-const checkAssignmentSpreadDays: CheckFn = (spec, schedule) => {
+const checkAssignmentSpreadDays: CheckFn = (spec, schedule, ctx) => {
   const assignmentId = String(spec.params.assignmentId ?? '');
   const minDays = Number(spec.params.minDays ?? NaN);
   const entries = schedule.filter((e) => String(e.assignmentId ?? '') === assignmentId);
@@ -827,7 +827,7 @@ const checkAssignmentSpreadDays: CheckFn = (spec, schedule) => {
 
 // ===== NEW TEACHER CHECKERS =====
 
-const checkTeacherMinWorkingDays: CheckFn = (spec, schedule) => {
+const checkTeacherMinWorkingDays: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const minDays = Number(spec.params.minDays ?? NaN);
   if (!teacher || !Number.isFinite(minDays)) return [];
@@ -841,7 +841,7 @@ const checkTeacherMinWorkingDays: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkTeacherMaxGaps: CheckFn = (spec, schedule) => {
+const checkTeacherMaxGaps: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const maxGaps = Number(spec.params.maxGaps ?? NaN);
   if (!teacher || !Number.isFinite(maxGaps)) return [];
@@ -868,7 +868,7 @@ const checkTeacherMaxGaps: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherMinConsecutive: CheckFn = (spec, schedule) => {
+const checkTeacherMinConsecutive: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const minConsecutive = Number(spec.params.minConsecutive ?? NaN);
   if (!teacher || !Number.isFinite(minConsecutive) || minConsecutive < 1) return [];
@@ -894,7 +894,7 @@ const checkTeacherMinConsecutive: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherBalancedLoad: CheckFn = (spec, schedule) => {
+const checkTeacherBalancedLoad: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const tolerance = Number(spec.params.tolerance ?? 0);
   if (!teacher) return [];
@@ -913,7 +913,7 @@ const checkTeacherBalancedLoad: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkTeacherMaxSubjectsPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherMaxSubjectsPerDay: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const max = Number(spec.params.max ?? NaN);
   if (!teacher || !Number.isFinite(max)) return [];
@@ -934,7 +934,7 @@ const checkTeacherMaxSubjectsPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherMaxConsecutiveDays: CheckFn = (spec, schedule) => {
+const checkTeacherMaxConsecutiveDays: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const maxDays = Number(spec.params.maxDays ?? NaN);
   if (!teacher || !Number.isFinite(maxDays)) return [];
@@ -953,7 +953,7 @@ const checkTeacherMaxConsecutiveDays: CheckFn = (spec, schedule) => {
 
 // ===== NEW SUBJECT CHECKERS =====
 
-const checkSubjectBlockPeriod: CheckFn = (spec, schedule) => {
+const checkSubjectBlockPeriod: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const blocked = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -968,7 +968,7 @@ const checkSubjectBlockPeriod: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Môn ${subject} bị chặn một số tiết.`, offendingEntries: offending }];
 };
 
-const checkSubjectBlockDays: CheckFn = (spec, schedule) => {
+const checkSubjectBlockDays: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const blocked = new Set(Array.isArray(spec.params.days) ? spec.params.days.map(String) : []);
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -982,7 +982,7 @@ const checkSubjectBlockDays: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Môn ${subject} bị chặn một số ngày.`, offendingEntries: offending }];
 };
 
-const checkSubjectNotConsecutive: CheckFn = (spec, schedule) => {
+const checkSubjectNotConsecutive: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
   if (!subject) return [];
@@ -1007,7 +1007,7 @@ const checkSubjectNotConsecutive: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectMinDays: CheckFn = (spec, schedule) => {
+const checkSubjectMinDays: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const minDays = Number(spec.params.minDays ?? NaN);
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -1029,7 +1029,7 @@ const checkSubjectMinDays: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectSpreadEvenly: CheckFn = (spec, schedule) => {
+const checkSubjectSpreadEvenly: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
   if (!subject) return [];
@@ -1061,7 +1061,7 @@ const checkSubjectSpreadEvenly: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectOrderBefore: CheckFn = (spec, schedule) => {
+const checkSubjectOrderBefore: CheckFn = (spec, schedule, ctx) => {
   const subjectA = String(spec.params.subjectA ?? '');
   const subjectB = String(spec.params.subjectB ?? '');
   const scope = spec.params.scope as { class?: string; day?: string } | undefined;
@@ -1091,7 +1091,7 @@ const checkSubjectOrderBefore: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectNotAfterSubject: CheckFn = (spec, schedule) => {
+const checkSubjectNotAfterSubject: CheckFn = (spec, schedule, ctx) => {
   const subjectA = String(spec.params.subjectA ?? '');
   const subjectB = String(spec.params.subjectB ?? '');
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -1123,7 +1123,7 @@ const checkSubjectNotAfterSubject: CheckFn = (spec, schedule) => {
 
 // ===== NEW CLASS CHECKERS =====
 
-const checkClassFixedPeriod: CheckFn = (spec, schedule) => {
+const checkClassFixedPeriod: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const day = String(spec.params.day ?? '');
   const period = Number(spec.params.period ?? NaN);
@@ -1133,7 +1133,7 @@ const checkClassFixedPeriod: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} thiếu tiết cố định ${day} tiết ${period}.`, offendingEntries: [] }];
 };
 
-const checkClassAllowedDays: CheckFn = (spec, schedule) => {
+const checkClassAllowedDays: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const allowed = new Set(Array.isArray(spec.params.days) ? spec.params.days.map(String) : []);
   if (!klass || allowed.size === 0) return [];
@@ -1142,7 +1142,7 @@ const checkClassAllowedDays: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} có tiết ngoài các ngày cho phép.`, offendingEntries: offending }];
 };
 
-const checkClassAllowedPeriods: CheckFn = (spec, schedule) => {
+const checkClassAllowedPeriods: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const allowed = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
   if (!klass || allowed.size === 0) return [];
@@ -1155,7 +1155,7 @@ const checkClassAllowedPeriods: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} có tiết ngoài các tiết cho phép.`, offendingEntries: offending }];
 };
 
-const checkClassMaxConsecutive: CheckFn = (spec, schedule) => {
+const checkClassMaxConsecutive: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const maxConsecutive = Number(spec.params.maxConsecutive ?? NaN);
   if (!klass || !Number.isFinite(maxConsecutive)) return [];
@@ -1178,7 +1178,7 @@ const checkClassMaxConsecutive: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassMaxSubjectsPerDay: CheckFn = (spec, schedule) => {
+const checkClassMaxSubjectsPerDay: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const max = Number(spec.params.max ?? NaN);
   if (!klass || !Number.isFinite(max)) return [];
@@ -1197,7 +1197,7 @@ const checkClassMaxSubjectsPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassBalancedLoad: CheckFn = (spec, schedule) => {
+const checkClassBalancedLoad: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const tolerance = Number(spec.params.tolerance ?? 0);
   if (!klass) return [];
@@ -1211,7 +1211,7 @@ const checkClassBalancedLoad: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} phân bố không đều (${min}–${max} tiết/ngày).`, offendingEntries: schedule.filter((e) => e.class === klass) }];
 };
 
-const checkClassSubjectsSameDay: CheckFn = (spec, schedule) => {
+const checkClassSubjectsSameDay: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const subjects = Array.isArray(spec.params.subjects) ? spec.params.subjects.map(String) : [];
   if (!klass || subjects.length < 2) return [];
@@ -1227,7 +1227,7 @@ const checkClassSubjectsSameDay: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Lớp ${klass} các môn {${subjects.join(', ')}} không cùng ngày nào.`, offendingEntries: entries }];
 };
 
-const checkClassMinWorkingDays: CheckFn = (spec, schedule) => {
+const checkClassMinWorkingDays: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const minDays = Number(spec.params.minDays ?? NaN);
   if (!klass || !Number.isFinite(minDays)) return [];
@@ -1238,7 +1238,7 @@ const checkClassMinWorkingDays: CheckFn = (spec, schedule) => {
 
 // ===== NEW ASSIGNMENT CHECKERS =====
 
-const checkAssignmentConsecutive: CheckFn = (spec, schedule) => {
+const checkAssignmentConsecutive: CheckFn = (spec, schedule, ctx) => {
   const assignmentId = String(spec.params.assignmentId ?? '');
   const length = Number(spec.params.length ?? 0);
   if (!assignmentId) return [];
@@ -1266,7 +1266,7 @@ const checkAssignmentConsecutive: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkAssignmentMaxPerDay: CheckFn = (spec, schedule) => {
+const checkAssignmentMaxPerDay: CheckFn = (spec, schedule, ctx) => {
   const assignmentId = String(spec.params.assignmentId ?? '');
   const max = Number(spec.params.max ?? NaN);
   if (!assignmentId || !Number.isFinite(max)) return [];
@@ -1280,7 +1280,7 @@ const checkAssignmentMaxPerDay: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkAssignmentSameDay: CheckFn = (spec, schedule) => {
+const checkAssignmentSameDay: CheckFn = (spec, schedule, ctx) => {
   const ids = (Array.isArray(spec.params.assignmentIds) ? spec.params.assignmentIds : []).map(String);
   if (ids.length < 2) return [];
   const byDay = new Map<string, Set<string>>();
@@ -1296,7 +1296,7 @@ const checkAssignmentSameDay: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Các assignment {${ids.join(', ')}} không cùng ngày.`, offendingEntries: schedule.filter((e) => ids.includes(String(e.assignmentId ?? ''))) }];
 };
 
-const checkAssignmentNotSameDay: CheckFn = (spec, schedule) => {
+const checkAssignmentNotSameDay: CheckFn = (spec, schedule, ctx) => {
   const ids = (Array.isArray(spec.params.assignmentIds) ? spec.params.assignmentIds : []).map(String);
   if (ids.length < 2) return [];
   const byDay = new Map<string, Set<string>>();
@@ -1317,7 +1317,7 @@ const checkAssignmentNotSameDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherPreferredPeriods: CheckFn = (spec, schedule) => {
+const checkTeacherPreferredPeriods: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const preferred = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
   if (!teacher || preferred.size === 0) return [];
@@ -1335,7 +1335,7 @@ const checkTeacherPreferredPeriods: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkSubjectPreferredPeriods: CheckFn = (spec, schedule) => {
+const checkSubjectPreferredPeriods: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const preferred = new Set((Array.isArray(spec.params.periods) ? spec.params.periods : []).map(Number));
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
@@ -1355,7 +1355,7 @@ const checkSubjectPreferredPeriods: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkTeacherMaxClassesPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherMaxClassesPerDay: CheckFn = (spec, schedule, ctx) => {
   const teacherFilter = spec.params.teacher ? String(spec.params.teacher) : null;
   const maxClasses = Number(spec.params.maxClasses ?? NaN);
   if (!Number.isFinite(maxClasses)) return [];
@@ -1383,7 +1383,7 @@ const checkTeacherMaxClassesPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherPairNotSameSlot: CheckFn = (spec, schedule) => {
+const checkTeacherPairNotSameSlot: CheckFn = (spec, schedule, ctx) => {
   const teachers = Array.isArray(spec.params.teachers)
     ? spec.params.teachers.map((value) => String(value))
     : [];
@@ -1414,7 +1414,7 @@ const checkTeacherPairNotSameSlot: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherPairNotSameDay: CheckFn = (spec, schedule) => {
+const checkTeacherPairNotSameDay: CheckFn = (spec, schedule, ctx) => {
   const teachers = Array.isArray(spec.params.teachers)
     ? spec.params.teachers.map((value) => String(value))
     : [];
@@ -1444,7 +1444,7 @@ const checkTeacherPairNotSameDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherHomeroomFirstPeriod: CheckFn = (spec, schedule) => {
+const checkTeacherHomeroomFirstPeriod: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const klass = String(spec.params.class ?? '');
   const period = Number(spec.params.period ?? 1);
@@ -1475,7 +1475,7 @@ const checkTeacherHomeroomFirstPeriod: CheckFn = (spec, schedule) => {
 // THEN positive atoms (F-6, F-7): dùng bên trong `if_then.params.then[]`.
 // "phải dạy" — flag nếu teacher không có entry khớp với (teacher, day[, period]).
 // Trả offendingEntries = tất cả entries của teacher đó để user dễ debug.
-const checkTeacherRequiredDay: CheckFn = (spec, schedule) => {
+const checkTeacherRequiredDay: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
   if (!teacher || !day) return [];
@@ -1505,7 +1505,7 @@ const checkTeacherNoConstraint: CheckFn = (spec) => {
  * Op: 'gte' (A ≥ B + value), 'lte' (A ≤ B + value), 'eq' (A = B + value),
  *     'pct' (A ≥ value% × B), 'factor' (A ≥ factor × B).
  */
-const checkTeacherCountRelative: CheckFn = (spec, schedule) => {
+const checkTeacherCountRelative: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const otherTeacher = String(spec.params.otherTeacher ?? '');
   const op = String(spec.params.op ?? 'gte');
@@ -1536,7 +1536,7 @@ const checkTeacherCountRelative: CheckFn = (spec, schedule) => {
 /**
  * teacher_total_periods: tổng số tiết của nhiều teachers theo op (min/max/exact).
  */
-const checkTeacherTotalPeriods: CheckFn = (spec, schedule) => {
+const checkTeacherTotalPeriods: CheckFn = (spec, schedule, ctx) => {
   const teachers = Array.isArray(spec.params.teachers) ? (spec.params.teachers as string[]).map(String) : [];
   const op = String(spec.params.op ?? 'exact');
   const value = Number(spec.params.value ?? 0);
@@ -1565,7 +1565,7 @@ const checkTeacherTotalPeriods: CheckFn = (spec, schedule) => {
  * teacher_argmax_weekly: teacher dạy nhiều nhất trong tuần.
  * Đếm số tiết mỗi teacher trong schedule; teacher được chỉ định phải có số tiết >= max(others).
  */
-const checkTeacherArgmaxWeekly: CheckFn = (spec, schedule) => {
+const checkTeacherArgmaxWeekly: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   if (!teacher) return [];
 
@@ -1604,7 +1604,7 @@ const checkTeacherArgmaxWeekly: CheckFn = (spec, schedule) => {
  *
  * If one teacher doesn't teach on a day, the constraint is vacuous.
  */
-const checkTeacherPairPeriodOrder: CheckFn = (spec, schedule) => {
+const checkTeacherPairPeriodOrder: CheckFn = (spec, schedule, ctx) => {
   const teacherA = String(spec.params.teacherA ?? '');
   const teacherB = String(spec.params.teacherB ?? '');
   const relation = String(spec.params.relation ?? 'before') as
@@ -1662,7 +1662,7 @@ const checkTeacherPairPeriodOrder: CheckFn = (spec, schedule) => {
  * teacher_pair_not_adjacent: on every day, when both teachers teach,
  * their periods must not be adjacent (|period_A - period_B| != 1).
  */
-const checkTeacherPairNotAdjacent: CheckFn = (spec, schedule) => {
+const checkTeacherPairNotAdjacent: CheckFn = (spec, schedule, ctx) => {
   const teacherA = String(spec.params.teacherA ?? '');
   const teacherB = String(spec.params.teacherB ?? '');
   if (!teacherA || !teacherB) return [];
@@ -1706,7 +1706,7 @@ const checkTeacherPairNotAdjacent: CheckFn = (spec, schedule) => {
  * teaches on day dA and teacherB teaches on day dB, with |dA - dB| == distance
  * (or dB - dA == distance for 'before', or dA - dB == distance for 'after').
  */
-const checkTeacherPairDayDistance: CheckFn = (spec, schedule) => {
+const checkTeacherPairDayDistance: CheckFn = (spec, schedule, ctx) => {
   const teacherA = String(spec.params.teacherA ?? '');
   const teacherB = String(spec.params.teacherB ?? '');
   const direction = String(spec.params.direction ?? 'either') as 'before' | 'after' | 'either';
@@ -1754,7 +1754,7 @@ const checkTeacherPairDayDistance: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
+const checkTeacherRequiredSlot: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
   const period = toPeriod(String(spec.params.period ?? ''));
@@ -1774,7 +1774,7 @@ const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkTeacherPairRequiredSameDay: CheckFn = (spec, schedule) => {
+const checkTeacherPairRequiredSameDay: CheckFn = (spec, schedule, ctx) => {
   const teachers = Array.isArray(spec.params.teachers) ? (spec.params.teachers as string[]) : [];
   const day = String(spec.params.day ?? '');
   if (teachers.length === 0 || !day) return [];
@@ -1794,7 +1794,7 @@ const checkTeacherPairRequiredSameDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherPairRequiredSameSlot: CheckFn = (spec, schedule) => {
+const checkTeacherPairRequiredSameSlot: CheckFn = (spec, schedule, ctx) => {
   const teachers = Array.isArray(spec.params.teachers) ? (spec.params.teachers as string[]) : [];
   const day = String(spec.params.day ?? '');
   const period = toPeriod(String(spec.params.period ?? ''));
@@ -1819,7 +1819,7 @@ const checkTeacherPairRequiredSameSlot: CheckFn = (spec, schedule) => {
 
 // Phase 0 require-family: positive atLeast constraints (count across week, not per-day).
 // "phải có ít nhất N tiết X trong tuần" — count distinct days where entity appears at period X.
-const checkTeacherRequiredPeriod: CheckFn = (spec, schedule) => {
+const checkTeacherRequiredPeriod: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const period = toPeriod(String(spec.params.period ?? ''));
   const minCount = Number(spec.params.minCount ?? spec.params.count ?? 1);
@@ -1844,7 +1844,7 @@ const checkTeacherRequiredPeriod: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkClassRequiredPeriod: CheckFn = (spec, schedule) => {
+const checkClassRequiredPeriod: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   const period = toPeriod(String(spec.params.period ?? ''));
   const minCount = Number(spec.params.minCount ?? spec.params.count ?? 1);
@@ -1869,7 +1869,7 @@ const checkClassRequiredPeriod: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkSubjectRequiredPeriod: CheckFn = (spec, schedule) => {
+const checkSubjectRequiredPeriod: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const period = toPeriod(String(spec.params.period ?? ''));
   const minCount = Number(spec.params.minCount ?? spec.params.count ?? 1);
@@ -1897,7 +1897,7 @@ const checkSubjectRequiredPeriod: CheckFn = (spec, schedule) => {
   return [];
 };
 
-const checkSubjectNotLastPeriod: CheckFn = (spec, schedule) => {
+const checkSubjectNotLastPeriod: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const classes = Array.isArray(spec.params.classes) ? spec.params.classes.map(String) : null;
   if (!subject) return [];
@@ -1927,7 +1927,7 @@ const checkSubjectNotLastPeriod: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkClassMaxHeavySubjectsPerDay: CheckFn = (spec, schedule) => {
+const checkClassMaxHeavySubjectsPerDay: CheckFn = (spec, schedule, ctx) => {
   const heavy = new Set((Array.isArray(spec.params.subjects) ? spec.params.subjects : []).map(String));
   const maxHeavy = Number(spec.params.maxHeavy ?? NaN);
   const targetClass = spec.params.class ? String(spec.params.class) : null;
@@ -1958,7 +1958,7 @@ const checkClassMaxHeavySubjectsPerDay: CheckFn = (spec, schedule) => {
 
 
 
-const checkClassMaxHeavySubjectsPerSession: CheckFn = (spec, schedule) => {
+const checkClassMaxHeavySubjectsPerSession: CheckFn = (spec, schedule, ctx) => {
   const heavy = new Set((Array.isArray(spec.params.subjects) ? spec.params.subjects : []).map(String));
   const groups = Array.isArray(spec.params.subjectGroups)
     ? (spec.params.subjectGroups as string[][]).map((g) => g.map(String))
@@ -1997,7 +1997,7 @@ const checkClassMaxHeavySubjectsPerSession: CheckFn = (spec, schedule) => {
   }
   return violations;
 };
-const checkClassFirstPeriodRequired: CheckFn = (spec, schedule) => {
+const checkClassFirstPeriodRequired: CheckFn = (spec, schedule, ctx) => {
   const klass = String(spec.params.class ?? '');
   if (!klass) return [];
   const violations: Violation[] = [];
@@ -2022,7 +2022,7 @@ const checkClassFirstPeriodRequired: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkSubjectFlagCeremonySlot: CheckFn = (spec, schedule) => {
+const checkSubjectFlagCeremonySlot: CheckFn = (spec, schedule, ctx) => {
   const day = String(spec.params.day ?? '');
   const period = Number(spec.params.period ?? NaN);
   if (!day || !Number.isFinite(period)) return [];
@@ -2036,7 +2036,7 @@ const checkSubjectFlagCeremonySlot: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkGlobalTeacherUtilizationBalance: CheckFn = (spec, schedule) => {
+const checkGlobalTeacherUtilizationBalance: CheckFn = (spec, schedule, ctx) => {
   const tolerance = Number(spec.params.tolerance ?? 1);
   const loads = new Map<string, number>();
   for (const e of schedule) {
@@ -2058,7 +2058,7 @@ const checkGlobalTeacherUtilizationBalance: CheckFn = (spec, schedule) => {
 
 // ===== NEW GLOBAL CHECKERS =====
 
-const checkPairSameSlot: CheckFn = (spec, schedule) => {
+const checkPairSameSlot: CheckFn = (spec, schedule, ctx) => {
   const ids = (Array.isArray(spec.params.assignmentIds) ? spec.params.assignmentIds : []).map(String);
   if (ids.length !== 2) return [];
   const [a, b] = ids;
@@ -2072,7 +2072,7 @@ const checkPairSameSlot: CheckFn = (spec, schedule) => {
   return [{ constraintId: spec.id, kind: spec.kind, message: `Hai assignment ${a} và ${b} không song song slot.`, offendingEntries: offending }];
 };
 
-const checkMutualExclusion: CheckFn = (spec, schedule) => {
+const checkMutualExclusion: CheckFn = (spec, schedule, ctx) => {
   const ids = (Array.isArray(spec.params.assignmentIds) ? spec.params.assignmentIds : []).map(String);
   if (ids.length < 2) return [];
   const bySlot = new Map<string, string[]>();
@@ -2100,7 +2100,7 @@ const teacherGroupList = (spec: ConstraintSpec): string[] =>
 const countTeacherWeekly = (teacher: string, schedule: ScheduleEntry[]): number =>
   schedule.filter((e) => e.teacher === teacher).length;
 
-const checkTeacherGroupNotSameDay: CheckFn = (spec, schedule) => {
+const checkTeacherGroupNotSameDay: CheckFn = (spec, schedule, ctx) => {
   const teachers = teacherGroupList(spec);
   if (teachers.length < 2) return [];
   const nested: ConstraintSpec = {
@@ -2108,10 +2108,10 @@ const checkTeacherGroupNotSameDay: CheckFn = (spec, schedule) => {
     kind: 'teacher_pair_not_same_day',
     params: { teachers: teachers.slice(0, 2) },
   };
-  return checkTeacherPairNotSameDay(nested, schedule);
+  return checkTeacherPairNotSameDay(nested, schedule, ctx);
 };
 
-const checkTeacherGroupNotSamePeriod: CheckFn = (spec, schedule) => {
+const checkTeacherGroupNotSamePeriod: CheckFn = (spec, schedule, ctx) => {
   const teachers = teacherGroupList(spec);
   if (teachers.length < 2) return [];
   const nested: ConstraintSpec = {
@@ -2119,10 +2119,10 @@ const checkTeacherGroupNotSamePeriod: CheckFn = (spec, schedule) => {
     kind: 'teacher_pair_not_same_slot',
     params: { teachers: teachers.slice(0, 2) },
   };
-  return checkTeacherPairNotSameSlot(nested, schedule);
+  return checkTeacherPairNotSameSlot(nested, schedule, ctx);
 };
 
-const checkTeacherGroupMinPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherGroupMinPerDay: CheckFn = (spec, schedule, ctx) => {
   const teachers = new Set(teacherGroupList(spec));
   const minCount = Number(spec.params.minCount ?? 1);
   if (teachers.size < 2 || !Number.isFinite(minCount)) return [];
@@ -2144,7 +2144,7 @@ const checkTeacherGroupMinPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherGroupMaxConcurrent: CheckFn = (spec, schedule) => {
+const checkTeacherGroupMaxConcurrent: CheckFn = (spec, schedule, ctx) => {
   const teachers = new Set(teacherGroupList(spec));
   const maxConcurrent = Number(spec.params.maxConcurrent ?? 2);
   if (teachers.size < 2 || !Number.isFinite(maxConcurrent)) return [];
@@ -2170,7 +2170,7 @@ const checkTeacherGroupMaxConcurrent: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherGroupExactPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherGroupExactPerDay: CheckFn = (spec, schedule, ctx) => {
   const teachers = new Set(teacherGroupList(spec));
   const exactCount = Number(spec.params.exactCount ?? 3);
   if (teachers.size < 2 || !Number.isFinite(exactCount)) return [];
@@ -2192,7 +2192,7 @@ const checkTeacherGroupExactPerDay: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkTeacherGroupTotalPeriods: CheckFn = (spec, schedule) => {
+const checkTeacherGroupTotalPeriods: CheckFn = (spec, schedule, ctx) => {
   const a = (Array.isArray(spec.params.teachersA) ? spec.params.teachersA : []).map(String);
   const b = (Array.isArray(spec.params.teachersB) ? spec.params.teachersB : []).map(String);
   if (a.length < 1 || b.length < 1) return [];
@@ -2207,7 +2207,7 @@ const checkTeacherGroupTotalPeriods: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkSubjectConsecutivePeriods: CheckFn = (spec, schedule) => {
+const checkSubjectConsecutivePeriods: CheckFn = (spec, schedule, ctx) => {
   const nested: ConstraintSpec = {
     ...spec,
     kind: 'subject_consecutive',
@@ -2217,10 +2217,10 @@ const checkSubjectConsecutivePeriods: CheckFn = (spec, schedule) => {
       ...(spec.params.classes ? { classes: spec.params.classes } : {}),
     },
   };
-  return checkSubjectConsecutive(nested, schedule);
+  return checkSubjectConsecutive(nested, schedule, ctx);
 };
 
-const checkGlobalMinTeachersPerPeriod: CheckFn = (spec, schedule) => {
+const checkGlobalMinTeachersPerPeriod: CheckFn = (spec, schedule, ctx) => {
   const minCount = Number(spec.params.minCount ?? NaN);
   if (!Number.isFinite(minCount)) return [];
   const periodFilter = spec.params.period !== undefined ? Number(spec.params.period) : null;
@@ -2250,7 +2250,7 @@ const checkGlobalMinTeachersPerPeriod: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkGlobalMaxTeachersPerPeriod: CheckFn = (spec, schedule) => {
+const checkGlobalMaxTeachersPerPeriod: CheckFn = (spec, schedule, ctx) => {
   const maxCount = Number(spec.params.maxCount ?? NaN);
   if (!Number.isFinite(maxCount)) return [];
   const periodFilter = spec.params.period !== undefined ? Number(spec.params.period) : null;
@@ -2280,7 +2280,7 @@ const checkGlobalMaxTeachersPerPeriod: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkGlobalExactTeachersPerPeriod: CheckFn = (spec, schedule) => {
+const checkGlobalExactTeachersPerPeriod: CheckFn = (spec, schedule, ctx) => {
   const exactCount = Number(spec.params.exactCount ?? NaN);
   if (!Number.isFinite(exactCount)) return [];
   const periodFilter = spec.params.period !== undefined ? Number(spec.params.period) : null;
@@ -2310,7 +2310,7 @@ const checkGlobalExactTeachersPerPeriod: CheckFn = (spec, schedule) => {
   return violations;
 };
 
-const checkGlobalMaxWorkloadDiff: CheckFn = (spec, schedule) => {
+const checkGlobalMaxWorkloadDiff: CheckFn = (spec, schedule, ctx) => {
   const maxDiff = Number(spec.params.maxDiff ?? NaN);
   if (!Number.isFinite(maxDiff)) return [];
   const nested: ConstraintSpec = {
@@ -2318,7 +2318,7 @@ const checkGlobalMaxWorkloadDiff: CheckFn = (spec, schedule) => {
     kind: 'global_teacher_utilization_balance',
     params: { tolerance: maxDiff },
   };
-  return checkGlobalTeacherUtilizationBalance(nested, schedule);
+  return checkGlobalTeacherUtilizationBalance(nested, schedule, ctx);
 };
 
 const checkTeacherPrioritySession: CheckFn = () => [];
@@ -2328,7 +2328,7 @@ const checkTeacherUnavailableSudden: CheckFn = () => [];
 const checkTeacherBreakTimeMinutes: CheckFn = () => [];
 const checkTeacherLunchBreakRequired: CheckFn = () => [];
 
-const checkSubjectAfterSubjectWeek: CheckFn = (spec, schedule) => {
+const checkSubjectAfterSubjectWeek: CheckFn = (spec, schedule, ctx) => {
   const subjectA = String(spec.params.subjectA ?? '');
   const subjectB = String(spec.params.subjectB ?? '');
   if (!subjectA || !subjectB) return [];
@@ -2337,10 +2337,10 @@ const checkSubjectAfterSubjectWeek: CheckFn = (spec, schedule) => {
     kind: 'subject_order_before',
     params: { subjectA, subjectB },
   };
-  return checkSubjectOrderBefore(nested, schedule);
+  return checkSubjectOrderBefore(nested, schedule, ctx);
 };
 
-const checkSubjectBeforeSubjectWeek: CheckFn = (spec, schedule) => {
+const checkSubjectBeforeSubjectWeek: CheckFn = (spec, schedule, ctx) => {
   const subjectA = String(spec.params.subjectA ?? '');
   const subjectB = String(spec.params.subjectB ?? '');
   if (!subjectA || !subjectB) return [];
@@ -2349,10 +2349,10 @@ const checkSubjectBeforeSubjectWeek: CheckFn = (spec, schedule) => {
     kind: 'subject_order_before',
     params: { subjectA, subjectB },
   };
-  return checkSubjectOrderBefore(nested, schedule);
+  return checkSubjectOrderBefore(nested, schedule, ctx);
 };
 
-const checkSubjectSameWeek: CheckFn = (spec, schedule) => {
+const checkSubjectSameWeek: CheckFn = (spec, schedule, ctx) => {
   const subjectA = String(spec.params.subjectA ?? '');
   const subjectB = String(spec.params.subjectB ?? '');
   if (!subjectA || !subjectB) return [];
@@ -2373,7 +2373,7 @@ const checkSubjectSameWeek: CheckFn = (spec, schedule) => {
 const checkSubjectGapWeeks: CheckFn = () => [];
 const checkSubjectMinGapHours: CheckFn = () => [];
 
-const checkSubjectAfterBreak: CheckFn = (spec, schedule) => {
+const checkSubjectAfterBreak: CheckFn = (spec, schedule, ctx) => {
   const subject = String(spec.params.subject ?? '');
   const afterPeriod = Number(spec.params.afterPeriod ?? 3);
   if (!subject) return [];
@@ -2391,7 +2391,7 @@ const checkSubjectAfterBreak: CheckFn = (spec, schedule) => {
   }];
 };
 
-const checkTeacherMaxHoursPerDay: CheckFn = (spec, schedule) => {
+const checkTeacherMaxHoursPerDay: CheckFn = (spec, schedule, ctx) => {
   const teacher = String(spec.params.teacher ?? '');
   const maxHours = Number(spec.params.maxHours ?? NaN);
   if (!teacher || !Number.isFinite(maxHours)) return [];
@@ -2400,12 +2400,12 @@ const checkTeacherMaxHoursPerDay: CheckFn = (spec, schedule) => {
     kind: 'teacher_max_per_day',
     params: { teacher, maxPerDay: maxHours },
   };
-  return checkTeacherMaxPerDay(nested, schedule);
+  return checkTeacherMaxPerDay(nested, schedule, ctx);
 };
 
 const checkTeacherMinRestBetweenDays: CheckFn = () => [];
 const checkTeacherMentorship: CheckFn = () => [];
-const checkTeacherConflict: CheckFn = (spec, schedule) => {
+const checkTeacherConflict: CheckFn = (spec, schedule, ctx) => {
   const teacherA = String(spec.params.teacherA ?? '');
   const teacherB = String(spec.params.teacherB ?? '');
   if (!teacherA || !teacherB) return [];
@@ -2414,7 +2414,7 @@ const checkTeacherConflict: CheckFn = (spec, schedule) => {
     kind: 'teacher_pair_not_same_slot',
     params: { teachers: [teacherA, teacherB] },
   };
-  return checkTeacherPairNotSameSlot(nested, schedule);
+  return checkTeacherPairNotSameSlot(nested, schedule, ctx);
 };
 
 const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {

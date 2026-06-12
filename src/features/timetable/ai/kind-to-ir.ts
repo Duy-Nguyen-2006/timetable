@@ -432,17 +432,17 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
       const value = Number(p.value ?? 0);
       // We compare: count(teacher teaches anywhere) vs count(otherTeacher teaches anywhere)
       // adjusted by op/value. Encoded using `count` + `compare` directly.
-      const teacherCount = {
+      const teacherCount: IntExpr = {
         count: {
           var: 'a',
-          in: { filter: { in: 'classes', where: { eq: ['$$A$$', teacher] } } },
+          in: { in: 'classes', where: { eq: ['$$A$$', teacher] } },
           body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
         },
       };
-      const otherCount = {
+      const otherCount: IntExpr = {
         count: {
           var: 'a',
-          in: { filter: { in: 'classes', where: { eq: ['$$A$$', otherTeacher] } } },
+          in: { in: 'classes', where: { eq: ['$$A$$', otherTeacher] } },
           body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
         },
       };
@@ -490,11 +490,12 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
       const teachers = (Array.isArray(p.teachers) ? p.teachers : []).map(String);
       const op = String(p.op ?? 'exact');
       const value = Number(p.value ?? 0);
-      const total = {
+      const total: IntExpr = {
         count: {
           var: 'a',
           in: {
-            filter: { in: 'classes', where: { in: ['$$A$$', teachers] } },
+            in: 'classes',
+            where: { in: ['$$A$$', teachers] },
           },
           body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
         },
@@ -513,10 +514,10 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
       // by pairwise >=, which is correct when target teacher has strictly the
       // most slots in the final schedule.)
       const teacher = String(p.teacher ?? '');
-      const target = {
+      const target: IntExpr = {
         count: {
           var: 'a',
-          in: { filter: { in: 'classes', where: { eq: ['$$A$$', teacher] } } },
+          in: { in: 'classes', where: { eq: ['$$A$$', teacher] } },
           body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
         },
       };
@@ -528,7 +529,7 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
             in: 'teachers',
             body: {
               implies: [
-                { compare: { op: '!=', lhs: '$$T$$', rhs: teacher } },
+                { compare: { op: '!=', lhs: { var: '$$T$$' }, rhs: { var: teacher } } },
                 {
                   compare: {
                     op: '>=',
@@ -536,7 +537,7 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
                     rhs: {
                       count: {
                         var: 'a',
-                        in: { filter: { in: 'classes', where: { eq: ['$$A$$', '$$T$$'] } } },
+                        in: { in: 'classes', where: { eq: ['$$A$$', '$$T$$'] } },
                         body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
                       },
                     },

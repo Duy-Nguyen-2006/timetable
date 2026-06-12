@@ -26,7 +26,7 @@ type ConstraintDraftCardProps = {
   onConfirm: () => void;
   onIgnore: () => void;
   onDelete: () => void;
-  onAiAnalyze?: (userFeedback?: string) => void;
+  onAiAnalyze?: () => void;
   onApplySpecDraft?: (spec: ConstraintSpec) => void;
   onOpenTemplatePicker?: () => void;
   onOpenManualEdit?: () => void;
@@ -296,15 +296,11 @@ export function ConstraintDraftCard({
                   questions={draft.clarificationQuestions}
                   reparseCount={draft.reparseCount}
                   constraintType={constraint.type}
-                  onSelectOption={(_questionId, option: ClarificationOption) => {
-                    if (option.id === 'use_teacher' || option.id.startsWith('use_')) {
-                      onAiAnalyze?.(`Dùng tên «${option.labelVi.replace(/^Dùng «|»$/gu, '')}»`);
-                      return;
-                    }
-                    onAiAnalyze?.(option.labelVi);
+                  onSelectOption={(_questionId, _option: ClarificationOption) => {
+                    onAiAnalyze?.();
                   }}
                   onApplySpecDraft={onApplySpecDraft}
-                  onReparseWithFeedback={(feedback) => onAiAnalyze?.(feedback)}
+                  onReparseWithFeedback={() => onAiAnalyze?.()}
                   onOpenManualEdit={onOpenManualEdit}
                   onOpenTemplatePicker={onOpenTemplatePicker}
                   onDemoteToPreferred={onDemoteToPreferred}

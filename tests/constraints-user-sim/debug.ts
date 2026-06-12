@@ -31,7 +31,13 @@ async function debugOne(text: string) {
     periodCounts: { monday: 6, tuesday: 6, wednesday: 6, thursday: 6, friday: 6 },
     deletedPeriods: {},
     assignments: (() => {
-      const arr = [];
+      const arr: Array<{
+        id: string;
+        teacher: { id: string; label: string };
+        subject: { id: string; label: string };
+        class: { id: string; label: string };
+        weeklyPeriods: number;
+      }> = [];
       for (let ti = 0; ti < teacherLabels.length; ti++) {
         for (let ci = 0; ci < 2; ci++) {
           for (let si = 0; si < 2; si++) {

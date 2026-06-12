@@ -1,7 +1,7 @@
 // Test dataset cho 150 constraints
 // Tạo fixture với 20 giáo viên, 10 lớp, 12 môn, 5 ngày (T2-T6)
 
-import type { AgentInputPayload } from '../src/features/timetable/ai/types';
+import type { AgentInputPayload } from '../../src/features/timetable/ai/types';
 
 const teacherNames = [
   'Hiếu', 'Long', 'Dung', 'Mai', 'Tuấn', 'Lan', 'Hoa', 'Minh', 'Quân', 'Nam',
@@ -25,7 +25,13 @@ const days = [
 const sessions = [{ id: 'morning', label: 'Sáng' }, { id: 'afternoon', label: 'Chiều' }];
 
 // Mỗi giáo viên dạy 2 lớp × 2 môn = 4 assignments
-const assignments = [];
+const assignments: Array<{
+  id: string;
+  teacher: { id: string; label: string };
+  subject: { id: string; label: string };
+  class: { id: string; label: string };
+  weeklyPeriods: number;
+}> = [];
 let asgId = 0;
 for (let t = 0; t < teacherNames.length; t++) {
   for (let c = 0; c < 2; c++) {
@@ -47,6 +53,7 @@ export const testFixture: AgentInputPayload = {
   periodCounts: { monday: 6, tuesday: 6, wednesday: 6, thursday: 6, friday: 6 },
   deletedPeriods: {},
   assignments,
+  constraints: [],
 };
 
 // Danh sách 150 constraints từ file

@@ -1280,9 +1280,6 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   }
 
   if (subj.length > 0 && /có\s*(\d+)\s*tiết.*tuần/iu.test(raw)) {
-    if (/(đều|deu|cách\s*đều|cach\s*deu)/iu.test(raw)) {
-      return { kind: 'subject_spread_evenly', subjectLabels: subj }
-    }
     const n = extractFirstNumber(raw)
     if (n !== null) {
       return { kind: 'subject_min_days', subjectLabels: subj, minDays: Math.min(n, 5) }
