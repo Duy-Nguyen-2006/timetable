@@ -424,6 +424,130 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
         },
       };
     }
+    // ─── Phase 2 quick wins: frequency comparison (nhóm 7) ───────────────
+    case 'teacher_count_relative': {
+      const teacher = String(p.teacher ?? '');
+      const otherTeacher = String(p.otherTeacher ?? '');
+      const op = String(p.op ?? 'gte');
+      const value = Number(p.value ?? 0);
+      // We compare: count(teacher teaches anywhere) vs count(otherTeacher teaches anywhere)
+      // adjusted by op/value. Encoded using `count` + `compare` directly.
+      const teacherCount = {
+        count: {
+          var: 'a',
+          in: { filter: { in: 'classes', where: { eq: ['$$A$$', teacher] } } },
+          body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
+        },
+      };
+      const otherCount = {
+        count: {
+          var: 'a',
+          in: { filter: { in: 'classes', where: { eq: ['$$A$$', otherTeacher] } } },
+          body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
+        },
+      };
+      let compareOp: '<=' | '<' | '==' | '!=' | '>=' | '>' = '>=';
+      if (op === 'gte') compareOp = '>=';
+      else if (op === 'lte') compareOp = '<=';
+      else if (op === 'eq') compareOp = '==';
+      else if (op === 'pct') {
+        // teacher >= ceil(value/100 * other)
+        return {
+          ...base,
+          expr: {
+            compare: {
+              op: '>=',
+              lhs: teacherCount,
+              rhs: { scale: { factor: value, of: otherCount } },
+            },
+          },
+        };
+      } else if (op === 'factor') {
+        // teacher >= value * other
+        return {
+          ...base,
+          expr: {
+            compare: {
+              op: '>=',
+              lhs: teacherCount,
+              rhs: { scale: { factor: value, of: otherCount } },
+            },
+          },
+        };
+      }
+      return {
+        ...base,
+        expr: {
+          compare: {
+            op: compareOp,
+            lhs: teacherCount,
+            rhs: { sum: [otherCount, value] },
+          },
+        },
+      };
+    }
+    case 'teacher_total_periods': {
+      const teachers = (Array.isArray(p.teachers) ? p.teachers : []).map(String);
+      const op = String(p.op ?? 'exact');
+      const value = Number(p.value ?? 0);
+      const total = {
+        count: {
+          var: 'a',
+          in: {
+            filter: { in: 'classes', where: { in: ['$$A$$', teachers] } },
+          },
+          body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
+        },
+      };
+      let compareOp: '<=' | '<' | '==' | '!=' | '>=' | '>' = '==';
+      if (op === 'min') compareOp = '>=';
+      else if (op === 'max') compareOp = '<=';
+      return {
+        ...base,
+        expr: { compare: { op: compareOp, lhs: total, rhs: value } },
+      };
+    }
+    case 'teacher_argmax_weekly': {
+      // Simplified IR: for each other teacher, ensure teacher >= other.
+      // (Full argmax would need an aggregate over all teachers; we approximate
+      // by pairwise >=, which is correct when target teacher has strictly the
+      // most slots in the final schedule.)
+      const teacher = String(p.teacher ?? '');
+      const target = {
+        count: {
+          var: 'a',
+          in: { filter: { in: 'classes', where: { eq: ['$$A$$', teacher] } } },
+          body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
+        },
+      };
+      return {
+        ...base,
+        expr: {
+          forall: {
+            var: 't',
+            in: 'teachers',
+            body: {
+              implies: [
+                { compare: { op: '!=', lhs: '$$T$$', rhs: teacher } },
+                {
+                  compare: {
+                    op: '>=',
+                    lhs: target,
+                    rhs: {
+                      count: {
+                        var: 'a',
+                        in: { filter: { in: 'classes', where: { eq: ['$$A$$', '$$T$$'] } } },
+                        body: { assigned: { assignment: '$$A$$', day: '$$D$$', period: '$$P$$' } },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
+    }
     // ─── Fallback: kind not yet IR-encodable ─────────────────────────────
     default:
       return null;

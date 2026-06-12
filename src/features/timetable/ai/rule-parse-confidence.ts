@@ -164,6 +164,17 @@ export function inferRuleParseConfidence(
     return { specs, confidence: 'high', issues };
   }
 
+  // Phase 2 quick wins: frequency comparison (nhóm 7). Parser fully resolves
+  // teacher_count_relative, teacher_total_periods, teacher_argmax_weekly from
+  // common Vietnamese patterns, so high confidence is appropriate.
+  if (specs.every((s) =>
+    s.kind === 'teacher_count_relative' ||
+    s.kind === 'teacher_total_periods' ||
+    s.kind === 'teacher_argmax_weekly'
+  )) {
+    return { specs, confidence: 'high', issues };
+  }
+
   if (specs.every((s) => s.kind === 'subject_max_consecutive')) {
     return {
       specs,

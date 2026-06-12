@@ -121,6 +121,9 @@ const constraintSpecSchema = z.object({
     'teacher_pair_required_same_day',
     'teacher_pair_required_same_slot',
     'teacher_no_constraint',
+    'teacher_count_relative',
+    'teacher_total_periods',
+    'teacher_argmax_weekly',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -1026,6 +1029,50 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         params: { teacher: parsed.teacherLabels[0] },
         tags: ['auto_base'],
         notes: 'no_op:constraint_resolves_to_all_days',
+      } satisfies ConstraintSpec;
+    }
+
+    // ─── Phase 2 quick wins: frequency comparison (nhóm 7) ───────────────
+    if (
+      parsed.kind === 'teacher_count_relative' &&
+      parsed.teacherLabels[0] &&
+      parsed.otherTeacherLabels[0]
+    ) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_count_relative',
+        params: {
+          teacher: parsed.teacherLabels[0],
+          otherTeacher: parsed.otherTeacherLabels[0],
+          op: parsed.op,
+          value: parsed.value,
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_total_periods' && parsed.teacherLabels.length >= 2) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_total_periods',
+        params: {
+          teachers: parsed.teacherLabels,
+          op: parsed.op,
+          value: parsed.value,
+        },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_argmax_weekly' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_argmax_weekly',
+        params: { teacher: parsed.teacherLabels[0] },
       } satisfies ConstraintSpec;
     }
 

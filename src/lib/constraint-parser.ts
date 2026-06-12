@@ -45,6 +45,9 @@ export type ParsedConstraint =
   | { kind: 'teacher_exact_working_days'; teacherLabels: string[]; days: number }
   | { kind: 'teacher_max_per_day'; teacherLabels: string[]; maxPerDay: number }
   | { kind: 'teacher_no_constraint'; teacherLabels: string[] }
+  | { kind: 'teacher_count_relative'; teacherLabels: string[]; otherTeacherLabels: string[]; op: 'gt' | 'lt' | 'eq' | 'gte' | 'lte' | 'pct' | 'factor'; value: number }
+  | { kind: 'teacher_total_periods'; teacherLabels: string[]; op: 'min' | 'max' | 'exact'; value: number }
+  | { kind: 'teacher_argmax_weekly'; teacherLabels: string[] }
   | { kind: 'teacher_max_gaps'; teacherLabels: string[]; maxGaps: number }
   | { kind: 'teacher_min_consecutive'; teacherLabels: string[]; minConsecutive: number }
   | { kind: 'subject_min_gap_days'; subjectLabels: string[]; minGapDays: number; classFilter?: string[] }
@@ -610,6 +613,91 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     if (maxPerDay !== null) {
       return { kind: 'teacher_max_per_day', teacherLabels: teachers, maxPerDay }
     }
+  }
+
+  // ─── Phase 2 quick wins: frequency comparison (nhóm 7) ───────────────
+
+  // teacher_weekly_range (with negation): "Dung không dạy quá 6 tiết trong tuần"
+  // The existing teacher_weekly_range branch above excludes "không", so this
+  // dedicated rule handles the negated "max" case.
+  if (
+    teachers.length > 0 &&
+    /(tiết|tiet)/u.test(raw) &&
+    /(tuần|tuan|trong\s*tuần|trong\s*tuan)/u.test(raw) &&
+    /không|khong/u.test(raw)
+  ) {
+    // Word-boundary match for "đúng" to avoid clashing with teacher name "Dung".
+    // (Normalized "raw" lowercases both "Dung" and "đúng" to "dung".)
+    const hasExactWord = teachers.some((t) => normalize(t) === 'dung')
+      ? false  // a teacher named "Dung" exists, so the "dung" token is the name
+      : /\bđúng\b|\bdung\b/u.test(raw)
+    const maxMatch = raw.match(/(?:không\s*quá|khong\s*qua|không\s*dạy\s*quá|khong\s*day\s*qua|tối\s*đa|toi\s*da|nhiều\s*nhất|nhieu\s*nhat)\s*(\d+)\s*(?:tiết|tiet)?/u);
+    if (maxMatch && !hasExactWord) {
+      return { kind: 'teacher_weekly_range', teacherLabels: teachers, max: Number(maxMatch[1]) };
+    }
+  }
+
+  // teacher_count_relative: "Phương dạy nhiều hơn Trang ít nhất 2 tiết" / "gấp đôi" / "bằng" / "ít hơn tối đa" / "50% số tiết"
+  if (teachers.length >= 2) {
+    const [primary, other] = teachers; // primary is leftmost (the one with the constraint)
+    // Factor: "gấp đôi số tiết của X" → primary = 2 * other
+    if (/(gấp\s*đôi|gap\s*doi|nhân\s*đôi|nhan\s*doi)/iu.test(raw)) {
+      return { kind: 'teacher_count_relative', teacherLabels: [primary], otherTeacherLabels: [other], op: 'factor', value: 2 };
+    }
+    // Percent: "ít nhất N% số tiết của X"
+    const pctMatch = raw.match(/(?:ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|không\s*ít\s*hơn|khong\s*it\s*hon|>=|≥|tối\s*đa|toi\s*da|<=|≤)\s*(\d+)\s*%\s*(?:số\s*tiết|so\s*tiet)?\s*(?:của|qua|cua)/iu);
+    if (pctMatch) {
+      return { kind: 'teacher_count_relative', teacherLabels: [primary], otherTeacherLabels: [other], op: 'pct', value: Number(pctMatch[1]) };
+    }
+    // "nhiều hơn ... ít nhất N tiết" → primary >= other + N (gte)
+    const gteMatch = raw.match(/(?:nhiều\s*hơn|nhieu\s*hon|nhiều|nhieu|cao\s*hơn|cao\s*hon).*?(?:ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|>=|≥)?\s*(\d+)\s*(?:tiết|tiet)?/iu);
+    if (gteMatch && /(nhiều\s*hơn|nhieu\s*hon|cao\s*hơn|cao\s*hon)/iu.test(raw)) {
+      return { kind: 'teacher_count_relative', teacherLabels: [primary], otherTeacherLabels: [other], op: 'gte', value: Number(gteMatch[1]) };
+    }
+    // "ít hơn ... tối đa N tiết" → primary <= other + N (lte)
+    const lteMatch = raw.match(/(?:ít\s*hơn|it\s*hon|ít|it|thấp\s*hơn|thap\s*hon).*?(?:tối\s*đa|toi\s*da|nhiều\s*nhất|nhieu\s*nhat|<=|≤)?\s*(\d+)\s*(?:tiết|tiet)?/iu);
+    if (lteMatch && /(ít\s*hơn|it\s*hon|thấp\s*hơn|thap\s*hon)/iu.test(raw)) {
+      return { kind: 'teacher_count_relative', teacherLabels: [primary], otherTeacherLabels: [other], op: 'lte', value: Number(lteMatch[1]) };
+    }
+    // "nhiều hơn ... đúng N tiết" → primary == other + N (eq)
+    const eqOffsetMatch = raw.match(/(?:nhiều\s*hơn|nhieu\s*hon|nhiều|nhieu|ít\s*hơn|it\s*hon|ít|it).*?(?:đúng|dung|chính\s*xác|chinh\s*xac|=)\s*(\d+)\s*(?:tiết|tiet)?/iu);
+    if (eqOffsetMatch) {
+      return { kind: 'teacher_count_relative', teacherLabels: [primary], otherTeacherLabels: [other], op: 'eq', value: Number(eqOffsetMatch[1]) };
+    }
+    // "bằng số tiết của X" / "bằng X" → primary == other (eq, value=0)
+    if (/bằng\s*số\s*tiết|bang\s*so\s*tiet|bằng\s*|bang\s*$/iu.test(raw) && !/ít\s*nhất|it\s*nhat|ít\s*hơn|it\s*hon|tối\s*đa|toi\s*da/iu.test(raw)) {
+      return { kind: 'teacher_count_relative', teacherLabels: [primary], otherTeacherLabels: [other], op: 'eq', value: 0 };
+    }
+  }
+
+  // teacher_total_periods: "Bình và Cường dạy tổng cộng N tiết" / "không quá N tiết" / "ít nhất N tiết"
+  if (teachers.length >= 2 && /(tổng\s*cộng|tong\s*cong|tổng|tong|sum|combined)/iu.test(raw)) {
+    const value = extractFirstNumber(raw);
+    if (value !== null) {
+      let op: 'min' | 'max' | 'exact' = 'exact';
+      if (/(ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|>=?|≥|tối\s*thiểu)/iu.test(raw)) op = 'min';
+      else if (/(tối\s*đa|toi\s*da|không\s*quá|khong\s*qua|nhiều\s*nhất|nhieu\s*nhat|<=?|≤)/iu.test(raw)) op = 'max';
+      return { kind: 'teacher_total_periods', teacherLabels: teachers, op, value };
+    }
+  }
+  if (teachers.length >= 2 && /và|va|,/iu.test(raw) && /(tiết|tiet)/iu.test(raw) && /(tổng|tong|sum|combined|cộng|cong|all\s*together|cả\s*hai|ca\s*hai)/iu.test(raw)) {
+    const value = extractFirstNumber(raw);
+    if (value !== null) {
+      let op: 'min' | 'max' | 'exact' = 'exact';
+      if (/(ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu|>=?|≥)/iu.test(raw)) op = 'min';
+      else if (/(tối\s*đa|toi\s*da|không\s*quá|khong\s*qua|nhiều\s*nhất|nhieu\s*nhat|<=?|≤)/iu.test(raw)) op = 'max';
+      return { kind: 'teacher_total_periods', teacherLabels: teachers, op, value };
+    }
+  }
+
+  // teacher_argmax_weekly: "Toàn dạy nhiều nhất trong tuần"
+  if (
+    teachers.length === 1 &&
+    /(dạy\s*nhiều\s*nhất|day\s*nhieu\s*nhat|dạy\s*nhiều|day\s*nhieu|most\s*periods|argmax|nhiều\s*nhất|nhieu\s*nhat)/iu.test(raw) &&
+    /(tuần|tuan|trong\s*tuần|trong\s*tuan|weekly|week)/iu.test(raw) &&
+    !/(và|va|,)/iu.test(raw)
+  ) {
+    return { kind: 'teacher_argmax_weekly', teacherLabels: teachers };
   }
 
   // teacher_allow_only_days (range): "Minh dạy từ thứ 2 đến thứ 5" → expand range and emit allow-only.

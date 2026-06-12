@@ -88,6 +88,10 @@ export type ConstraintKind =
   // current fixture (e.g. "Trang dạy tất cả các ngày trong tuần" on a 5-day fixture).
   // Validators and solver encoders must treat this as a no-op.
   | 'teacher_no_constraint'
+  // Phase 2 quick wins: frequency comparison (nhóm 7).
+  | 'teacher_count_relative'
+  | 'teacher_total_periods'
+  | 'teacher_argmax_weekly'
   | 'custom_dsl';
 
 export type ConditionExpr =

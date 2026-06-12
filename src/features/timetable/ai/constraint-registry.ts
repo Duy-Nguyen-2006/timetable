@@ -112,6 +112,9 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'class_required_period', label: 'Class required period', group: 'class', hasChecker: true, requiredParams: ['class', 'period', 'minCount'] },
   { kind: 'subject_required_period', label: 'Subject required period', group: 'subject', hasChecker: true, requiredParams: ['subject', 'period', 'minCount'] },
   { kind: 'teacher_no_constraint', label: 'Teacher no-op constraint', group: 'teacher', hasChecker: true, requiredParams: [] },
+  { kind: 'teacher_count_relative', label: 'Teacher count relative', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'op', 'value'] },
+  { kind: 'teacher_total_periods', label: 'Teacher total periods', group: 'teacher', hasChecker: true, requiredParams: ['teachers', 'op', 'value'] },
+  { kind: 'teacher_argmax_weekly', label: 'Teacher argmax weekly', group: 'teacher', hasChecker: true, requiredParams: ['teacher'] },
   { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: [] },
 ];
 
@@ -256,6 +259,10 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
   'subject_required_period',
   // Phase 1 quick wins: no-op marker (e.g. "all days in week" on a 5-day fixture).
   'teacher_no_constraint',
+  // Phase 2 quick wins: frequency comparison (nhóm 7).
+  'teacher_count_relative',
+  'teacher_total_periods',
+  'teacher_argmax_weekly',
 ] as const satisfies readonly ConstraintKind[];
 
 export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);

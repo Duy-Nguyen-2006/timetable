@@ -1500,6 +1500,96 @@ const checkTeacherNoConstraint: CheckFn = (spec) => {
   return [];
 };
 
+/**
+ * teacher_count_relative: so sánh số tiết giữa 2 teachers.
+ * Op: 'gte' (A ≥ B + value), 'lte' (A ≤ B + value), 'eq' (A = B + value),
+ *     'pct' (A ≥ value% × B), 'factor' (A ≥ factor × B).
+ */
+const checkTeacherCountRelative: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const otherTeacher = String(spec.params.otherTeacher ?? '');
+  const op = String(spec.params.op ?? 'gte');
+  const value = Number(spec.params.value ?? 0);
+  if (!teacher || !otherTeacher) return [];
+
+  const teacherSlots = schedule.filter((e) => e.teacher === teacher).length;
+  const otherSlots = schedule.filter((e) => e.teacher === otherTeacher).length;
+  let isViolated = false;
+  let expected = '';
+  if (op === 'gte') { isViolated = teacherSlots < otherSlots + value; expected = `≥ ${otherSlots + value}`; }
+  else if (op === 'lte') { isViolated = teacherSlots > otherSlots + value; expected = `≤ ${otherSlots + value}`; }
+  else if (op === 'eq') { isViolated = teacherSlots !== otherSlots + value; expected = `= ${otherSlots + value}`; }
+  else if (op === 'pct') { isViolated = teacherSlots < Math.ceil((value / 100) * otherSlots); expected = `≥ ${value}% × ${otherSlots}`; }
+  else if (op === 'factor') { isViolated = teacherSlots < value * otherSlots; expected = `≥ ${value} × ${otherSlots}`; }
+  if (isViolated) {
+    const entries = schedule.filter((e) => e.teacher === teacher);
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Giáo viên ${teacher} có ${teacherSlots} tiết, so với ${otherTeacher} (${otherSlots} tiết) cần ${expected}, thực tế ${teacherSlots}.`,
+      offendingEntries: entries,
+    }];
+  }
+  return [];
+};
+
+/**
+ * teacher_total_periods: tổng số tiết của nhiều teachers theo op (min/max/exact).
+ */
+const checkTeacherTotalPeriods: CheckFn = (spec, schedule) => {
+  const teachers = Array.isArray(spec.params.teachers) ? (spec.params.teachers as string[]).map(String) : [];
+  const op = String(spec.params.op ?? 'exact');
+  const value = Number(spec.params.value ?? 0);
+  if (teachers.length === 0) return [];
+
+  const total = schedule.filter((e) => teachers.includes(e.teacher)).length;
+  let isViolated = false;
+  if (op === 'min') isViolated = total < value;
+  else if (op === 'max') isViolated = total > value;
+  else isViolated = total !== value;
+
+  if (isViolated) {
+    const entries = schedule.filter((e) => teachers.includes(e.teacher));
+    const opLabel = op === 'min' ? 'ít nhất' : op === 'max' ? 'không quá' : 'đúng';
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Tổng tiết của ${teachers.join(', ')} phải ${opLabel} ${value}, thực tế ${total}.`,
+      offendingEntries: entries,
+    }];
+  }
+  return [];
+};
+
+/**
+ * teacher_argmax_weekly: teacher dạy nhiều nhất trong tuần.
+ * Đếm số tiết mỗi teacher trong schedule; teacher được chỉ định phải có số tiết >= max(others).
+ */
+const checkTeacherArgmaxWeekly: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  if (!teacher) return [];
+
+  const counts = new Map<string, number>();
+  for (const e of schedule) {
+    counts.set(e.teacher, (counts.get(e.teacher) ?? 0) + 1);
+  }
+  const target = counts.get(teacher) ?? 0;
+  let max = target;
+  for (const [, v] of counts) {
+    if (v > max) max = v;
+  }
+  if (target < max) {
+    const entries = schedule.filter((e) => e.teacher === teacher);
+    return [{
+      constraintId: spec.id,
+      kind: spec.kind,
+      message: `Giáo viên ${teacher} phải dạy nhiều nhất tuần, thực tế ${target} tiết (tối đa hiện tại: ${max}).`,
+      offendingEntries: entries,
+    }];
+  }
+  return [];
+};
+
 const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
@@ -1923,6 +2013,9 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   class_required_period: checkClassRequiredPeriod,
   subject_required_period: checkSubjectRequiredPeriod,
   teacher_no_constraint: checkTeacherNoConstraint,
+  teacher_count_relative: checkTeacherCountRelative,
+  teacher_total_periods: checkTeacherTotalPeriods,
+  teacher_argmax_weekly: checkTeacherArgmaxWeekly,
 };
 
 export function validateSchedule(
