@@ -60,12 +60,36 @@ export function buildTranslatorPeriodsByDay(input: AgentInputPayload): Record<st
 }
 
 export function periodsForSession(input: AgentInputPayload, sessionId: string): number[] {
-  let offset = 0;
-  for (const session of input.sessions) {
-    const count = Number(input.periodCounts[session.id] ?? 0);
-    const periods = Array.from({ length: Math.max(0, count) }, (_, index) => offset + index + 1);
-    if (session.id === sessionId) return periods;
-    offset += count;
+  // Try session-level counts first (periodCounts keyed by session.id)
+  const sessionLevelCount = Number(input.periodCounts[sessionId] ?? 0);
+  if (Number.isFinite(sessionLevelCount) && sessionLevelCount > 0) {
+    let offset = 0;
+    for (const session of input.sessions) {
+      if (session.id === sessionId) {
+        return Array.from({ length: sessionLevelCount }, (_, i) => offset + i + 1);
+      }
+      const count = Number(input.periodCounts[session.id] ?? 0);
+      offset += Number.isFinite(count) ? count : 0;
+    }
   }
-  return [];
+
+  // Fallback: derive session-level counts from day-level counts (periodCounts keyed by day.id).
+  // Split each day equally across sessions and map session position to absolute period numbers.
+  const sessionIndex = input.sessions.findIndex((s) => s.id === sessionId);
+  if (sessionIndex < 0 || input.sessions.length === 0) return [];
+
+  const sampleDay = input.days[0];
+  if (!sampleDay) return [];
+  const dayLevelCount = Number(input.periodCounts[sampleDay.id] ?? 0);
+  if (!Number.isFinite(dayLevelCount) || dayLevelCount <= 0) return [];
+
+  const sessionsCount = input.sessions.length;
+  // For session i, periods are: i*N+1, i*N+2, ..., i*N+(N/sessions) — but we don't know the split.
+  // Use a simple heuristic: each session gets dayLevelCount / sessionsCount periods (rounded up).
+  const periodsPerSession = Math.ceil(dayLevelCount / sessionsCount);
+  const start = sessionIndex * periodsPerSession + 1;
+  const end = Math.min(start + periodsPerSession - 1, dayLevelCount);
+  const periods: number[] = [];
+  for (let p = start; p <= end; p += 1) periods.push(p);
+  return periods;
 }

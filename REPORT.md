@@ -9,19 +9,19 @@
 | Metric | Count | % |
 |---|---|---|
 | Tổng constraints test | 150 | 100% |
-| **PASS** (rule + AI cho ra spec hợp lệ) | 92 | 61.3% |
-| **PARTIAL** (cần user feedback/custom_dsl) | 56 | 37.3% |
-| **FAIL** (không parse được) | 2 | 1.3% |
+| **PASS** (rule + AI cho ra spec hợp lệ) | 103 | 68.7% |
+| **PARTIAL** (cần user feedback/custom_dsl) | 47 | 31.3% |
+| **FAIL** (không parse được) | 0 | 0.0% |
 | Rule parser HIGH confidence (fast-path, không gọi AI) | 30 | 20.0% |
 
 ## Phân tích theo nhóm
 
 | Nhóm | Mô tả | Pass | Partial | Fail | Tỷ lệ Pass |
 |---|---|---|---|---|---|
-| 1-days | Cơ bản về ngày | 10 | 10 | 0 | 50% |
-| 2-periods | Cơ bản về tiết | 11 | 9 | 0 | 55% |
-| 3-day-period | Kết hợp ngày + tiết | 11 | 7 | 2 | 55% |
-| 4-if-then-simple | IF/THEN đơn giản | 16 | 4 | 0 | 80% |
+| 1-days | Cơ bản về ngày | 13 | 7 | 0 | 65% |
+| 2-periods | Cơ bản về tiết | 15 | 5 | 0 | 75% |
+| 3-day-period | Kết hợp ngày + tiết | 14 | 6 | 0 | 70% |
+| 4-if-then-simple | IF/THEN đơn giản | 17 | 3 | 0 | 85% |
 | 5-if-then-complex | IF/THEN phức tạp | 20 | 0 | 0 | 100% |
 | 6-order-distance | Khoảng cách / thứ tự | 7 | 13 | 0 | 35% |
 | 7-frequency | Tần suất / tổng số | 7 | 13 | 0 | 35% |
@@ -43,10 +43,10 @@
 | 8 | Minh dạy từ thứ 2 đến thứ 5 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 9 | Quân không dạy thứ 7 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 10 | Nam chỉ dạy thứ 3 và thứ 5 | medium | translator | medium | 3 | - | ✅ PASS | - |
-| 11 | Phương không dạy cuối tuần | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
+| 11 | Phương không dạy cuối tuần | medium | translator | medium | 3 | - | ✅ PASS | - |
 | 12 | Trang dạy tất cả các ngày trong tuần | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 13 | Bình không dạy đầu tuần | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 14 | Cường chỉ dạy giữa tuần | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
+| 13 | Bình không dạy đầu tuần | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 14 | Cường chỉ dạy giữa tuần | medium | translator | medium | 4 | - | ✅ PASS | - |
 | 15 | Đạt không dạy thứ 4 | high | rule | high | 1 | - | ✅ PASS | - |
 | 16 | Khánh dạy ít nhất 3 ngày trong tuần | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 17 | Thảo không dạy quá 2 ngày trong tuần | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
@@ -58,25 +58,25 @@
 
 | # | Input | Rule Conf | Source | Final Conf | #Specs | Custom DSL | Status | Ghi chú |
 |---|---|---|---|---|---|---|---|---|
-| 21 | Hiếu chỉ dạy tiết 1 | medium | translator | medium | 1 | - | ✅ PASS | - |
+| 21 | Hiếu chỉ dạy tiết 1 | medium | translator | medium | 5 | - | ✅ PASS | - |
 | 22 | Long không dạy tiết 5 | medium | translator | medium | 1 | - | ✅ PASS | - |
-| 23 | Dung dạy từ tiết 1 đến tiết 3 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 24 | Mai chỉ dạy các tiết buổi sáng | medium | translator | medium | 6 | - | ✅ PASS | - |
-| 25 | Tuấn không dạy tiết cuối cùng | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
+| 23 | Dung dạy từ tiết 1 đến tiết 3 | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 24 | Mai chỉ dạy các tiết buổi sáng | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 25 | Tuấn không dạy tiết cuối cùng | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 26 | Lan dạy tiết 2 và tiết 4 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 27 | Hoa không dạy tiết 1 và tiết 5 | medium | translator | medium | 2 | - | ✅ PASS | - |
-| 28 | Minh chỉ dạy tiết buổi chiều | medium | translator | medium | 6 | - | ✅ PASS | - |
+| 28 | Minh chỉ dạy tiết buổi chiều | medium | translator | medium | 3 | - | ✅ PASS | - |
 | 29 | Quân dạy tiết 3 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 30 | Nam không dạy tiết đầu tiên | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 31 | Phương chỉ dạy tiết 1, 2, 3 | medium | translator | medium | 1 | - | ✅ PASS | - |
+| 31 | Phương chỉ dạy tiết 1, 2, 3 | medium | translator | medium | 5 | - | ✅ PASS | - |
 | 32 | Trang không dạy tiết 4 | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 33 | Bình dạy tối đa 2 tiết mỗi ngày | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 34 | Cường dạy ít nhất 3 tiết mỗi ngày | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 35 | Đạt chỉ dạy 1 tiết mỗi ngày | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 36 | Khánh không dạy quá 4 tiết mỗi ngày | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 37 | Thảo dạy đúng 2 tiết mỗi ngày | medium | translator | medium | 1 | - | ✅ PASS | - |
-| 38 | Nhung chỉ dạy các tiết lẻ | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 39 | Toàn chỉ dạy các tiết chẵn | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
+| 38 | Nhung chỉ dạy các tiết lẻ | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 39 | Toàn chỉ dạy các tiết chẵn | medium | translator | medium | 3 | - | ✅ PASS | - |
 | 40 | Vân không dạy tiết 2 và tiết 3 | medium | translator | medium | 2 | - | ✅ PASS | - |
 
 ### Nhóm 3-day-period: Kết hợp ngày + tiết
@@ -85,23 +85,23 @@
 |---|---|---|---|---|---|---|---|---|
 | 41 | Hiếu dạy thứ 2 tiết 1 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 42 | Long không dạy thứ 3 tiết 5 | medium | translator | medium | 1 | - | ✅ PASS | - |
-| 43 | Dung chỉ dạy thứ 4 tiết 1 và thứ 5 | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 43 | Dung chỉ dạy thứ 4 tiết 1 và thứ 5 | medium | translator | medium | 5 | - | ✅ PASS | - |
 | 44 | Mai dạy thứ 6 tiết 2 hoặc tiết 3 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 45 | Tuấn không dạy thứ 2 tiết 4 | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 46 | Lan dạy thứ 3 tiết 1, 2, 3 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 47 | Hoa chỉ dạy thứ 5 tiết buổi sáng | medium | translator | medium | 16 | - | ✅ PASS | - |
 | 48 | Minh không dạy thứ 4 tiết 5 | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 49 | Quân dạy thứ 7 tiết 1 và tiết 2 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 50 | Nam chỉ dạy thứ 2 tiết 3 | medium | translator | medium | 4 | - | ✅ PASS | - |
-| 51 | Phương không dạy thứ 6 các tiết buổi chiều | low | rule | low | 0 | Có | ❌ FAIL | - |
-| 52 | Trang dạy thứ 4 từ tiết 1 đến tiết 3 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 53 | Bình chỉ dạy thứ 3 tiết 4 | medium | translator | medium | 4 | - | ✅ PASS | - |
+| 50 | Nam chỉ dạy thứ 2 tiết 3 | medium | translator | medium | 5 | - | ✅ PASS | - |
+| 51 | Phương không dạy thứ 6 các tiết buổi chiều | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 52 | Trang dạy thứ 4 từ tiết 1 đến tiết 3 | medium | translator | medium | 3 | - | ✅ PASS | - |
+| 53 | Bình chỉ dạy thứ 3 tiết 4 | medium | translator | medium | 5 | - | ✅ PASS | - |
 | 54 | Cường không dạy thứ 5 tiết 1, 2 | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 55 | Đạt dạy thứ 2 tiết 5 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
 | 56 | Khánh chỉ dạy thứ 6 tiết 2 và thứ 7 tiết 3 | medium | translator | medium | 4 | - | ✅ PASS | - |
-| 57 | Thảo không dạy thứ 4 tiết buổi sáng | low | rule | low | 0 | Có | ❌ FAIL | - |
+| 57 | Thảo không dạy thứ 4 tiết buổi sáng | medium | translator | medium | 3 | - | ✅ PASS | - |
 | 58 | Nhung dạy thứ 3 tiết lẻ | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
-| 59 | Toàn chỉ dạy thứ 5 tiết chẵn | medium | translator | medium | 4 | - | ✅ PASS | - |
+| 59 | Toàn chỉ dạy thứ 5 tiết chẵn | medium | translator | medium | 3 | - | ✅ PASS | - |
 | 60 | Vân không dạy thứ 2 tiết 1 và thứ 6 tiết 5 | medium | translator | medium | 1 | - | ✅ PASS | - |
 
 ### Nhóm 4-if-then-simple: IF/THEN đơn giản
@@ -112,7 +112,7 @@
 | 62 | Nếu Long dạy tiết 1 thì Dung không dạy tiết 1 | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 63 | Nếu Dung dạy thứ 3 thì Mai phải dạy thứ 4 | high | rule | high | 1 | - | ✅ PASS | - |
 | 64 | Nếu Mai không dạy thứ 5 thì Tuấn phải dạy thứ 5 | high | rule | high | 1 | - | ✅ PASS | - |
-| 65 | Nếu Tuấn dạy tiết 2 thì Lan dạy tiết 3 | low | translator | medium | 1 | Có | ⚠️ PARTIAL | - |
+| 65 | Nếu Tuấn dạy tiết 2 thì Lan dạy tiết 3 | medium | translator | medium | 4 | - | ✅ PASS | - |
 | 66 | Nếu Lan dạy thứ 2 thì Hoa không dạy thứ 2 | high | rule | high | 1 | - | ✅ PASS | - |
 | 67 | Nếu Hoa dạy tiết 4 thì Minh không dạy tiết 4 | medium | translator | medium | 1 | - | ✅ PASS | - |
 | 68 | Nếu Minh dạy thứ 6 thì Quân dạy thứ 7 | medium | translator | low | 1 | - | ✅ PASS | - |
@@ -225,93 +225,20 @@
 - LLM fallback hoạt động cho các constraints phức tạp hơn (nhóm 5, 7, 8).
 
 ### Điểm cần cải thiện
-- 56 constraints cần user feedback. Ví dụ điển hình:
+- 47 constraints cần user feedback. Ví dụ điển hình:
   - #4: "Mai dạy tất cả các ngày trừ thứ 7" → translator (1 specs)
   - #8: "Minh dạy từ thứ 2 đến thứ 5" → translator (1 specs)
   - #9: "Quân không dạy thứ 7" → translator (1 specs)
-  - #11: "Phương không dạy cuối tuần" → translator (1 specs)
   - #12: "Trang dạy tất cả các ngày trong tuần" → translator (1 specs)
-  - #13: "Bình không dạy đầu tuần" → translator (1 specs)
-  - #14: "Cường chỉ dạy giữa tuần" → translator (1 specs)
   - #17: "Thảo không dạy quá 2 ngày trong tuần" → translator (1 specs)
   - #18: "Nhung dạy đúng 4 ngày trong tuần" → translator (1 specs)
   - #20: "Vân chỉ dạy 1 ngày trong tuần" → translator (1 specs)
+  - #26: "Lan dạy tiết 2 và tiết 4" → translator (1 specs)
+  - #29: "Quân dạy tiết 3" → translator (1 specs)
+  - #30: "Nam không dạy tiết đầu tiên" → translator (1 specs)
 - Multi-condition (nhóm 8): cần xử lý tốt hơn các IF với nhiều branches AND/OR phức tạp.
 - Frequency/range (nhóm 7): cần parser nhận diện "ít nhất", "tối đa", "đúng", "từ X đến Y".
 
 ## Kết luận
 
-Với 150 constraints đa dạng, hệ thống đạt **61.3%** tỷ lệ pass (không cần user feedback). Kết hợp rule parser + LLM (deepseek/deepseek-v4-flash) cho kết quả khả quan. Các constraints còn lại (56 partial, 2 fail) thuộc nhóm phức tạp và cần user feedback hoặc custom DSL.
-
-### Phân tích chi tiết từng nhóm
-
-**Nhóm 1 (Cơ bản về ngày, 1-20): 50% pass**
-- ✅ Pass tốt: pattern "không dạy thứ X" đơn (#1, #2, #15), "không dạy thứ X và thứ Y" sau fix (#5, #19).
-- ⚠️ Partial nhiều: "tất cả các ngày trừ thứ 7" (#4), "cuối tuần" (#11), "đầu tuần" (#13), "giữa tuần" (#14), "ít nhất N ngày" (#16 - pass), "không quá N ngày" (#17), "đúng N ngày" (#18), "chỉ 1 ngày" (#20). Lý do: rule parser không có từ điển "cuối tuần/đầu tuần/giữa tuần" và không hỗ trợ constraint về số ngày/tuần mạch lạc.
-
-**Nhóm 2 (Cơ bản về tiết, 21-40): 55% pass**
-- ✅ Pass tốt: "chỉ dạy tiết 1" (#21), "không dạy tiết 5" (#22), "chỉ dạy các tiết buổi sáng" (#24), "không dạy tiết 1 và tiết 5" (#27), "chỉ dạy tiết buổi chiều" (#28).
-- ⚠️ Partial: "từ tiết 1 đến tiết 3" (#23), "không dạy tiết cuối cùng" (#25), "tiết lẻ/chẵn" (#38, #39 - đôi khi), "chỉ dạy 1 tiết mỗi ngày" (#35), "không dạy quá 4 tiết mỗi ngày" (#36). Lý do: thiếu pattern "từ A đến B" rõ ràng và "tiết lẻ/chẵn".
-
-**Nhóm 3 (Kết hợp ngày + tiết, 41-60): 55% pass**
-- ✅ Pass tốt: hầu hết "không dạy thứ X tiết Y" và "chỉ dạy thứ X tiết Y" cụ thể.
-- ❌ FAIL: #51 ("Phương không dạy thứ 6 các tiết buổi chiều"), #57 ("Thảo không dạy thứ 4 tiết buổi sáng"). Lý do: pattern kết hợp "ngày + buổi" chưa có trong rule parser.
-- ⚠️ Partial: "tiết lẻ/chẵn" (#58, #59), "dạy thứ 6 tiết 2 hoặc tiết 3" (#44 - diễn đạt OR khó).
-
-**Nhóm 4 (IF/THEN đơn giản, 61-80): 80% pass - TỐT**
-- ✅ Pass tốt: tất cả pattern "Nếu A thì B" với teacher + day/period.
-- ⚠️ Partial nhẹ: "Nếu A thì B" với "phải" (#63, #64) - vẫn pass nhờ LLM.
-
-**Nhóm 5 (IF/THEN phức tạp, 81-100): 100% pass - XUẤT SẮC**
-- ✅ Pass tất cả: IF với AND/OR, nhiều teachers, multiple THEN branches.
-- Đây là nhóm LLM thể hiện rõ sức mạnh.
-
-**Nhóm 6 (Khoảng cách/thứ tự, 101-120): 35% pass - YẾU**
-- ⚠️ Partial nhiều: "không dạy cùng tiết" (#101), "không dạy liên tiếp" (#104), "không dạy cùng ngày" (#107), "không dạy các tiết liên tiếp" (#118) - đa số cần custom_dsl.
-- Lý do: các constraint về "cách nhau", "liên tiếp", "trước/sau" giữa nhiều giáo viên thường cần encode IR riêng.
-
-**Nhóm 7 (Tần suất, 121-140): 35% pass - YẾU**
-- ✅ Pass: pattern "đúng N tiết/tuần" (#121, #125, #129), "tối đa N tiết" (#126, #128), "ít nhất N tiết" (#127), "không quá N tiết" (#128).
-- ⚠️ Partial: "từ N đến M tiết" (#130), "nhiều hơn/ít hơn N tiết" (so sánh giữa 2 giáo viên #131, #132, #134, #135, #136, #138), "tổng cộng N tiết" (#133, #137, #140), "nhiều nhất trong tuần" (#139).
-- Lý do: constraint so sánh giữa 2+ giáo viên cần IR riêng.
-
-**Nhóm 8 (Multi-condition phức tạp, 141-150): 100% pass - XUẤT SẮC**
-- ✅ Pass tất cả 10 constraints với rule parser (high/low confidence) hoặc LLM.
-- Đây là kết quả tốt bất ngờ nhờ logic IF/THEN đã hoàn thiện.
-
-### Gợi ý cải thiện
-
-1. **Rule parser (ưu tiên cao)**:
-   - Thêm pattern "cuối tuần", "đầu tuần", "giữa tuần" (nhóm 1, 4 cases)
-   - Thêm pattern "từ A đến B" cho period (nhóm 2, 3)
-   - Thêm pattern "tiết lẻ/chẵn" (nhóm 2, 2 cases)
-   - Thêm pattern kết hợp "ngày + buổi" (nhóm 3, 2 FAIL cases)
-   - Cải thiện nhóm 6 (order/distance) và 7 (frequency comparison)
-
-2. **LLM fallback** (đã tốt, chỉ cần tinh chỉnh):
-   - Nhóm 5 và 8 đạt 100% → giữ nguyên
-   - Nhóm 6 và 7 vẫn cần custom_dsl cho nhiều cases - đây là hạn chế tự nhiên
-
-3. **UI/UX**:
-   - Cảnh báo rõ ràng khi constraint cần user feedback (đã có sẵn issue `hard_unchecked`)
-   - Nút "AI phân tích" hoạt động tốt (3/5 cases PARTIAL được AI fixed)
-
-
----
-
-## Phụ lục: Test nút "AI phân tích" với 10 constraints PARTIAL/FAIL
-
-Mục đích: mô phỏng user click "AI phân tích" trên UI để xem AI có cải thiện kết quả không.
-
-| # | Input | First pass | AI analyze | Conf | #Specs | AI cải thiện? | Display text |
-|---|---|---|---|---|---|---|---|
-| 4 | Mai dạy tất cả các ngày trừ thứ 7 | PARTIAL_OR_FAIL | PASS | medium | 1 | ✅ Có | Cô Mai dạy tất cả các ngày trong tuần (thứ 2 đến thứ 6). |
-| 11 | Phương không dạy cuối tuần | PARTIAL_OR_FAIL | PASS | medium | 1 | ✅ Có | Phương không dạy cuối tuần. |
-| 17 | Thảo không dạy quá 2 ngày trong tuần | PARTIAL_OR_FAIL | FAIL | low | 0 | ⚠️ Vẫn cần feedback | Thảo không dạy quá 2 ngày trong tuần |
-| 23 | Dung dạy từ tiết 1 đến tiết 3 | PARTIAL_OR_FAIL | FAIL | medium | 0 | ⚠️ Vẫn cần feedback | Dung dạy từ tiết 1 đến tiết 3 |
-| 25 | Tuấn không dạy tiết cuối cùng | PARTIAL_OR_FAIL | PASS | high | 1 | ✅ Có | Tuấn không dạy tiết cuối cùng |
-
-**Tổng kết:**
-- AI cải thiện (từ PARTIAL/FAIL → PASS): **3/5**
-- AI cho spec hợp lệ (bao gồm cả first-pass đã PASS): **3/5**
-- Vẫn cần user feedback (needs_clarification): **0/5**
+Với 150 constraints đa dạng, hệ thống đạt **68.7%** tỷ lệ pass (không cần user feedback). Kết hợp rule parser + LLM (deepseek/deepseek-v4-flash) cho kết quả khả quan. Các constraints còn lại (47 partial, 0 fail) thuộc nhóm phức tạp và cần user feedback hoặc custom DSL.

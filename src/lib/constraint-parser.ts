@@ -3,10 +3,12 @@ import type { DayId, SessionId } from '../features/timetable/calendar-schema'
 export type ParsedConstraint =
   | { kind: 'teacher_block_days'; teacherLabels: string[]; dayIds: string[] }
   | { kind: 'teacher_block_periods'; teacherLabels: string[]; periods: number[] }
+  | { kind: 'teacher_block_last_period'; teacherLabels: string[] }
   | { kind: 'teacher_block_sessions'; teacherLabels: string[]; sessionIds: string[] }
   | { kind: 'teacher_block_day_period'; teacherLabels: string[]; dayIds: string[]; periods: number[] }
   | { kind: 'teacher_block_session_day'; teacherLabels: string[]; sessionIds: string[]; dayIds: string[] }
   | { kind: 'teacher_allow_only_days'; teacherLabels: string[]; dayIds: string[] }
+  | { kind: 'teacher_allow_only_periods'; teacherLabels: string[]; periods: number[] }
   | { kind: 'teacher_allow_only_sessions'; teacherLabels: string[]; sessionIds: string[] }
   | { kind: 'class_block_days'; classLabels: string[]; dayIds: string[] }
   | { kind: 'subject_block_periods'; subjectLabels: string[]; periods: number[] }
@@ -168,8 +170,22 @@ function extractPeriods(text: string): number[] {
     const hi = Number(range[2])
     for (let n = Math.min(lo, hi); n <= Math.max(lo, hi); n++) periods.push(n)
   }
+  // "từ tiết A đến tiết B" — also catch "tiết A đến tiết B"
+  const wordRange = text.match(/\btiết\s*(\d+)\s*(?:đến|den|toi)\s*(?:tiết\s*)?(\d+)/u);
+  if (wordRange) {
+    const lo = Number(wordRange[1])
+    const hi = Number(wordRange[2])
+    for (let n = Math.min(lo, hi); n <= Math.max(lo, hi); n++) periods.push(n)
+  }
   const singles = text.matchAll(/\btiết\s*(\d+)\b/gu)
   for (const match of singles) periods.push(Number(match[1]))
+  // "tiết lẻ" / "tiết chẵn"
+  if (/\btiết\s*lẻ|tiet\s*le\b/u.test(text)) {
+    for (let n = 1; n <= 10; n += 2) periods.push(n);
+  }
+  if (/\btiết\s*chẵn|tiet\s*chan\b/u.test(text)) {
+    for (let n = 2; n <= 10; n += 2) periods.push(n);
+  }
   return unique(periods.map(String)).map(Number).filter((n) => Number.isInteger(n) && n > 0)
 }
 
@@ -248,6 +264,11 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   }
 
   if (/không\s*dạy|khong\s*day|không\s*có\s*lịch|khong\s*co\s*lich|tránh\s*dạy|tranh\s*day|tránh\s*tiết|tranh\s*tiet|tránh|tranh/u.test(raw) && teachers.length > 0) {
+    // Special: "không dạy tiết cuối cùng" — treat as block of all max period
+    if (periods.length === 0 && /(tiết\s*cuối|tiet\s*cuoi)/u.test(raw)) {
+      // Defer to translator to expand based on period counts
+      return { kind: 'teacher_block_last_period', teacherLabels: teachers }
+    }
     if (days.length > 0 && periods.length > 0) return { kind: 'teacher_block_day_period', teacherLabels: teachers, dayIds: days, periods }
     if (sessions.length > 0 && days.length > 0) return { kind: 'teacher_block_session_day', teacherLabels: teachers, sessionIds: sessions, dayIds: days }
     if (days.length > 0) return { kind: 'teacher_block_days', teacherLabels: teachers, dayIds: days }
@@ -255,9 +276,49 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     if (sessions.length > 0) return { kind: 'teacher_block_sessions', teacherLabels: teachers, sessionIds: sessions }
   }
 
+  if (periods.length > 0 && teachers.length > 0 && !/không|khong|tránh|tranh/u.test(raw)) {
+    // "dạy từ tiết A đến tiết B" / "chỉ dạy tiết 1-3" — positive period constraint
+    if (/(từ|tu|đến|den)/u.test(raw) || (/chỉ|chi/u.test(raw))) {
+      return { kind: 'teacher_allow_only_periods', teacherLabels: teachers, periods };
+    }
+  }
+
   if ((/chỉ\s*dạy|chi\s*day/u.test(raw) || /\bchỉ|chi\b/u.test(raw)) && teachers.length > 0) {
     if (days.length > 0) return { kind: 'teacher_allow_only_days', teacherLabels: teachers, dayIds: days }
     if (sessions.length > 0) return { kind: 'teacher_allow_only_sessions', teacherLabels: teachers, sessionIds: sessions }
+    if (periods.length > 0) return { kind: 'teacher_allow_only_periods', teacherLabels: teachers, periods }
+  }
+
+  // teacher_allow_only_relative_days: "cuối tuần" / "đầu tuần" / "giữa tuần" / "tất cả các ngày trừ thứ 7"
+  if (teachers.length > 0 && (/tuần|tuan|uần|uan|trừ|tru|ngoại\s*trừ|ngoai\s*tru/u.test(raw))) {
+    const allDayIds = Object.keys(ctx.dayIds);
+    const excluded = extractDays(raw, ctx.dayIds);
+    let allowed: string[] = allDayIds;
+    if (/cuối\s*tuần|cuoi\s*tuan|cuối\s*tuần/u.test(raw)) {
+      const last = allDayIds.slice(-2);
+      if (last.length > 0) allowed = last;
+    } else if (/đầu\s*tuần|dau\s*tuan|uầu\s*tuần|uau\s*tuan|đầu\s*tuần/u.test(raw)) {
+      allowed = allDayIds.slice(0, 2);
+    } else if (/giữa\s*tuần|giua\s*tuan|giữa\s*tuần/u.test(raw)) {
+      const mid = allDayIds.slice(2, -2);
+      allowed = mid.length > 0 ? mid : allDayIds.slice(1, -1);
+    } else if (/(trừ|tru|ngoại\s*trừ|ngoai\s*tru|except)/u.test(raw) && excluded.length > 0) {
+      const exSet = new Set(excluded);
+      allowed = allDayIds.filter((d) => !exSet.has(d));
+    } else if (/tất\s*cả|tat\s*ca|mọi|moi|uất\s*cả|uat\s*ca|all\s*days?/u.test(raw)) {
+      // "tất cả các ngày" with no real exclusion = unparsed (already covers all)
+      if (excluded.length === 0) {
+        return { kind: 'unparsed', reason: 'Constraint áp dụng cho tất cả các ngày — không cần ràng buộc cụ thể.' };
+      }
+      allowed = allDayIds.filter((d) => !excluded.includes(d));
+    }
+    if (allowed.length > 0 && allowed.length < allDayIds.length) {
+      if (/không|khong/u.test(raw)) {
+        const blockSet = new Set(allDayIds.filter((d) => !allowed.includes(d)));
+        return { kind: 'teacher_block_days', teacherLabels: teachers, dayIds: Array.from(blockSet) };
+      }
+      return { kind: 'teacher_allow_only_days', teacherLabels: teachers, dayIds: allowed };
+    }
   }
 
   if (/không\s*học|khong\s*hoc/u.test(raw) && classes.length > 0) {

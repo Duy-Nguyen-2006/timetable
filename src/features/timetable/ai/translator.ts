@@ -426,6 +426,20 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }) satisfies ConstraintSpec);
     }
 
+    if (parsed.kind === 'teacher_block_last_period' && parsed.teacherLabels[0]) {
+      const allPeriods = buildTranslatorPeriods(input);
+      const lastPeriod = allPeriods[allPeriods.length - 1];
+      if (lastPeriod !== undefined) {
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_block_period' as const,
+          params: { teacher: parsed.teacherLabels[0], period: lastPeriod },
+        } satisfies ConstraintSpec;
+      }
+    }
+
     if (
       parsed.kind === 'teacher_block_day_period' &&
       parsed.teacherLabels[0] &&
@@ -480,6 +494,19 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
 
     if (parsed.kind === 'teacher_allow_only_sessions' && parsed.teacherLabels[0] && parsed.sessionIds.length > 0) {
       const allowedPeriods = new Set(parsed.sessionIds.flatMap((sessionId) => periodsForSession(input, sessionId)));
+      return buildTranslatorPeriods(input)
+        .filter((period) => !allowedPeriods.has(period))
+        .map((period) => ({
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_block_period',
+          params: { teacher: parsed.teacherLabels[0], period },
+        }) satisfies ConstraintSpec);
+    }
+
+    if (parsed.kind === 'teacher_allow_only_periods' && parsed.teacherLabels[0] && parsed.periods.length > 0) {
+      const allowedPeriods = new Set(parsed.periods);
       return buildTranslatorPeriods(input)
         .filter((period) => !allowedPeriods.has(period))
         .map((period) => ({
