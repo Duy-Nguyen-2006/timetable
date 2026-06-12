@@ -5,6 +5,16 @@ export function includesLabel(text: string, label: string): boolean {
   return text.toLocaleLowerCase('vi').includes(label.toLocaleLowerCase('vi'));
 }
 
+export function normalizeConstraintText(text: string): string {
+  return text
+    .toLocaleLowerCase('vi')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const VIETNAMESE_NUMBER_WORDS: Record<string, number> = {
   mot: 1,
   hai: 2,
@@ -137,14 +147,52 @@ export function extractDayId(text: string, days: Array<{ id: string; label: stri
   return null;
 }
 
-export function normalizeConstraintText(text: string): string {
-  return text
-    .toLocaleLowerCase('vi')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/\s+/g, ' ')
-    .trim();
+/**
+ * Extract ALL day IDs mentioned in text, handling OR patterns like "thứ 3 hoặc thứ 5".
+ */
+export function extractAllDayIds(text: string, days: Array<{ id: string; label: string }>): string[] {
+  const foundDays = new Set<string>();
+  const normalizedText = normalizeConstraintText(text);
+  
+  // First: direct match against context day IDs and labels (normalized)
+  for (const day of days) {
+    const normalizedId = day.id.toLowerCase();
+    const normalizedLabel = normalizeConstraintText(day.label);
+    if (normalizedText.includes(normalizedId) || normalizedText.includes(normalizedLabel)) {
+      foundDays.add(day.id);
+    }
+  }
+
+  // Second: match Vietnamese day-of-week patterns by number
+  const dayNumberPattern = /(?:thứ|thu)\s*([2-7])|(?:chủ\s*nhật|chu\s*nhat|\bcn\b)/giu;
+  const matches = text.matchAll(dayNumberPattern);
+  for (const match of matches) {
+    if (match[1]) {
+      // "thứ 2" -> "thứ 7"
+      const dayNum = Number(match[1]);
+      const searchText = `thứ ${dayNum}`;
+      const contextId = lookupDayIdByNumber(searchText, days);
+      if (contextId) foundDays.add(contextId);
+    } else {
+      // "chủ nhật"
+      const contextId = lookupDayIdByNumber(match[0], days);
+      if (contextId) foundDays.add(contextId);
+    }
+  }
+
+  // Third: hardcoded English fallback when days array is short (< 7)
+  if (days.length < HARDCODED_DAY_IDS.length) {
+    const dayIds = new Set(days.map((d) => d.id));
+    if (/thứ\s*2|thu\s*2/iu.test(text) && dayIds.has('monday')) foundDays.add('monday');
+    if (/thứ\s*3|thu\s*3/iu.test(text) && dayIds.has('tuesday')) foundDays.add('tuesday');
+    if (/thứ\s*4|thu\s*4/iu.test(text) && dayIds.has('wednesday')) foundDays.add('wednesday');
+    if (/thứ\s*5|thu\s*5/iu.test(text) && dayIds.has('thursday')) foundDays.add('thursday');
+    if (/thứ\s*6|thu\s*6/iu.test(text) && dayIds.has('friday')) foundDays.add('friday');
+    if (/thứ\s*7|thu\s*7/iu.test(text) && dayIds.has('saturday')) foundDays.add('saturday');
+    if (/chủ\s*nhật|chu\s*nhat|\bcn\b/iu.test(text) && dayIds.has('sunday')) foundDays.add('sunday');
+  }
+
+  return Array.from(foundDays);
 }
 
 export function isAutoBaseConstraintText(text: string): boolean {

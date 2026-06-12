@@ -13,6 +13,7 @@ import {
   applyConstraintWeight,
   includesLabel,
   extractDayId,
+  extractAllDayIds,
   extractFirstNumber,
   extractConsecutiveBanCount,
   extractPeriodNumber,
@@ -844,13 +845,13 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
     }
 
     if (parsed.kind === 'subject_allow_only_days' && parsed.subjectLabels[0] && parsed.dayIds.length > 0) {
-      return parsed.dayIds.map((day, idx) => ({
-        id: parsed.dayIds.length === 1 ? id : `${id}_${idx + 1}`,
+      return [{
+        id: parsed.dayIds.length === 1 ? id : `${id}_multi`,
         original: constraint.text,
         severity,
         kind: 'subject_allowed_days' as const,
-        params: { subject: parsed.subjectLabels[0], days: [day] },
-      }) satisfies ConstraintSpec);
+        params: { subject: parsed.subjectLabels[0], days: parsed.dayIds },
+      }] satisfies ConstraintSpec[];
     }
 
     if (parsed.kind === 'class_no_gaps' && parsed.classLabels[0]) {
@@ -1310,13 +1311,11 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
-    // teacher_allowed_days: "giáo viên A chỉ dạy thứ 2, thứ 4"
+    // teacher_allowed_days: "giáo viên A chỉ dạy thứ 2, thứ 4" hoặc "Hương chỉ dạy thứ 3 hoặc thứ 5"
     if (/(chỉ\s*dạy|chi\s*day).*(thứ|thu)/u.test(constraint.text)) {
       const teacher = teacherLabels.find((label) => includesLabel(constraint.text, label));
       if (teacher) {
-        const days = input.days.map((d) => d.id).filter((dayId) => includesLabel(constraint.text, dayId) || new RegExp(`thứ\\s*${dayId}|thu\\s*${dayId}`, 'iu').test(constraint.text));
-        const extractedDay = extractDayId(constraint.text, input.days);
-        const allDays = extractedDay ? [extractedDay] : days;
+        const allDays = extractAllDayIds(constraint.text, input.days);
         if (allDays.length > 0) {
           return { id, original: constraint.text, severity, kind: 'teacher_allowed_days', params: { teacher, days: allDays } } satisfies ConstraintSpec;
         }
@@ -1345,9 +1344,9 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
     if (/(chỉ\s*học|chi\s*hoc|chỉ\s*xếp|chi\s*xep).*(thứ|thu)/u.test(constraint.text)) {
       const subject = subjectLabels.find((label) => includesLabel(constraint.text, label));
       if (subject) {
-        const extractedDay = extractDayId(constraint.text, input.days);
-        if (extractedDay) {
-          return { id, original: constraint.text, severity, kind: 'subject_allowed_days', params: { subject, days: [extractedDay] } } satisfies ConstraintSpec;
+        const allDays = extractAllDayIds(constraint.text, input.days);
+        if (allDays.length > 0) {
+          return { id, original: constraint.text, severity, kind: 'subject_allowed_days', params: { subject, days: allDays } } satisfies ConstraintSpec;
         }
       }
     }
@@ -1423,13 +1422,11 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
-    // class_allowed_days: "lớp 10A chỉ học thứ 2, 3, 4"
+    // class_allowed_days: "lớp 10A chỉ học thứ 2, 3, 4" hoặc "lớp 10A chỉ học thứ 2 hoặc thứ 4"
     if (/(chỉ\s*học|chi\s*hoc).*(thứ|thu|lớp|lop)/u.test(constraint.text) && !/(tiết|tiet)/u.test(constraint.text)) {
       const klass = classLabels.find((label) => includesLabel(constraint.text, label));
       if (klass) {
-        const days = input.days.map((d) => d.id).filter((dayId) => includesLabel(constraint.text, dayId) || new RegExp(`thứ\\s*${dayId}|thu\\s*${dayId}`, 'iu').test(constraint.text));
-        const extracted = extractDayId(constraint.text, input.days);
-        const allDays = extracted ? [extracted] : days;
+        const allDays = extractAllDayIds(constraint.text, input.days);
         if (allDays.length > 0) {
           return { id, original: constraint.text, severity, kind: 'class_allowed_days', params: { class: klass, days: allDays } } satisfies ConstraintSpec;
         }

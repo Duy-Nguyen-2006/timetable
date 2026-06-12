@@ -405,5 +405,9 @@ test('rule parser: Môn Thể dục chỉ học thứ 3 hoặc thứ 5 → subje
   const specs = __translatorInternal.fallbackFromRuleParser(input);
   const daySpecs = specs.filter((s) => s.kind === 'subject_allowed_days');
   assert.ok(daySpecs.length >= 1, 'should produce subject_allowed_days specs');
+  const allowedDays = daySpecs[0].params.days as string[];
+  assert.ok(allowedDays.includes('tuesday'), 'should include tuesday (thứ 3)');
+  assert.ok(allowedDays.includes('thursday'), 'should include thursday (thứ 5)');
+  assert.equal(allowedDays.length, 2, 'should have exactly 2 allowed days');
 });
 

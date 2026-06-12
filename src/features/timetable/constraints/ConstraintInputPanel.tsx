@@ -23,6 +23,7 @@ import {
   CONSTRAINT_GROUP_LABELS,
   CONSTRAINT_TEMPLATES,
 } from './constraint-form-schema';
+import { humanizeConstraintSpec } from '../ai/constraint-humanizer';
 
 export type ConstraintDraftForm = {
   type: keyof typeof constraintTypes;
@@ -271,6 +272,32 @@ export function ConstraintInputPanel({
             <p>Ràng buộc: {CONSTRAINT_TEMPLATES.find((t) => t.id === suggestion.kind)?.label ?? suggestion.explanation}</p>
             {Object.entries(displayedParams).map(([k, v]) => (<p key={k}>{paramDisplay(agentInput, k, v)}</p>))}
           </div>
+          {(() => {
+            const previewSpec: ConstraintSpec | null = (() => {
+              const sourceDraft = suggestion.specsDraft && suggestion.specsDraft.length > 0
+                ? suggestion.specsDraft[0]
+                : { kind: suggestion.kind, paramsDraft: suggestion.paramsDraft };
+              if (sourceDraft) {
+                return {
+                  id: 'preview_spec',
+                  original: draft.text,
+                  severity: draft.type === 'required' ? 'hard' : 'soft',
+                  kind: sourceDraft.kind as ConstraintSpec['kind'],
+                  params: sourceDraft.paramsDraft as ConstraintSpec['params'],
+                };
+              }
+              return null;
+            })();
+            if (previewSpec) {
+              const humanText = humanizeConstraintSpec(previewSpec);
+              return (
+                <p className="mt-2 text-white/75">
+                  - Hệ thống hiểu là {humanText}
+                </p>
+              );
+            }
+            return null;
+          })()}
           <div className="mt-3 grid grid-cols-3 gap-2">
             <button type="button" onClick={importBuiltInSuggestion} className={`${primaryButtonClass} w-full`}>Dùng và xác nhận</button>
             <button type="button" onClick={handleAiClick} disabled={aiLoading} className="w-full rounded-md border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-medium text-violet-200 hover:bg-violet-500/25 disabled:opacity-50">

@@ -147,7 +147,6 @@ function extractDays(text: string, ctxDayIds?: Record<string, string>): string[]
   for (const [pattern, dayIndex] of VN_DAY_ALIASES) {
     if (pattern.test(text)) {
       days.push(resolveDayId(dayIndex, ctxDayIds));
-      break
     }
   }
   return unique(days)
