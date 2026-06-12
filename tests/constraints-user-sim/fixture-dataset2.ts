@@ -51,6 +51,16 @@ function buildAssignments() {
       }
     }
   }
+  // One assignment per subject label so matchLabels sees names like "Anh Văn", "Sinh học".
+  for (let s = 0; s < subjectNames.length; s++) {
+    assignments.push({
+      id: `asg_subj_${asgId++}`,
+      teacher: { id: 't0', label: teacherNames[0] },
+      subject: { id: `subj_${s}`, label: subjectNames[s] },
+      class: { id: 'c0', label: classNames[0] },
+      weeklyPeriods: 3,
+    });
+  }
   return assignments;
 }
 

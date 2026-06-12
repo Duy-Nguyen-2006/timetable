@@ -158,8 +158,25 @@ function extractTeacherGroupMembers(raw: string, ctx: ParseContext): string[] {
   return unique(picked)
 }
 
+/** Match subject labels including multi-word names (longest first). */
+function resolveSubjects(raw: string, ctx: ParseContext): string[] {
+  const fromLabels = matchLabels(raw, ctx.subjectLabels)
+  if (fromLabels.length > 0) return unique(fromLabels)
+  const sorted = [...ctx.subjectLabels].filter(Boolean).sort((a, b) => b.length - a.length)
+  const picked: string[] = []
+  let rest = raw
+  for (const label of sorted) {
+    const pat = boundaryPattern(label)
+    if (pat.test(rest)) {
+      picked.push(label)
+      rest = rest.replace(pat, ' ')
+    }
+  }
+  return unique(picked)
+}
+
 function extractSubjectPairFromText(raw: string, ctx: ParseContext): [string, string] | null {
-  const subjects = matchLabels(raw, ctx.subjectLabels)
+  const subjects = resolveSubjects(raw, ctx)
   if (subjects.length >= 2) return [subjects[0], subjects[1]]
   const andSplit = raw.split(/\s+và\s+|\s+va\s+/iu)
   if (andSplit.length >= 2) {
@@ -1230,6 +1247,139 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   if (/(cân\s*bằng\s*tải|cân\s*bằng\s*tiết|phan\s*bo\s*deu|balanced)/u.test(raw) && /(giáo\s*viên|giao\s*vien|gv|toàn\s*trường)/u.test(raw)) {
     const tolerance = extractFirstNumber(raw) ?? 1
     return { kind: 'global_teacher_utilization_balance', tolerance }
+  }
+
+  // ─── Dataset 2 quick wins (subject + group + global) ─────────────────
+  const subj = resolveSubjects(raw, ctx)
+
+  if (subj.length > 0 && /(chỉ\s*dạy|chi\s*day|chỉ\s*học|chi\s*hoc)/iu.test(raw) && days.length > 0) {
+    return { kind: 'subject_allow_only_days', subjectLabels: subj, dayIds: days }
+  }
+
+  if (subj.length > 0 && /(tiết\s*đầu|tiet\s*dau).*(hoặc|hoac).*(tiết\s*cuối|tiet\s*cuoi)/iu.test(raw)) {
+    return { kind: 'subject_prefer_periods', subjectLabels: subj, periods: [1, -1] }
+  }
+
+  if (subj.length >= 2 && /(không|khong).*(liên\s*tiếp|lien\s*tiep)/iu.test(raw)) {
+    return { kind: 'subjects_not_consecutive', subjectLabels: subj }
+  }
+
+  if (subj.length >= 2 && /(không|khong).*(cùng|trùng).*(ngày|ngay)/iu.test(raw)) {
+    return {
+      kind: 'class_subjects_not_same_day',
+      classLabels: '*',
+      subjectLabels: subj,
+      maxSubjectsPerDay: 1,
+      softHint: false,
+    }
+  }
+
+  if (subj.length > 0 && /(\d+)\s*tiết\s*liên\s*tiếp|lien\s*tiep|(\d+)\s*tiết\s*liền|lien\b/iu.test(raw)) {
+    const length = extractFirstNumber(raw) ?? 2
+    return { kind: 'subject_consecutive_periods', subjectLabels: subj, length }
+  }
+
+  if (subj.length > 0 && /có\s*(\d+)\s*tiết.*tuần/iu.test(raw)) {
+    if (/(đều|deu|cách\s*đều|cach\s*deu)/iu.test(raw)) {
+      return { kind: 'subject_spread_evenly', subjectLabels: subj }
+    }
+    const n = extractFirstNumber(raw)
+    if (n !== null) {
+      return { kind: 'subject_min_days', subjectLabels: subj, minDays: Math.min(n, 5) }
+    }
+  }
+
+  if (subj.length > 0 && /(dạy\s*trước|day\s*truoc).*(trong\s*tuần|trong\s*tuan)/iu.test(raw) && subj.length >= 2) {
+    return { kind: 'subject_before_subject_week', subjectALabels: [subj[0]], subjectBLabels: [subj[1]] }
+  }
+
+  if (subj.length >= 2 && /(dạy\s*cùng\s*ngày|cung\s*ngay)/iu.test(raw) && /(môn|mon|với|voi)/iu.test(raw)) {
+    return { kind: 'subject_same_week', subjectALabels: [subj[0]], subjectBLabels: [subj[1]] }
+  }
+
+  if (subj.length > 0 && sessions.length > 0 && /(buổi\s*sáng|buoi\s*sang|buổi\s*chiều|buoi\s*chieu)/iu.test(raw)) {
+    return { kind: 'subject_only_sessions', subjectLabels: subj, sessionIds: sessions }
+  }
+
+  if (groupMembersFinal.length >= 2 && /(dạy\s*buổi|day\s*buoi|buổi\s*sáng|buoi\s*sang)/iu.test(raw)) {
+    const sessionIds = sessions.length > 0 ? sessions : (['morning'] as SessionId[])
+    return { kind: 'teacher_allow_only_sessions', teacherLabels: groupMembersFinal, sessionIds }
+  }
+
+  if (groupMembersFinal.length >= 2 && /(phải\s*dạy\s*đều|phai\s*day\s*deu|dạy\s*đều).*tuần/iu.test(raw)) {
+    return { kind: 'teacher_no_constraint', teacherLabels: groupMembersFinal }
+  }
+
+  if (teachers.length >= 2 && /(xen\s*kẽ|xen\s*ke)/iu.test(raw)) {
+    return {
+      kind: 'teacher_pair_period_order',
+      teacherALabels: [teachers[0]],
+      teacherBLabels: [teachers[1]],
+      relation: 'before',
+      minGap: 2,
+    }
+  }
+
+  if (teachers.length >= 2 && /(cách\s*nhau|cach\s*nhau).*(ít\s*nhất|it\s*nhat).*tiết/iu.test(raw)) {
+    const minGap = extractFirstNumber(raw) ?? 2
+    return {
+      kind: 'teacher_pair_period_order',
+      teacherALabels: [teachers[0]],
+      teacherBLabels: [teachers[1]],
+      relation: 'before',
+      minGap,
+    }
+  }
+
+  if (teachers.length >= 3 && /(không\s*đồng\s*thời|khong\s*dong\s*thoi)/iu.test(raw)) {
+    return { kind: 'teacher_pair_not_same_slot', teacherLabels: teachers.slice(0, 2), dayIds: days }
+  }
+
+  if (/(nhóm|nhom|tổ|to)\b/iu.test(raw) && /(không\s*dạy|khong\s*day).*(thứ\s*7|thu\s*7)/iu.test(raw)) {
+    return { kind: 'teacher_no_constraint', teacherLabels: groupMembersFinal.length ? groupMembersFinal : teachers }
+  }
+
+  if (groupMembersFinal.length >= 2 && /(tối\s*đa|toi\s*da)\s*1\s*người.*tiết/iu.test(raw)) {
+    return { kind: 'teacher_group_max_concurrent', teacherLabels: groupMembersFinal, maxConcurrent: 1 }
+  }
+
+  if (/(ít\s*nhất|it\s*nhat)\s*\d+\s*người.*tiết.*buổi\s*sáng/iu.test(raw)) {
+    const minCount = extractFirstNumber(raw) ?? 2
+    return { kind: 'global_min_teachers_per_period', minCount, period: undefined, dayIds: days }
+  }
+
+  if (teachers.length > 0 && /(không\s*dạy\s*quá|khong\s*day\s*qua).*\d+\s*tiết.*tuần/iu.test(raw)) {
+    const max = extractFirstNumber(raw) ?? 8
+    return { kind: 'teacher_weekly_range', teacherLabels: teachers, max }
+  }
+
+  if (teachers.length > 0 && /(tối\s*thiểu|toi\s*thieu|ít\s*nhất|it\s*nhat).*\d+\s*tiết.*tuần/iu.test(raw)) {
+    const min = extractFirstNumber(raw) ?? 5
+    return { kind: 'teacher_weekly_range', teacherLabels: teachers, min }
+  }
+
+  if (teachers.length > 0 && /(phân\s*bổ\s*đều|phan\s*bo\s*deu).*(sáng|sang).*(chiều|chieu)/iu.test(raw)) {
+    return { kind: 'global_teacher_utilization_balance', tolerance: 1 }
+  }
+
+  if (teachers.length > 0 && /(nhiều\s*buổi\s*sáng|nhieu\s*buoi\s*sang).*(hơn|hon).*(chiều|chieu)/iu.test(raw)) {
+    return { kind: 'teacher_priority_session', teacherLabels: teachers, sessionIds: ['morning'] }
+  }
+
+  if (/(đúng|dung)\s*\d+\s*giáo\s*viên.*tiết/iu.test(raw)) {
+    const exactCount = extractFirstNumber(raw) ?? 8
+    return { kind: 'global_exact_teachers_per_period', exactCount, period: periods[0], dayIds: days }
+  }
+
+  if (/(từ\s*\d+\s*đến\s*\d+|tu\s*\d+\s*den\s*\d+).*giáo\s*viên/iu.test(raw)) {
+    const m = raw.match(/(\d+)\s*(?:đến|den|toi)\s*(\d+)/iu)
+    if (m) {
+      return { kind: 'global_min_teachers_per_period', minCount: Number(m[1]), period: periods[0], dayIds: days }
+    }
+  }
+
+  if (subj.length > 0 && /(tiết\s*cuối|tiet\s*cuoi)/iu.test(raw) && /(không|khong)/iu.test(raw)) {
+    return { kind: 'subject_not_last_period', subjectLabels: subj }
   }
 
   return { kind: 'unparsed', reason: 'Không khớp pattern chuẩn hoặc thiếu entity/ngày/tiết/buổi.' }
