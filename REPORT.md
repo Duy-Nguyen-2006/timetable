@@ -610,3 +610,18 @@ Target: **90%+ pass rate** (270/300 constraints)
 ## Quyết định tiếp theo
 
 **Đề xuất:** Chạy lại harness/eval trên 300 constraints với dataset teachers (Hiếu, Long, …) trong context parse.
+
+## Benchmark rule-only sau Phase 4–8 (2026-06-12)
+
+**Phương pháp:** `npx tsx tests/constraints-user-sim/run-dataset2-rule.ts` — chỉ rule parser (không LLM).
+**Fixture:** 20 GV, 80 assignments, 5 ngày, 18 môn.
+
+| Metric | Count | % |
+|---|---|---|
+| Tổng (unique lines) | 300 | 100% |
+| **PASS** | **48** | **16.0%** |
+| PARTIAL (custom_dsl only) | 250 | 83.3% |
+| FAIL (no specs) | 2 | 0.7% |
+| Rule HIGH confidence | 22 | 7.3% |
+
+**Top kinds (sample):** custom_dsl(250), teacher_block_period(45), teacher_block_day(9), teacher_no_constraint(4), teacher_count_relative(4), weekly_periods_exact(4), subject_max_consecutive(4), subject_pin_period(3), teacher_mentorship(2), teacher_max_per_day(2), teacher_lunch_break_required(2), teacher_group_not_same_day(1), teacher_group_min_per_day(1), teacher_pair_not_same_slot(1), teacher_pair_not_adjacent(1), teacher_pair_period_order(1), global_max_teachers_per_period(1), global_min_teachers_per_period(1), teacher_priority_session(1), teacher_unavailable_sudden(1)

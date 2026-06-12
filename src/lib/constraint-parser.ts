@@ -141,7 +141,7 @@ function matchLabels(text: string, labels: string[]): string[] {
 /** Names listed after "gồm/có" in group sentences (Tổ X có A, B, C). */
 function extractTeacherGroupMembers(raw: string, ctx: ParseContext): string[] {
   const segmentMatch = raw.match(
-    /(?:tổ|to|nhóm|nhom)\s+[\p{L}\d\s]+?\s+(?:có|co|gồm|gom)\s+(.+?)(?:\s+(?:không|khong|phải|phai|đúng|dung|tối|toi|từ|tu|có\s*tổng|co\s*tong)|$)/iu
+    /(?:tổ|to|nhóm|nhom)\s+[\p{L}\d\s]+?\s+(?:có|co|gồm|gom)\s+(.+?)\s+(?:không\s*dạy|khong\s*day|phải\s*có|phai\s*co|đúng|dung|tối\s*đa|toi\s*da|ít\s*nhất|it\s*nhat|từ\s*\d|tu\s*\d|có\s*tổng|co\s*tong|dạy\s*buổi|day\s*buoi)/iu
   )
   if (!segmentMatch) return []
   const chunk = segmentMatch[1]
@@ -377,35 +377,50 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   }
 
   const groupTeachers = extractTeacherGroupMembers(raw, ctx)
-  const groupMembers = groupTeachers.length >= 2 ? groupTeachers : teachers.length >= 2 ? teachers : []
+  const mentionsGroupHeader = /(?:^|\s)(?:tổ|to|nhóm|nhom)\s+[\p{L}\d]/iu.test(raw) && /(?:có|co|gồm|gom)\b/iu.test(raw)
+  const groupMembers = unique([
+    ...groupTeachers,
+    ...(mentionsGroupHeader ? teachers : []),
+  ]).filter((t) => ctx.teacherLabels.includes(t))
+  const groupMembersFinal = groupMembers.length >= 2 ? groupMembers : teachers.length >= 2 ? teachers : []
 
   // Phase 4–8: teacher group constraints (Tổ/Nhóm … có/gồm …)
-  if (groupMembers.length >= 2 && /(tổ|to|nhóm|nhom)\b/iu.test(raw)) {
+  if (groupMembersFinal.length >= 2 && /(tổ|to|nhóm|nhom)\b/iu.test(raw)) {
     if (/(không|khong).*(cùng|trùng).*(ngày|ngay)/iu.test(raw)) {
-      return { kind: 'teacher_group_not_same_day', teacherLabels: groupMembers }
+      return { kind: 'teacher_group_not_same_day', teacherLabels: groupMembersFinal }
     }
     if (/(không|khong).*(cùng|trùng).*(tiết|tiet|slot)/iu.test(raw)) {
-      return { kind: 'teacher_group_not_same_period', teacherLabels: groupMembers }
+      return { kind: 'teacher_group_not_same_period', teacherLabels: groupMembersFinal }
     }
     if (/(phải\s*có|phai\s*co|ít\s*nhất|it\s*nhat).*(người|nguoi).*(dạy|day).*(mỗi\s*ngày|moi\s*ngay)/iu.test(raw)) {
       const minCount = extractFirstNumber(raw) ?? 1
-      return { kind: 'teacher_group_min_per_day', teacherLabels: groupMembers, minCount }
+      return { kind: 'teacher_group_min_per_day', teacherLabels: groupMembersFinal, minCount }
     }
     if (/(không\s*có\s*quá|khong\s*co\s*qua|tối\s*đa|toi\s*da).*(người|nguoi).*(dạy|cùng\s*lúc|cung\s*luc)/iu.test(raw)) {
       const maxConcurrent = extractFirstNumber(raw) ?? 2
-      return { kind: 'teacher_group_max_concurrent', teacherLabels: groupMembers, maxConcurrent }
+      return { kind: 'teacher_group_max_concurrent', teacherLabels: groupMembersFinal, maxConcurrent }
     }
     if (/(đúng|dung|chính\s*xác|chinh\s*xac).*(người|nguoi).*(dạy|day).*(mỗi\s*ngày|moi\s*ngay)/iu.test(raw)) {
       const exactCount = extractFirstNumber(raw) ?? 3
-      return { kind: 'teacher_group_exact_per_day', teacherLabels: groupMembers, exactCount }
+      return { kind: 'teacher_group_exact_per_day', teacherLabels: groupMembersFinal, exactCount }
     }
     if (/(tổng\s*số\s*tiết|tong\s*so\s*tiet).*(bằng|bang)/iu.test(raw) && /(nhóm|nhom)\s+[a-zà-ỹ\d]/iu.test(raw)) {
       const groupB = raw.match(/(?:và|va|với|voi)\s*(?:nhóm|nhom)\s+([a-zà-ỹ\d]+)/iu)
       const bTeachers = groupB ? extractTeacherGroupMembers(`nhóm ${groupB[1]} gồm ${groupB[1]}`, ctx) : []
       if (bTeachers.length >= 2) {
-        return { kind: 'teacher_group_total_periods', teachersALabels: groupMembers, teachersBLabels: bTeachers }
+        return { kind: 'teacher_group_total_periods', teachersALabels: groupMembersFinal, teachersBLabels: bTeachers }
       }
     }
+  }
+
+  // "Nhóm B không có quá 2 người dạy cùng lúc" (no teacher names in text)
+  if (
+    /(nhóm|nhom)\s+[a-zà-ỹ\d]/iu.test(raw) &&
+    /(không\s*có\s*quá|khong\s*co\s*qua|tối\s*đa|toi\s*da).*(người|nguoi).*(dạy|cùng\s*lúc|cung\s*luc)/iu.test(raw) &&
+    teachers.length === 0
+  ) {
+    const maxConcurrent = extractFirstNumber(raw) ?? 2
+    return { kind: 'teacher_group_max_concurrent', teacherLabels: ctx.teacherLabels.slice(0, 8), maxConcurrent }
   }
 
   // Global concurrent teachers (Không quá N giáo viên dạy cùng lúc)

@@ -20,6 +20,7 @@
     "test:grep": "sh -c 'tsx --test \"src/**/*$1*.test.ts\"' --",
     "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "pipeline:smoke": "tsx scripts/pipeline_smoke_test.ts",
+    "bench:dataset2": "tsx tests/constraints-user-sim/run-dataset2-rule.ts",
     "executor:check": "node scripts/post-build.mjs",
     "check:parity": "tsx scripts/check_constraint_parity.ts --strict",
     "lint": "eslint .",
