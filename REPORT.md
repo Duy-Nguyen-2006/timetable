@@ -605,11 +605,11 @@ Target: **90%+ pass rate** (270/300 constraints)
 
 **Kinds mới:** `teacher_group_*` (6), `subject_consecutive_periods`, `global_*_teachers_per_period` (3), `global_max_workload_diff`, `teacher_priority_*` (2), `teacher_unavailable_*` (2), `teacher_break_time_minutes`, `subject_*_week` / gap / break (7), `teacher_min_rest_between_days`, `teacher_max_hours_per_day`, `teacher_lunch_break_required`, `teacher_mentorship`, `teacher_conflict`
 
-**Lưu ý:** Một số kind (soft priority, mentorship, gap weeks/hours) dùng checker no-op hoặc IR `const: true` — cần benchmark lại `constraints_dataset_2.txt` với fixture teachers/subjects đầy đủ để đo pass rate thực tế.
+**Benchmark rule-only (300 dòng):** `npm run bench:dataset2` → **49/300 PASS (16.3%)**, 249 PARTIAL — tăng nhẹ so với baseline LLM 12%; phần lớn câu vẫn rơi `custom_dsl` vì pattern chưa map (xen kẽ, giám sát, ưu tiên phức tạp, v.v.).
 
 ## Quyết định tiếp theo
 
-**Đề xuất:** Chạy lại harness/eval trên 300 constraints với dataset teachers (Hiếu, Long, …) trong context parse.
+**Đề xuất:** Thêm parser rules theo PARTIAL samples; tùy chọn chạy full `run.ts` + OpenRouter cho 300 dòng (chậm, có API key).
 
 ## Benchmark rule-only sau Phase 4–8 (2026-06-12)
 
@@ -619,9 +619,9 @@ Target: **90%+ pass rate** (270/300 constraints)
 | Metric | Count | % |
 |---|---|---|
 | Tổng (unique lines) | 300 | 100% |
-| **PASS** | **48** | **16.0%** |
-| PARTIAL (custom_dsl only) | 250 | 83.3% |
+| **PASS** | **49** | **16.3%** |
+| PARTIAL (custom_dsl only) | 249 | 83.0% |
 | FAIL (no specs) | 2 | 0.7% |
-| Rule HIGH confidence | 22 | 7.3% |
+| Rule HIGH confidence | 23 | 7.7% |
 
 **Top kinds (sample):** custom_dsl(250), teacher_block_period(45), teacher_block_day(9), teacher_no_constraint(4), teacher_count_relative(4), weekly_periods_exact(4), subject_max_consecutive(4), subject_pin_period(3), teacher_mentorship(2), teacher_max_per_day(2), teacher_lunch_break_required(2), teacher_group_not_same_day(1), teacher_group_min_per_day(1), teacher_pair_not_same_slot(1), teacher_pair_not_adjacent(1), teacher_pair_period_order(1), global_max_teachers_per_period(1), global_min_teachers_per_period(1), teacher_priority_session(1), teacher_unavailable_sudden(1)
