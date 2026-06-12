@@ -1,0 +1,171 @@
+Tôi hiểu rồi! Bạn có một chương trình lập lịch giảng dạy và muốn test khả năng hiểu constraints của nó. Tôi sẽ tạo 150 constraints từ cơ bản đến phức tạp cho bạn test.
+Action: file_editor create /app/test_constraints.txt --file-text "# 150 CONSTRAINTS ĐỂ TEST HỆ THỐNG LÊN LỊCH GIẢNG DẠY
+# Mỗi dòng là 1 constraint - từ cơ bản đến phức tạp
+
+# NHÓM 1: CONSTRAINTS CƠ BẢN VỀ NGÀY (1-20)
+Hiếu không dạy thứ 2
+Long không dạy thứ 6
+Dung chỉ dạy thứ 4
+Mai dạy tất cả các ngày trừ thứ 7
+Tuấn không dạy thứ 3 và thứ 5
+Lan chỉ dạy thứ 2, thứ 4, thứ 6
+Hoa không dạy vào các ngày thứ 2, thứ 3
+Minh dạy từ thứ 2 đến thứ 5
+Quân không dạy thứ 7
+Nam chỉ dạy thứ 3 và thứ 5
+Phương không dạy cuối tuần
+Trang dạy tất cả các ngày trong tuần
+Bình không dạy đầu tuần
+Cường chỉ dạy giữa tuần
+Đạt không dạy thứ 4
+Khánh dạy ít nhất 3 ngày trong tuần
+Thảo không dạy quá 2 ngày trong tuần
+Nhung dạy đúng 4 ngày trong tuần
+Toàn không dạy vào thứ 2 và thứ 6
+Vân chỉ dạy 1 ngày trong tuần
+
+# NHÓM 2: CONSTRAINTS VỀ TIẾT HỌC (21-40)
+Hiếu chỉ dạy tiết 1
+Long không dạy tiết 5
+Dung dạy từ tiết 1 đến tiết 3
+Mai chỉ dạy các tiết buổi sáng
+Tuấn không dạy tiết cuối cùng
+Lan dạy tiết 2 và tiết 4
+Hoa không dạy tiết 1 và tiết 5
+Minh chỉ dạy tiết buổi chiều
+Quân dạy tiết 3
+Nam không dạy tiết đầu tiên
+Phương chỉ dạy tiết 1, 2, 3
+Trang không dạy tiết 4
+Bình dạy tối đa 2 tiết mỗi ngày
+Cường dạy ít nhất 3 tiết mỗi ngày
+Đạt chỉ dạy 1 tiết mỗi ngày
+Khánh không dạy quá 4 tiết mỗi ngày
+Thảo dạy đúng 2 tiết mỗi ngày
+Nhung chỉ dạy các tiết lẻ
+Toàn chỉ dạy các tiết chẵn
+Vân không dạy tiết 2 và tiết 3
+
+# NHÓM 3: CONSTRAINTS KẾT HỢP NGÀY VÀ TIẾT (41-60)
+Hiếu dạy thứ 2 tiết 1
+Long không dạy thứ 3 tiết 5
+Dung chỉ dạy thứ 4 tiết 1 và thứ 5
+Mai dạy thứ 6 tiết 2 hoặc tiết 3
+Tuấn không dạy thứ 2 tiết 4
+Lan dạy thứ 3 tiết 1, 2, 3
+Hoa chỉ dạy thứ 5 tiết buổi sáng
+Minh không dạy thứ 4 tiết 5
+Quân dạy thứ 7 tiết 1 và tiết 2
+Nam chỉ dạy thứ 2 tiết 3
+Phương không dạy thứ 6 các tiết buổi chiều
+Trang dạy thứ 4 từ tiết 1 đến tiết 3
+Bình chỉ dạy thứ 3 tiết 4
+Cường không dạy thứ 5 tiết 1, 2
+Đạt dạy thứ 2 tiết 5
+Khánh chỉ dạy thứ 6 tiết 2 và thứ 7 tiết 3
+Thảo không dạy thứ 4 tiết buổi sáng
+Nhung dạy thứ 3 tiết lẻ
+Toàn chỉ dạy thứ 5 tiết chẵn
+Vân không dạy thứ 2 tiết 1 và thứ 6 tiết 5
+
+# NHÓM 4: CONSTRAINTS ĐIỀU KIỆN ĐƠN GIẢN (61-80)
+Nếu Hiếu dạy thứ 2 thì Long không dạy thứ 2
+Nếu Long dạy tiết 1 thì Dung không dạy tiết 1
+Nếu Dung dạy thứ 3 thì Mai phải dạy thứ 4
+Nếu Mai không dạy thứ 5 thì Tuấn phải dạy thứ 5
+Nếu Tuấn dạy tiết 2 thì Lan dạy tiết 3
+Nếu Lan dạy thứ 2 thì Hoa không dạy thứ 2
+Nếu Hoa dạy tiết 4 thì Minh không dạy tiết 4
+Nếu Minh dạy thứ 6 thì Quân dạy thứ 7
+Nếu Quân không dạy tiết 1 thì Nam dạy tiết 1
+Nếu Nam dạy thứ 3 thì Phương không dạy thứ 4
+Nếu Phương dạy tiết 5 thì Trang dạy tiết 5
+Nếu Trang không dạy thứ 2 thì Bình phải dạy thứ 2
+Nếu Bình dạy tiết 3 thì Cường không dạy tiết 3
+Nếu Cường dạy thứ 4 thì Đạt phải dạy thứ 5
+Nếu Đạt không dạy tiết 2 thì Khánh dạy tiết 2
+Nếu Khánh dạy thứ 6 thì Thảo không dạy thứ 6
+Nếu Thảo dạy tiết 1 thì Nhung phải dạy tiết 2
+Nếu Nhung không dạy thứ 7 thì Toàn dạy thứ 7
+Nếu Toàn dạy tiết 4 thì Vân không dạy tiết 4
+Nếu Vân dạy thứ 3 thì Hiếu phải dạy thứ 3
+
+# NHÓM 5: CONSTRAINTS ĐIỀU KIỆN PHỨC TẠP (81-100)
+Nếu Hiếu dạy thứ 2 và dạy tiết 1 thì Long không dạy thứ 3
+Nếu Long dạy thứ 4 tiết 2 thì Dung phải dạy thứ 5 tiết 2
+Nếu Dung không dạy thứ 6 hoặc không dạy tiết 3 thì Mai dạy thứ 6 tiết 3
+Nếu Mai dạy thứ 2 tiết 1 và tiết 2 thì Tuấn không dạy thứ 2
+Nếu Tuấn dạy thứ 3 hoặc thứ 4 thì Lan phải dạy tiết 5
+Nếu Lan không dạy thứ 5 tiết 1 thì Hoa dạy thứ 5 tiết 1 hoặc tiết 2
+Nếu Hoa dạy thứ 6 và Minh dạy thứ 6 thì Quân không dạy thứ 7
+Nếu Minh dạy tiết 3 hoặc tiết 4 thì Nam không dạy các tiết này
+Nếu Quân dạy thứ 2 tiết 1 thì Nam dạy thứ 2 tiết 2 và Phương dạy thứ 2 tiết 3
+Nếu Nam không dạy thứ 3 và không dạy thứ 4 thì Phương phải dạy cả 2 ngày này
+Nếu Phương dạy thứ 5 tiết buổi sáng thì Trang không dạy thứ 5
+Nếu Trang dạy thứ 6 hoặc thứ 7 thì Bình phải dạy ít nhất 1 trong 2 ngày này
+Nếu Bình dạy tiết 1, 2, 3 vào thứ 2 thì Cường không dạy thứ 2
+Nếu Cường không dạy thứ 3 tiết 4 thì Đạt phải dạy thứ 3 tiết 4 hoặc thứ 4 tiết 4
+Nếu Đạt dạy thứ 4 và thứ 5 thì Khánh chỉ dạy thứ 6 hoặc thứ 7
+Nếu Khánh dạy tiết 5 vào bất kỳ ngày nào thì Thảo không dạy tiết 5 ngày đó
+Nếu Thảo không dạy thứ 2, thứ 3, thứ 4 thì Nhung phải dạy ít nhất 2 trong 3 ngày này
+Nếu Nhung dạy thứ 5 tiết lẻ thì Toàn dạy thứ 5 tiết chẵn
+Nếu Toàn dạy thứ 6 và Vân dạy thứ 6 thì ít nhất 1 người phải dạy tiết 1
+Nếu Vân không dạy thứ 7 tiết 5 thì Hiếu và Long phải dạy thứ 7
+
+# NHÓM 6: CONSTRAINTS VỀ KHOẢNG CÁCH VÀ THỨ TỰ (101-120)
+Hiếu và Long không dạy cùng tiết
+Dung phải dạy sau Mai trong cùng ngày
+Tuấn dạy trước Lan ít nhất 1 tiết
+Hoa và Minh không dạy liên tiếp
+Quân dạy ngay sau Nam trong tuần
+Phương phải dạy cách Trang ít nhất 1 ngày
+Bình và Cường không dạy cùng ngày
+Đạt dạy trước Khánh ít nhất 2 tiết
+Thảo phải dạy ngay sau Nhung
+Toàn và Vân cách nhau đúng 1 tiết
+Hiếu dạy sau Long ít nhất 1 ngày
+Dung không dạy liền kề với Mai
+Tuấn và Lan cách nhau đúng 2 tiết
+Hoa dạy trước Minh trong tuần
+Quân phải dạy cách Nam đúng 1 ngày
+Phương không dạy ngay trước hoặc ngay sau Trang
+Bình dạy sau Cường ít nhất 3 tiết
+Đạt và Khánh không dạy các tiết liên tiếp
+Thảo dạy trước Nhung đúng 1 ngày
+Toàn phải dạy cách Vân ít nhất 2 ngày
+
+# NHÓM 7: CONSTRAINTS VỀ TẦN SUẤT VÀ TỔNG SỐ (121-140)
+Hiếu dạy đúng 5 tiết trong tuần
+Long dạy ít nhất 8 tiết trong tuần
+Dung không dạy quá 6 tiết trong tuần
+Mai dạy từ 4 đến 7 tiết trong tuần
+Tuấn dạy đúng 2 tiết mỗi ngày trong 3 ngày
+Lan dạy tối đa 10 tiết trong tuần
+Hoa dạy ít nhất 1 tiết mỗi ngày
+Minh không dạy quá 3 tiết mỗi ngày
+Quân dạy đúng 12 tiết trong tuần
+Nam dạy từ 6 đến 9 tiết trong tuần
+Phương dạy nhiều hơn Trang ít nhất 2 tiết
+Trang dạy ít hơn Bình tối đa 3 tiết
+Bình và Cường dạy tổng cộng 15 tiết
+Đạt dạy gấp đôi số tiết của Khánh
+Khánh dạy bằng số tiết của Thảo
+Thảo dạy nhiều hơn Nhung đúng 4 tiết
+Nhung và Toàn dạy tổng cộng không quá 10 tiết
+Vân dạy ít nhất 50% số tiết của Hiếu
+Toàn dạy nhiều nhất trong tuần
+Long và Dung dạy tổng cộng ít nhất 16 tiết
+
+# NHÓM 8: CONSTRAINTS PHỨC TẠP NHIỀU ĐIỀU KIỆN (141-150)
+Nếu Hiếu dạy thứ 2 tiết 1 và Long dạy thứ 2 tiết 2 thì Dung không dạy thứ 2 và Mai phải dạy thứ 3 tiết 1
+Nếu Tuấn dạy ít nhất 3 tiết vào thứ 4 thì Lan không dạy thứ 4 và Hoa phải dạy thứ 5 từ tiết 1 đến tiết 3
+Nếu Minh không dạy thứ 6 hoặc Quân dạy thứ 6 tiết 5 thì Nam dạy thứ 7 tiết 1 và Phương dạy thứ 7 tiết 2
+Nếu Trang dạy thứ 3 tiết lẻ và Bình dạy thứ 3 tiết chẵn thì Cường không dạy thứ 3, thứ 4 và phải dạy thứ 5
+Nếu Đạt dạy nhiều hơn 8 tiết trong tuần thì Khánh dạy ít hơn 5 tiết và Thảo không dạy thứ 2, thứ 4
+Nếu Nhung dạy thứ 2 và thứ 4 cùng tiết thì Toàn phải dạy thứ 3 và thứ 5 cùng tiết đó và Vân không dạy tiết đó
+Nếu Hiếu và Long cùng dạy thứ 6 thì Dung dạy thứ 7 tiết 1, Mai dạy thứ 7 tiết 2 và Tuấn không dạy thứ 7
+Nếu Lan dạy từ tiết 1 đến tiết 4 vào thứ 2 thì Hoa, Minh, Quân không dạy thứ 2 và ít nhất 2 người phải dạy thứ 3
+Nếu Nam dạy thứ 4 tiết 3 hoặc Phương dạy thứ 5 tiết 3 thì Trang dạy cả thứ 4 và thứ 5 tiết 4 và Bình không dạy tiết 3, tiết 4
+Nếu Cường không dạy thứ 2, thứ 3 và Đạt dạy cả 2 ngày này thì Khánh dạy thứ 4 từ tiết 1 đến tiết 5 và Thảo, Nhung không dạy thứ 4
+"
+Observation: Create successful: /app/test_constraints.txt
