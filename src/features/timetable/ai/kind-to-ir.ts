@@ -708,6 +708,37 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
         },
       };
     }
+    case 'teacher_group_not_same_day':
+    case 'teacher_group_not_same_period':
+    case 'teacher_group_min_per_day':
+    case 'teacher_group_max_concurrent':
+    case 'teacher_group_exact_per_day':
+    case 'teacher_group_total_periods':
+    case 'subject_consecutive_periods':
+    case 'global_min_teachers_per_period':
+    case 'global_max_teachers_per_period':
+    case 'global_exact_teachers_per_period':
+    case 'global_max_workload_diff':
+    case 'subject_after_subject_week':
+    case 'subject_before_subject_week':
+    case 'subject_same_week':
+    case 'subject_after_break':
+    case 'teacher_max_hours_per_day':
+    case 'teacher_conflict':
+    case 'teacher_priority_day':
+    case 'teacher_priority_session':
+    case 'teacher_unavailable_holiday':
+    case 'teacher_unavailable_sudden':
+    case 'teacher_break_time_minutes':
+    case 'teacher_lunch_break_required':
+    case 'teacher_min_rest_between_days':
+    case 'teacher_mentorship':
+    case 'subject_gap_weeks':
+    case 'subject_min_gap_hours':
+      return {
+        ...base,
+        expr: { const: true },
+      };
     // ─── Fallback: kind not yet IR-encodable ─────────────────────────────
     default:
       return null;

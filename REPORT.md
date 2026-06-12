@@ -595,10 +595,18 @@ Target: **90%+ pass rate** (270/300 constraints)
 - Priority: Phase 4 > Phase 6 > Phase 5 > Phase 8 > Phase 7 (theo độ khả thi + impact)
 - Có thể bỏ qua một số phase nếu user không cần
 
+## Triển khai Phase 4–8 (2026-06-12)
+
+**Đã implement** Phương án A (mở rộng rule parser) trong một đợt:
+
+- **+27 built-in kinds** (registry: **117** kinds gồm `custom_dsl`)
+- Pipeline: `constraint-spec.ts` → `constraint-parser.ts` → `translator.ts` → `constraint-registry.ts` → `deterministic-validator.ts` → `kind-to-ir.ts` → `rule-parse-confidence.ts`
+- **818/818** unit tests pass; `npx gitnexus analyze` đã chạy
+
+**Kinds mới:** `teacher_group_*` (6), `subject_consecutive_periods`, `global_*_teachers_per_period` (3), `global_max_workload_diff`, `teacher_priority_*` (2), `teacher_unavailable_*` (2), `teacher_break_time_minutes`, `subject_*_week` / gap / break (7), `teacher_min_rest_between_days`, `teacher_max_hours_per_day`, `teacher_lunch_break_required`, `teacher_mentorship`, `teacher_conflict`
+
+**Lưu ý:** Một số kind (soft priority, mentorship, gap weeks/hours) dùng checker no-op hoặc IR `const: true` — cần benchmark lại `constraints_dataset_2.txt` với fixture teachers/subjects đầy đủ để đo pass rate thực tế.
+
 ## Quyết định tiếp theo
 
-**Câu hỏi cho user:**
-1. Có muốn tiếp tục mở rộng rule parser (Phương án A) hay chỉ cải thiện LLM prompt (Phương án B)?
-2. Nếu chọn A, bắt đầu từ Phase nào? (đề xuất: Phase 4 - teacher groups)
-3. Target pass rate mong muốn? (80%, 90%, hay best effort?)
-4. Budget thời gian? (8 tuần cho full roadmap, hoặc 2-4 tuần cho quick wins)
+**Đề xuất:** Chạy lại harness/eval trên 300 constraints với dataset teachers (Hiếu, Long, …) trong context parse.

@@ -127,6 +127,33 @@ const constraintSpecSchema = z.object({
     'teacher_pair_period_order',
     'teacher_pair_not_adjacent',
     'teacher_pair_day_distance',
+    'teacher_group_not_same_day',
+    'teacher_group_min_per_day',
+    'teacher_group_not_same_period',
+    'teacher_group_max_concurrent',
+    'teacher_group_exact_per_day',
+    'teacher_group_total_periods',
+    'subject_consecutive_periods',
+    'global_min_teachers_per_period',
+    'global_max_teachers_per_period',
+    'global_exact_teachers_per_period',
+    'teacher_priority_day',
+    'teacher_priority_session',
+    'teacher_unavailable_holiday',
+    'teacher_unavailable_sudden',
+    'teacher_break_time_minutes',
+    'global_max_workload_diff',
+    'subject_after_subject_week',
+    'subject_before_subject_week',
+    'subject_same_week',
+    'subject_gap_weeks',
+    'subject_min_gap_hours',
+    'subject_after_break',
+    'teacher_min_rest_between_days',
+    'teacher_max_hours_per_day',
+    'teacher_lunch_break_required',
+    'teacher_mentorship',
+    'teacher_conflict',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -1132,6 +1159,294 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
           direction: parsed.direction,
           distance: parsed.distance,
         },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_group_not_same_day' && parsed.teacherLabels.length >= 2) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_group_not_same_day',
+        params: { teachers: parsed.teacherLabels },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_group_min_per_day' && parsed.teacherLabels.length >= 2) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_group_min_per_day',
+        params: { teachers: parsed.teacherLabels, minCount: parsed.minCount },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_group_not_same_period' && parsed.teacherLabels.length >= 2) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_group_not_same_period',
+        params: { teachers: parsed.teacherLabels },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_group_max_concurrent' && parsed.teacherLabels.length >= 2) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_group_max_concurrent',
+        params: { teachers: parsed.teacherLabels, maxConcurrent: parsed.maxConcurrent },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_group_exact_per_day' && parsed.teacherLabels.length >= 2) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_group_exact_per_day',
+        params: { teachers: parsed.teacherLabels, exactCount: parsed.exactCount },
+      } satisfies ConstraintSpec;
+    }
+    if (
+      parsed.kind === 'teacher_group_total_periods' &&
+      parsed.teachersALabels.length >= 2 &&
+      parsed.teachersBLabels.length >= 2
+    ) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_group_total_periods',
+        params: { teachersA: parsed.teachersALabels, teachersB: parsed.teachersBLabels },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_consecutive_periods' && parsed.subjectLabels[0]) {
+      const classes = classLabels.filter((label) => includesLabel(constraint.text, label));
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_consecutive_periods',
+        params: {
+          subject: parsed.subjectLabels[0],
+          length: parsed.length,
+          ...(classes.length ? { classes } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'global_min_teachers_per_period') {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'global_min_teachers_per_period',
+        params: {
+          minCount: parsed.minCount,
+          ...(parsed.period !== undefined ? { period: parsed.period } : {}),
+          ...(parsed.dayIds.length ? { days: parsed.dayIds } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'global_max_teachers_per_period') {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'global_max_teachers_per_period',
+        params: {
+          maxCount: parsed.maxCount,
+          ...(parsed.period !== undefined ? { period: parsed.period } : {}),
+          ...(parsed.dayIds.length ? { days: parsed.dayIds } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'global_exact_teachers_per_period') {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'global_exact_teachers_per_period',
+        params: {
+          exactCount: parsed.exactCount,
+          ...(parsed.period !== undefined ? { period: parsed.period } : {}),
+          ...(parsed.dayIds.length ? { days: parsed.dayIds } : {}),
+        },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'global_max_workload_diff') {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'global_max_workload_diff',
+        params: { maxDiff: parsed.maxDiff },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_before_subject_week' && parsed.subjectALabels[0] && parsed.subjectBLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_before_subject_week',
+        params: { subjectA: parsed.subjectALabels[0], subjectB: parsed.subjectBLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_after_subject_week' && parsed.subjectALabels[0] && parsed.subjectBLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_after_subject_week',
+        params: { subjectA: parsed.subjectALabels[0], subjectB: parsed.subjectBLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_same_week' && parsed.subjectALabels[0] && parsed.subjectBLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_same_week',
+        params: { subjectA: parsed.subjectALabels[0], subjectB: parsed.subjectBLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_gap_weeks' && parsed.subjectALabels[0] && parsed.subjectBLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_gap_weeks',
+        params: {
+          subjectA: parsed.subjectALabels[0],
+          subjectB: parsed.subjectBLabels[0],
+          gapWeeks: parsed.gapWeeks,
+        },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_min_gap_hours' && parsed.subjectALabels[0] && parsed.subjectBLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_min_gap_hours',
+        params: {
+          subjectA: parsed.subjectALabels[0],
+          subjectB: parsed.subjectBLabels[0],
+          minHours: parsed.minHours,
+        },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'subject_after_break' && parsed.subjectLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'subject_after_break',
+        params: { subject: parsed.subjectLabels[0], afterPeriod: parsed.afterPeriod },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_priority_session' && parsed.teacherLabels[0]) {
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: 'soft',
+        kind: 'teacher_priority_session',
+        params: { teacher: parsed.teacherLabels[0], session: parsed.sessionIds[0] ?? 'morning' },
+      } satisfies ConstraintSpec);
+    }
+    if (parsed.kind === 'teacher_priority_day' && parsed.teacherLabels[0]) {
+      return withWeight({
+        id,
+        original: constraint.text,
+        severity: 'soft',
+        kind: 'teacher_priority_day',
+        params: {
+          teacher: parsed.teacherLabels[0],
+          ...(parsed.dayIds[0] ? { day: parsed.dayIds[0] } : {}),
+        },
+      } satisfies ConstraintSpec);
+    }
+    if (parsed.kind === 'teacher_unavailable_holiday' && parsed.teacherLabels[0]) {
+      const blockDays = parsed.dayIds.filter((d) => Object.keys(dayIds).includes(d));
+      if (blockDays.length === 0) {
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_no_constraint',
+          params: {},
+          notes: 'holiday_day_not_in_fixture',
+        } satisfies ConstraintSpec;
+      }
+      return blockDays.map((day, idx) => ({
+        id: blockDays.length === 1 ? id : `${id}_${idx + 1}`,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_block_day' as const,
+        params: { teacher: parsed.teacherLabels[0], day },
+      }) satisfies ConstraintSpec);
+    }
+    if (parsed.kind === 'teacher_unavailable_sudden' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_unavailable_sudden',
+        params: { teacher: parsed.teacherLabels[0] },
+        notes: 'marker:requires_manual_substitution',
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_break_time_minutes' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_break_time_minutes',
+        params: { teacher: parsed.teacherLabels[0], minutes: parsed.minutes },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_lunch_break_required' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_lunch_break_required',
+        params: { teacher: parsed.teacherLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_mentorship' && parsed.mentorLabels[0] && parsed.menteeLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_mentorship',
+        params: { mentor: parsed.mentorLabels[0], mentee: parsed.menteeLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_conflict' && parsed.teacherALabels[0] && parsed.teacherBLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_conflict',
+        params: { teacherA: parsed.teacherALabels[0], teacherB: parsed.teacherBLabels[0] },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_max_hours_per_day' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_max_hours_per_day',
+        params: { teacher: parsed.teacherLabels[0], maxHours: parsed.maxHours },
+      } satisfies ConstraintSpec;
+    }
+    if (parsed.kind === 'teacher_min_rest_between_days' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_min_rest_between_days',
+        params: { teacher: parsed.teacherLabels[0], minRestDays: parsed.minRestDays },
       } satisfies ConstraintSpec;
     }
 

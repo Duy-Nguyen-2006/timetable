@@ -187,6 +187,31 @@ export function inferRuleParseConfidence(
     return { specs, confidence: 'high', issues };
   }
 
+  const phase48Kinds = new Set([
+    'teacher_group_not_same_day',
+    'teacher_group_min_per_day',
+    'teacher_group_not_same_period',
+    'teacher_group_max_concurrent',
+    'teacher_group_exact_per_day',
+    'teacher_group_total_periods',
+    'subject_consecutive_periods',
+    'global_min_teachers_per_period',
+    'global_max_teachers_per_period',
+    'global_exact_teachers_per_period',
+    'global_max_workload_diff',
+    'subject_before_subject_week',
+    'subject_after_subject_week',
+    'subject_same_week',
+    'subject_after_break',
+    'teacher_conflict',
+    'teacher_max_hours_per_day',
+    'teacher_no_constraint',
+    'teacher_block_day',
+  ]);
+  if (specs.length > 0 && specs.every((s) => phase48Kinds.has(s.kind))) {
+    return { specs, confidence: 'high', issues };
+  }
+
   if (specs.every((s) => s.kind === 'subject_max_consecutive')) {
     return {
       specs,

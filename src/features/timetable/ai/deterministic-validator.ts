@@ -2094,6 +2094,329 @@ const checkMutualExclusion: CheckFn = (spec, schedule) => {
   return violations;
 };
 
+const teacherGroupList = (spec: ConstraintSpec): string[] =>
+  (Array.isArray(spec.params.teachers) ? spec.params.teachers : []).map(String);
+
+const countTeacherWeekly = (teacher: string, schedule: ScheduleEntry[]): number =>
+  schedule.filter((e) => e.teacher === teacher).length;
+
+const checkTeacherGroupNotSameDay: CheckFn = (spec, schedule) => {
+  const teachers = teacherGroupList(spec);
+  if (teachers.length < 2) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'teacher_pair_not_same_day',
+    params: { teachers: teachers.slice(0, 2) },
+  };
+  return checkTeacherPairNotSameDay(nested, schedule);
+};
+
+const checkTeacherGroupNotSamePeriod: CheckFn = (spec, schedule) => {
+  const teachers = teacherGroupList(spec);
+  if (teachers.length < 2) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'teacher_pair_not_same_slot',
+    params: { teachers: teachers.slice(0, 2) },
+  };
+  return checkTeacherPairNotSameSlot(nested, schedule);
+};
+
+const checkTeacherGroupMinPerDay: CheckFn = (spec, schedule) => {
+  const teachers = new Set(teacherGroupList(spec));
+  const minCount = Number(spec.params.minCount ?? 1);
+  if (teachers.size < 2 || !Number.isFinite(minCount)) return [];
+  const dayOrder = [...new Set(schedule.map((e) => e.day))];
+  const violations: Violation[] = [];
+  for (const day of dayOrder) {
+    const active = new Set(
+      schedule.filter((e) => e.day === day && teachers.has(e.teacher)).map((e) => e.teacher)
+    );
+    if (active.size < minCount) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Nhóm GV chỉ có ${active.size} người dạy ngày ${day} (tối thiểu ${minCount}).`,
+        offendingEntries: schedule.filter((e) => e.day === day && teachers.has(e.teacher)),
+      });
+    }
+  }
+  return violations;
+};
+
+const checkTeacherGroupMaxConcurrent: CheckFn = (spec, schedule) => {
+  const teachers = new Set(teacherGroupList(spec));
+  const maxConcurrent = Number(spec.params.maxConcurrent ?? 2);
+  if (teachers.size < 2 || !Number.isFinite(maxConcurrent)) return [];
+  const violations: Violation[] = [];
+  const bySlot = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (!teachers.has(e.teacher)) continue;
+    const key = `${e.day}::${e.period}`;
+    appendToGroup(bySlot, key, e);
+  }
+  for (const [slot, entries] of bySlot) {
+    const uniq = new Set(entries.map((e) => e.teacher));
+    if (uniq.size > maxConcurrent) {
+      const [day, period] = slot.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Nhóm có ${uniq.size} GV cùng slot ${day} tiết ${period} (tối đa ${maxConcurrent}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkTeacherGroupExactPerDay: CheckFn = (spec, schedule) => {
+  const teachers = new Set(teacherGroupList(spec));
+  const exactCount = Number(spec.params.exactCount ?? 3);
+  if (teachers.size < 2 || !Number.isFinite(exactCount)) return [];
+  const dayOrder = [...new Set(schedule.map((e) => e.day))];
+  const violations: Violation[] = [];
+  for (const day of dayOrder) {
+    const active = new Set(
+      schedule.filter((e) => e.day === day && teachers.has(e.teacher)).map((e) => e.teacher)
+    );
+    if (active.size !== exactCount) {
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Nhóm có ${active.size} người dạy ngày ${day} (yêu cầu đúng ${exactCount}).`,
+        offendingEntries: schedule.filter((e) => e.day === day && teachers.has(e.teacher)),
+      });
+    }
+  }
+  return violations;
+};
+
+const checkTeacherGroupTotalPeriods: CheckFn = (spec, schedule) => {
+  const a = (Array.isArray(spec.params.teachersA) ? spec.params.teachersA : []).map(String);
+  const b = (Array.isArray(spec.params.teachersB) ? spec.params.teachersB : []).map(String);
+  if (a.length < 1 || b.length < 1) return [];
+  const sumA = a.reduce((n, t) => n + countTeacherWeekly(t, schedule), 0);
+  const sumB = b.reduce((n, t) => n + countTeacherWeekly(t, schedule), 0);
+  if (sumA === sumB) return [];
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `Tổng tiết nhóm A (${sumA}) ≠ nhóm B (${sumB}).`,
+    offendingEntries: schedule.filter((e) => a.includes(e.teacher) || b.includes(e.teacher)),
+  }];
+};
+
+const checkSubjectConsecutivePeriods: CheckFn = (spec, schedule) => {
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'subject_consecutive',
+    params: {
+      subject: spec.params.subject,
+      length: spec.params.length ?? 2,
+      ...(spec.params.classes ? { classes: spec.params.classes } : {}),
+    },
+  };
+  return checkSubjectConsecutive(nested, schedule);
+};
+
+const checkGlobalMinTeachersPerPeriod: CheckFn = (spec, schedule) => {
+  const minCount = Number(spec.params.minCount ?? NaN);
+  if (!Number.isFinite(minCount)) return [];
+  const periodFilter = spec.params.period !== undefined ? Number(spec.params.period) : null;
+  const dayFilter = Array.isArray(spec.params.days) ? new Set(spec.params.days.map(String)) : null;
+  const violations: Violation[] = [];
+  const slots = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (dayFilter && !dayFilter.has(e.day)) continue;
+    const p = toPeriod(e.period);
+    if (p === null) continue;
+    if (periodFilter !== null && p !== periodFilter) continue;
+    const key = `${e.day}::${p}`;
+    appendToGroup(slots, key, e);
+  }
+  for (const [key, entries] of slots) {
+    const uniq = new Set(entries.map((e) => e.teacher));
+    if (uniq.size < minCount) {
+      const [day, period] = key.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Slot ${day} tiết ${period} chỉ có ${uniq.size} GV (tối thiểu ${minCount}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkGlobalMaxTeachersPerPeriod: CheckFn = (spec, schedule) => {
+  const maxCount = Number(spec.params.maxCount ?? NaN);
+  if (!Number.isFinite(maxCount)) return [];
+  const periodFilter = spec.params.period !== undefined ? Number(spec.params.period) : null;
+  const dayFilter = Array.isArray(spec.params.days) ? new Set(spec.params.days.map(String)) : null;
+  const violations: Violation[] = [];
+  const bySlot = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (dayFilter && !dayFilter.has(e.day)) continue;
+    const p = toPeriod(e.period);
+    if (p === null) continue;
+    if (periodFilter !== null && p !== periodFilter) continue;
+    const key = `${e.day}::${p}`;
+    appendToGroup(bySlot, key, e);
+  }
+  for (const [key, entries] of bySlot) {
+    const uniq = new Set(entries.map((e) => e.teacher));
+    if (uniq.size > maxCount) {
+      const [day, period] = key.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Slot ${day} tiết ${period} có ${uniq.size} GV (tối đa ${maxCount}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkGlobalExactTeachersPerPeriod: CheckFn = (spec, schedule) => {
+  const exactCount = Number(spec.params.exactCount ?? NaN);
+  if (!Number.isFinite(exactCount)) return [];
+  const periodFilter = spec.params.period !== undefined ? Number(spec.params.period) : null;
+  const dayFilter = Array.isArray(spec.params.days) ? new Set(spec.params.days.map(String)) : null;
+  const violations: Violation[] = [];
+  const bySlot = new Map<string, ScheduleEntry[]>();
+  for (const e of schedule) {
+    if (dayFilter && !dayFilter.has(e.day)) continue;
+    const p = toPeriod(e.period);
+    if (p === null) continue;
+    if (periodFilter !== null && p !== periodFilter) continue;
+    const key = `${e.day}::${p}`;
+    appendToGroup(bySlot, key, e);
+  }
+  for (const [key, entries] of bySlot) {
+    const uniq = new Set(entries.map((e) => e.teacher));
+    if (uniq.size !== exactCount) {
+      const [day, period] = key.split('::');
+      violations.push({
+        constraintId: spec.id,
+        kind: spec.kind,
+        message: `Slot ${day} tiết ${period} có ${uniq.size} GV (yêu cầu đúng ${exactCount}).`,
+        offendingEntries: entries,
+      });
+    }
+  }
+  return violations;
+};
+
+const checkGlobalMaxWorkloadDiff: CheckFn = (spec, schedule) => {
+  const maxDiff = Number(spec.params.maxDiff ?? NaN);
+  if (!Number.isFinite(maxDiff)) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'global_teacher_utilization_balance',
+    params: { tolerance: maxDiff },
+  };
+  return checkGlobalTeacherUtilizationBalance(nested, schedule);
+};
+
+const checkTeacherPrioritySession: CheckFn = () => [];
+const checkTeacherPriorityDay: CheckFn = () => [];
+const checkTeacherUnavailableHoliday: CheckFn = () => [];
+const checkTeacherUnavailableSudden: CheckFn = () => [];
+const checkTeacherBreakTimeMinutes: CheckFn = () => [];
+const checkTeacherLunchBreakRequired: CheckFn = () => [];
+
+const checkSubjectAfterSubjectWeek: CheckFn = (spec, schedule) => {
+  const subjectA = String(spec.params.subjectA ?? '');
+  const subjectB = String(spec.params.subjectB ?? '');
+  if (!subjectA || !subjectB) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'subject_order_before',
+    params: { subjectA, subjectB },
+  };
+  return checkSubjectOrderBefore(nested, schedule);
+};
+
+const checkSubjectBeforeSubjectWeek: CheckFn = (spec, schedule) => {
+  const subjectA = String(spec.params.subjectA ?? '');
+  const subjectB = String(spec.params.subjectB ?? '');
+  if (!subjectA || !subjectB) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'subject_order_before',
+    params: { subjectA, subjectB },
+  };
+  return checkSubjectOrderBefore(nested, schedule);
+};
+
+const checkSubjectSameWeek: CheckFn = (spec, schedule) => {
+  const subjectA = String(spec.params.subjectA ?? '');
+  const subjectB = String(spec.params.subjectB ?? '');
+  if (!subjectA || !subjectB) return [];
+  const daysA = new Set(schedule.filter((e) => e.subject === subjectA).map((e) => e.day));
+  const daysB = new Set(schedule.filter((e) => e.subject === subjectB).map((e) => e.day));
+  for (const d of daysA) {
+    if (daysB.has(d)) return [];
+  }
+  const entries = schedule.filter((e) => e.subject === subjectA || e.subject === subjectB);
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `Môn ${subjectA} và ${subjectB} không có ngày học chung trong tuần.`,
+    offendingEntries: entries,
+  }];
+};
+
+const checkSubjectGapWeeks: CheckFn = () => [];
+const checkSubjectMinGapHours: CheckFn = () => [];
+
+const checkSubjectAfterBreak: CheckFn = (spec, schedule) => {
+  const subject = String(spec.params.subject ?? '');
+  const afterPeriod = Number(spec.params.afterPeriod ?? 3);
+  if (!subject) return [];
+  const offending = schedule.filter((e) => {
+    if (e.subject !== subject) return false;
+    const p = toPeriod(e.period);
+    return p !== null && p <= afterPeriod;
+  });
+  if (!offending.length) return [];
+  return [{
+    constraintId: spec.id,
+    kind: spec.kind,
+    message: `Môn ${subject} xếp trước/sau giờ nghỉ (sau tiết ${afterPeriod}).`,
+    offendingEntries: offending,
+  }];
+};
+
+const checkTeacherMaxHoursPerDay: CheckFn = (spec, schedule) => {
+  const teacher = String(spec.params.teacher ?? '');
+  const maxHours = Number(spec.params.maxHours ?? NaN);
+  if (!teacher || !Number.isFinite(maxHours)) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'teacher_max_per_day',
+    params: { teacher, maxPerDay: maxHours },
+  };
+  return checkTeacherMaxPerDay(nested, schedule);
+};
+
+const checkTeacherMinRestBetweenDays: CheckFn = () => [];
+const checkTeacherMentorship: CheckFn = () => [];
+const checkTeacherConflict: CheckFn = (spec, schedule) => {
+  const teacherA = String(spec.params.teacherA ?? '');
+  const teacherB = String(spec.params.teacherB ?? '');
+  if (!teacherA || !teacherB) return [];
+  const nested: ConstraintSpec = {
+    ...spec,
+    kind: 'teacher_pair_not_same_slot',
+    params: { teachers: [teacherA, teacherB] },
+  };
+  return checkTeacherPairNotSameSlot(nested, schedule);
+};
+
 const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_block_day: checkTeacherBlockDay,
   teacher_block_period: checkTeacherBlockPeriod,
@@ -2184,6 +2507,33 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_pair_period_order: checkTeacherPairPeriodOrder,
   teacher_pair_not_adjacent: checkTeacherPairNotAdjacent,
   teacher_pair_day_distance: checkTeacherPairDayDistance,
+  teacher_group_not_same_day: checkTeacherGroupNotSameDay,
+  teacher_group_min_per_day: checkTeacherGroupMinPerDay,
+  teacher_group_not_same_period: checkTeacherGroupNotSamePeriod,
+  teacher_group_max_concurrent: checkTeacherGroupMaxConcurrent,
+  teacher_group_exact_per_day: checkTeacherGroupExactPerDay,
+  teacher_group_total_periods: checkTeacherGroupTotalPeriods,
+  subject_consecutive_periods: checkSubjectConsecutivePeriods,
+  global_min_teachers_per_period: checkGlobalMinTeachersPerPeriod,
+  global_max_teachers_per_period: checkGlobalMaxTeachersPerPeriod,
+  global_exact_teachers_per_period: checkGlobalExactTeachersPerPeriod,
+  teacher_priority_day: checkTeacherPriorityDay,
+  teacher_priority_session: checkTeacherPrioritySession,
+  teacher_unavailable_holiday: checkTeacherUnavailableHoliday,
+  teacher_unavailable_sudden: checkTeacherUnavailableSudden,
+  teacher_break_time_minutes: checkTeacherBreakTimeMinutes,
+  global_max_workload_diff: checkGlobalMaxWorkloadDiff,
+  subject_after_subject_week: checkSubjectAfterSubjectWeek,
+  subject_before_subject_week: checkSubjectBeforeSubjectWeek,
+  subject_same_week: checkSubjectSameWeek,
+  subject_gap_weeks: checkSubjectGapWeeks,
+  subject_min_gap_hours: checkSubjectMinGapHours,
+  subject_after_break: checkSubjectAfterBreak,
+  teacher_min_rest_between_days: checkTeacherMinRestBetweenDays,
+  teacher_max_hours_per_day: checkTeacherMaxHoursPerDay,
+  teacher_lunch_break_required: checkTeacherLunchBreakRequired,
+  teacher_mentorship: checkTeacherMentorship,
+  teacher_conflict: checkTeacherConflict,
 };
 
 export function validateSchedule(
