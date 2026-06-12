@@ -21,6 +21,7 @@
     "provider:smoke": "tsx scripts/provider_smoke_test.ts",
     "pipeline:smoke": "tsx scripts/pipeline_smoke_test.ts",
     "bench:dataset2": "tsx tests/constraints-user-sim/run-dataset2-rule.ts",
+    "bench:dataset2:full": "tsx tests/constraints-user-sim/run-dataset2-full.ts",
     "executor:check": "node scripts/post-build.mjs",
     "check:parity": "tsx scripts/check_constraint_parity.ts --strict",
     "lint": "eslint .",

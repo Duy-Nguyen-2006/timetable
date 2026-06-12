@@ -31,6 +31,7 @@ python-dist/
 *.tsbuildinfo
 repomix-output.xml
 harness.db
+tests/constraints-user-sim/dataset2-full-results.json
 
 # Python specific
 *.pyc

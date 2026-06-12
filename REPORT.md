@@ -625,3 +625,17 @@ Target: **90%+ pass rate** (270/300 constraints)
 | Rule HIGH confidence | 31 | 10.3% |
 
 **Top kinds (sample):** custom_dsl(250), teacher_block_period(45), teacher_block_day(9), teacher_no_constraint(4), teacher_count_relative(4), weekly_periods_exact(4), subject_max_consecutive(4), subject_pin_period(3), teacher_mentorship(2), teacher_max_per_day(2), teacher_lunch_break_required(2), teacher_group_not_same_day(1), teacher_group_min_per_day(1), teacher_pair_not_same_slot(1), teacher_pair_not_adjacent(1), teacher_pair_period_order(1), global_max_teachers_per_period(1), global_min_teachers_per_period(1), teacher_priority_session(1), teacher_unavailable_sudden(1)
+## Benchmark full pipeline (rule + OpenRouter LLM)
+
+**Ngày:** 2026-06-12
+**Model:** deepseek/deepseek-v4-flash
+**Lệnh:** `OPENROUTER_API_KEY=... npm run bench:dataset2:full`
+
+| Metric | Count | % |
+|---|---|---|
+| Tổng | 300 | 100% |
+| **PASS** | **94** | **31.3%** |
+| PARTIAL | 204 | 68.0% |
+| FAIL | 2 | 0.7% |
+| Rule fast-path | 37 | 12.3% |
+| LLM path | 263 | 87.7% |
