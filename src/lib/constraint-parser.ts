@@ -10,6 +10,7 @@ export type ParsedConstraint =
   | { kind: 'teacher_allow_only_days'; teacherLabels: string[]; dayIds: string[] }
   | { kind: 'teacher_allow_only_periods'; teacherLabels: string[]; periods: number[] }
   | { kind: 'teacher_allow_only_sessions'; teacherLabels: string[]; sessionIds: string[] }
+  | { kind: 'teacher_weekly_range'; teacherLabels: string[]; min?: number; max?: number }
   | { kind: 'class_block_days'; classLabels: string[]; dayIds: string[] }
   | { kind: 'subject_block_periods'; subjectLabels: string[]; periods: number[] }
   | { kind: 'subject_pin_periods'; subjectLabels: string[]; periods: number[] }
@@ -177,6 +178,20 @@ function extractPeriods(text: string): number[] {
     const hi = Number(wordRange[2])
     for (let n = Math.min(lo, hi); n <= Math.max(lo, hi); n++) periods.push(n)
   }
+  // Match "tiết 1, 2, 3" — comma-separated list after "tiết"
+  const commaList = text.match(/\btiết\s*(\d+(?:\s*,\s*\d+)+)\b/u);
+  if (commaList) {
+    for (const n of commaList[1].split(',')) {
+      const num = Number(n.trim());
+      if (Number.isInteger(num) && num > 0) periods.push(num);
+    }
+  }
+  // Match "tiết 1, tiết 2, tiết 3" or "tiết 1 và tiết 2"
+  const expandedList = text.matchAll(/\btiết\s*(\d+)(?:\s*,?\s*(?:và|va|and|hoặc|hoac|or|,))?\s*tiết\s*(\d+)/gu);
+  for (const m of expandedList) {
+    if (Number.isInteger(Number(m[1]))) periods.push(Number(m[1]));
+    if (Number.isInteger(Number(m[2]))) periods.push(Number(m[2]));
+  }
   const singles = text.matchAll(/\btiết\s*(\d+)\b/gu)
   for (const match of singles) periods.push(Number(match[1]))
   // "tiết lẻ" / "tiết chẵn"
@@ -186,7 +201,15 @@ function extractPeriods(text: string): number[] {
   if (/\btiết\s*chẵn|tiet\s*chan\b/u.test(text)) {
     for (let n = 2; n <= 10; n += 2) periods.push(n);
   }
-  return unique(periods.map(String)).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+  // "tiết đầu tiên" / "tiết đầu"
+  if (/\btiết\s*đầu\b|\btiet\s*dau\b|\btiết\s*đầu\s*tiên\b|\btiet\s*dau\s*tien\b/u.test(text)) {
+    periods.push(1);
+  }
+  // "tiết cuối" / "tiết cuối cùng" (for parsing; the max period is resolved at translator)
+  if (/\btiết\s*cuối\b|\btiet\s*cuoi\b/u.test(text)) {
+    periods.push(-1);
+  }
+  return unique(periods.map(String)).map(Number).filter((n) => Number.isInteger(n) && n > 0 || n === -1)
 }
 
 
@@ -263,6 +286,35 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     return { kind: 'teacher_pair_not_same_slot', teacherLabels: teachers.slice(0, 2), dayIds: days }
   }
 
+  // teacher_weekly_range: "dạy từ N đến M tiết trong tuần" / "dạy đúng N tiết" / "ít nhất N tiết" / "tối đa N tiết"
+  if (teachers.length > 0 && /(?:tiết|tiet)\b/u.test(raw) && /(?:trong\s*tuần|trong\s*tuan|tuần\s*này|tuan\s*nay|tuần|tuan|\bweek\b)/u.test(raw) && !/không|khong/u.test(raw)) {
+    // Range: "từ N đến M tiết"
+    const rangeMatch = raw.match(/\b(?:từ|tu|đến|den|toi)\s*(\d+)\s*(?:đến|den|toi|[-–])\s*(\d+)/u);
+    if (rangeMatch) {
+      const lo = Number(rangeMatch[1]);
+      const hi = Number(rangeMatch[2]);
+      if (lo > 0 && hi >= lo) {
+        return { kind: 'teacher_weekly_range', teacherLabels: teachers, min: lo, max: hi };
+      }
+    }
+    // "ít nhất N tiết" / "tối thiểu N tiết"
+    const minMatch = raw.match(/(?:ít\s*nhất|it\s*nhat|tối\s*thiểu|toi\s*thieu)\s*(\d+)\s*(?:tiết|tiet)?/u);
+    if (minMatch) {
+      return { kind: 'teacher_weekly_range', teacherLabels: teachers, min: Number(minMatch[1]) };
+    }
+    // "tối đa N tiết" / "không quá N tiết" / "nhiều nhất N tiết"
+    const maxMatch = raw.match(/(?:tối\s*đa|toi\s*da|không\s*quá|khong\s*qua|nhiều\s*nhất|nhieu\s*nhat|nhiều|nhieu)\s*(\d+)\s*(?:tiết|tiet)?/u);
+    if (maxMatch) {
+      return { kind: 'teacher_weekly_range', teacherLabels: teachers, max: Number(maxMatch[1]) };
+    }
+    // "đúng N tiết" / "chính xác N tiết"
+    const exactMatch = raw.match(/(?:đúng|dung|chính\s*xác|chinh\s*xac|đủ|du|chỉ|chi|=\s*)\s*(\d+)\s*(?:tiết|tiet)?/u);
+    if (exactMatch) {
+      const n = Number(exactMatch[1]);
+      return { kind: 'teacher_weekly_range', teacherLabels: teachers, min: n, max: n };
+    }
+  }
+
   if (/không\s*dạy|khong\s*day|không\s*có\s*lịch|khong\s*co\s*lich|tránh\s*dạy|tranh\s*day|tránh\s*tiết|tranh\s*tiet|tránh|tranh/u.test(raw) && teachers.length > 0) {
     // Special: "không dạy tiết cuối cùng" — treat as block of all max period
     if (periods.length === 0 && /(tiết\s*cuối|tiet\s*cuoi)/u.test(raw)) {
@@ -279,6 +331,10 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   if (periods.length > 0 && teachers.length > 0 && !/không|khong|tránh|tranh/u.test(raw)) {
     // "dạy từ tiết A đến tiết B" / "chỉ dạy tiết 1-3" — positive period constraint
     if (/(từ|tu|đến|den)/u.test(raw) || (/chỉ|chi/u.test(raw))) {
+      return { kind: 'teacher_allow_only_periods', teacherLabels: teachers, periods };
+    }
+    // "Quân dạy tiết 3" / "Lan dạy tiết 2 và tiết 4" — single/multiple specific periods
+    if (periods.length > 0) {
       return { kind: 'teacher_allow_only_periods', teacherLabels: teachers, periods };
     }
   }

@@ -80,6 +80,17 @@ async function main() {
   await debugOne('Long và Dung dạy tổng cộng ít nhất 16 tiết');
   await debugOne('Toàn dạy nhiều nhất trong tuần');
   await debugOne('Long dạy đúng tiết 4 vào thứ 3');
+  await debugOne('Mai dạy từ 4 đến 7 tiết trong tuần');
+  await debugOne('Nam dạy từ 6 đến 9 tiết trong tuần');
+  await debugOne('Lan dạy tiết 2 và tiết 4');
+  await debugOne('Quân dạy tiết 3');
+  await debugOne('Nam không dạy tiết đầu tiên');
+  await debugOne('Hiếu dạy thứ 2 tiết 1');
+  await debugOne('Mai dạy thứ 6 tiết 2 hoặc tiết 3');
+  await debugOne('Lan dạy thứ 3 tiết 1, 2, 3');
+  await debugOne('Đạt dạy thứ 2 tiết 5');
+  await debugOne('Quân dạy thứ 7 tiết 1 và tiết 2');
+  await debugOne('Toàn dạy nhiều nhất trong tuần');
 }
 
 main();

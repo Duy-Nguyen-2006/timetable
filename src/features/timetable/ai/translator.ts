@@ -518,6 +518,40 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         }) satisfies ConstraintSpec);
     }
 
+    if (parsed.kind === 'teacher_weekly_range' && parsed.teacherLabels[0]) {
+      const teacher = parsed.teacherLabels[0];
+      // If min === max, use the exact existing kind to keep the spec encodable
+      if (parsed.min !== undefined && parsed.max !== undefined && parsed.min === parsed.max) {
+        return {
+          id,
+          original: constraint.text,
+          severity,
+          kind: 'weekly_periods_exact',
+          params: { teacher, weeklyPeriods: parsed.min },
+        } satisfies ConstraintSpec;
+      }
+      const specs: ConstraintSpec[] = [];
+      if (parsed.min !== undefined) {
+        specs.push({
+          id: `${id}_min`,
+          original: constraint.text,
+          severity,
+          kind: 'weekly_periods_exact',
+          params: { teacher, weeklyPeriods: parsed.min, minOnly: true },
+        } satisfies ConstraintSpec);
+      }
+      if (parsed.max !== undefined) {
+        specs.push({
+          id: `${id}_max`,
+          original: constraint.text,
+          severity,
+          kind: 'weekly_periods_exact',
+          params: { teacher, weeklyPeriods: parsed.max, maxOnly: true },
+        } satisfies ConstraintSpec);
+      }
+      if (specs.length > 0) return specs;
+    }
+
     if (parsed.kind === 'teacher_max_consecutive') {
       const teacher = parsed.teacherLabels === '*' ? '' : parsed.teacherLabels[0];
       if (teacher) {
