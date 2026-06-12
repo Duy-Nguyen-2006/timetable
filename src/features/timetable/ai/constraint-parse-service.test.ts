@@ -411,3 +411,26 @@ test('rule parser: Môn Thể dục chỉ học thứ 3 hoặc thứ 5 → subje
   assert.equal(allowedDays.length, 2, 'should have exactly 2 allowed days');
 });
 
+test('rule parser: Hiếu không dạy thứ 4 và thứ 6 → 2 teacher_block_day specs', () => {
+  const input: AgentInputPayload = {
+    ...sampleInput,
+    days: [
+      { id: 'monday', label: 'Thứ 2' },
+      { id: 'tuesday', label: 'Thứ 3' },
+      { id: 'wednesday', label: 'Thứ 4' },
+      { id: 'thursday', label: 'Thứ 5' },
+      { id: 'friday', label: 'Thứ 6' },
+    ],
+    assignments: [
+      { id: 'asg_h', teacher: { id: 'tH', label: 'Hiếu' }, subject: { id: 's1', label: 'Toán' }, class: { id: 'c1', label: '6A' }, weeklyPeriods: 4 },
+    ],
+    constraints: [{ type: 'required', text: 'Hiếu không dạy thứ 4 và thứ 6' }],
+  };
+  const specs = __translatorInternal.fallbackFromRuleParser(input);
+  const blockSpecs = specs.filter((s) => s.kind === 'teacher_block_day' && s.params.teacher === 'Hiếu');
+  assert.ok(blockSpecs.length >= 2, `should produce >=2 teacher_block_day specs, got ${blockSpecs.length}`);
+  const blockedDays = blockSpecs.map((s) => s.params.day as string).sort();
+  assert.ok(blockedDays.includes('wednesday'), 'should include wednesday (thứ 4)');
+  assert.ok(blockedDays.includes('friday'), 'should include friday (thứ 6)');
+});
+

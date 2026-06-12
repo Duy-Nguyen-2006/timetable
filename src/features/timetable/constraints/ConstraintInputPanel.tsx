@@ -289,10 +289,10 @@ export function ConstraintInputPanel({
               return null;
             })();
             if (previewSpec) {
-              const humanText = humanizeConstraintSpec(previewSpec);
+              const humanText = humanizeConstraintSpec(previewSpec).replace(/\.+$/u, '').trim();
               return (
                 <p className="mt-2 text-white/75">
-                  - Hệ thống hiểu là {humanText}
+                  - Hệ thống hiểu là: {humanText}.
                 </p>
               );
             }

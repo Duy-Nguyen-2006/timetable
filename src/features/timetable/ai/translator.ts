@@ -406,14 +406,14 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
       }
     }
 
-    if (parsed.kind === 'teacher_block_days' && parsed.teacherLabels[0] && parsed.dayIds[0]) {
-      return {
-        id,
+    if (parsed.kind === 'teacher_block_days' && parsed.teacherLabels[0] && parsed.dayIds.length > 0) {
+      return parsed.dayIds.map((day, idx) => ({
+        id: parsed.dayIds.length === 1 ? id : `${id}_${idx + 1}`,
         original: constraint.text,
         severity,
-        kind: 'teacher_block_day',
-        params: { teacher: parsed.teacherLabels[0], day: parsed.dayIds[0] },
-      } satisfies ConstraintSpec;
+        kind: 'teacher_block_day' as const,
+        params: { teacher: parsed.teacherLabels[0], day },
+      }) satisfies ConstraintSpec);
     }
 
     if (parsed.kind === 'teacher_block_periods' && parsed.teacherLabels[0] && parsed.periods.length > 0) {
