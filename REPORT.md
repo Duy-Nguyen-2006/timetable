@@ -377,3 +377,228 @@ Tất cả 8 nhóm đều pass 100%. Không còn PARTIAL hay FAIL. Hệ thống 
 - 60 rule parser HIGH confidence patterns (40% fast-path)
 - IR đã được mở rộng với `{ var: string }` operator
 - 818/818 unit tests pass
+
+---
+
+# TEST 300 CONSTRAINTS MỚI - PHÂN TÍCH & ROADMAP
+
+**Ngày test:** 2026-06-12
+**Dataset:** `constraints_dataset_2.txt` (300 unique constraints)
+**AI model:** deepseek/deepseek-v4-flash (OpenRouter)
+
+## Kết quả test với AI fallback (Rule + LLM)
+
+| Metric | Count | % |
+|---|---|---|
+| Tổng constraints test | 301 | 100% |
+| **PASS** (non-custom_dsl specs) | **36** | **12.0%** |
+| **PARTIAL** (custom_dsl only) | **262** | **87.0%** |
+| **FAIL** (no specs) | **3** | **1.0%** |
+| Rule parser HIGH confidence (fast-path) | ~60 | ~20% |
+
+**Phân tích vấn đề:**
+- AI over-uses `custom_dsl` (87%) vì không tìm thấy kind phù hợp
+- 300 constraints có nhiều concept mới mà schema hiện tại (90 kinds) chưa cover
+- Chỉ 12% pass rate (thấp hơn rule parser 17.6% khi test 150 constraints cũ)
+
+**Breakdown theo 10 nhóm concept:**
+
+| Nhóm | Mô tả | Pass + Partial / 30 | Pass rate |
+|---|---|---|---|
+| 1 | Nhóm/Tổ giáo viên | 9 + 21 = 30 | 30.0% |
+| 2 | Môn học | 3 + 27 = 30 | 10.0% |
+| 3 | Số GV đồng thời | 3 + 27 = 30 | 10.0% |
+| 4 | Độ ưu tiên | 3 + 26 = 29 | 10.3% |
+| 5 | Nghỉ | 4 + 26 = 30 | 13.3% |
+| 6 | Cân bằng KL | 6 + 22 = 28 | 21.4% |
+| 7 | Thứ tự môn | 1 + 29 = 30 | 3.3% |
+| 8 | Khoảng cách buổi | 3 + 27 = 30 | 10.0% |
+| 9 | Nghỉ ngơi | 4 + 26 = 30 | 13.3% |
+| 10 | Quan hệ | 0 + 30 = 30 | 0.0% |
+
+**Top 3 FAIL cases (AI không parse được):**
+1. #97: "Hoa ưu tiên dạy buổi sáng hơn buổi chiều" → preference optimization
+2. #167: "Nhung phân bổ đều buổi sáng và chiều" → balance distribution
+3. #168: "Toàn dạy nhiều buổi sáng hơn buổi chiều" → session count comparison
+
+## Phương án cải thiện
+
+Có 2 phương án:
+
+### Phương án A: Mở rộng rule parser (RECOMMENDED)
+
+**Ý tưởng:** Thêm 15-20 constraint kinds mới để cover các concept chưa có trong schema. Tăng rule parser coverage lên 80-90%.
+
+**Ưu điểm:**
+- Pass rate cao hơn (dự kiến 80-90% vs 12% hiện tại)
+- Fast-path không cần gọi AI (tiết kiệm cost + latency)
+- Maintainable: logic rõ ràng, testable
+- Đã chứng minh hiệu quả qua Phase 1-3 (từ 61% → 100% trong 150 constraints cũ)
+
+**Nhược điểm:**
+- Effort lớn (4-6 tuần)
+- Cần mở rộng IR schema nếu concept quá mới
+
+**Risk:** TRUNG BÌNH (đã có pipeline chứng minh, các concept mới không quá phức tạp)
+
+### Phương án B: Cải thiện LLM prompt
+
+**Ý tưởng:** Fine-tune prompt để LLM biết rõ hơn về 90 kinds hiện tại, giảm tỷ lệ emit `custom_dsl`.
+
+**Ưu điểm:**
+- Effort thấp (1-2 tuần)
+- Không cần sửa schema/IR
+
+**Nhược điểm:**
+- Pass rate khó đạt cao (dự kiến 40-60% max)
+- AI cost cao (mỗi constraint cần 1-2 LLM calls)
+- Latency lớn (3-5s/constraint vs <1ms rule parser)
+- Không ổn định (phụ thuộc vào model quality)
+
+**Risk:** CAO (không chắc chắn đạt target, phụ thuộc vào LLM capability)
+
+## Roadmap đề xuất: Phương án A (Mở rộng rule parser)
+
+Target: **90%+ pass rate** (270/300 constraints)
+
+### Phase 4: Teacher groups & subject-level constraints (60 cases)
+
+**Mục tiêu:** Nhóm 1 + Nhóm 2 → 30 + 30 = 60 cases
+
+**Constraint kinds mới cần thêm (8 kinds):**
+
+| Kind | Mô tả | Cases cover | IR complexity |
+|---|---|---|---|
+| `teacher_group_not_same_day` | Nhóm GV không dạy cùng ngày | Nhóm 1: #1, #25 (2) | MEDIUM (forall group members) |
+| `teacher_group_min_per_day` | Nhóm GV cần ít nhất N người/ngày | Nhóm 1: #2, #13 (2) | MEDIUM |
+| `teacher_group_not_same_period` | Nhóm GV không dạy cùng tiết | Nhóm 1: #3, #7 (2) | MEDIUM |
+| `teacher_group_max_concurrent` | Nhóm GV tối đa N người/tiết | Nhóm 1: #6 (1) | MEDIUM |
+| `teacher_group_exact_per_day` | Nhóm GV đúng N người/ngày | Nhóm 1: #10 (1) | MEDIUM |
+| `teacher_group_total_periods` | Nhóm GV tổng tiết = nhóm khác | Nhóm 1: #22 (1) | HIGH (cross-group) |
+| `subject_not_last_period` | Môn không dạy tiết cuối | Nhóm 2: #31 (1) | LOW |
+| `subject_consecutive_periods` | Môn cần N tiết liên tiếp | Nhóm 2: #38 (1) | MEDIUM (exists consecutive) |
+
+**Ước lượng:**
+- Số case có thể chuyển sang PASS: **40-50/60** (67-83%)
+- Số case vẫn PARTIAL: **10-20/60** (concepts quá phức tạp như "dạy xen kẽ", "giám sát", "lớp khó")
+- Effort: **2 tuần**
+- Risk: **TRUNG BÌNH**
+
+**File checklist:**
+1. `constraint-spec.ts`: thêm 8 kinds vào union
+2. `constraint-parser.ts`: thêm 8 ParsedConstraint + parser rules
+3. `translator.ts`: thêm 8 handlers
+4. `constraint-registry.ts`: register 8 kinds
+5. `deterministic-validator.ts`: thêm 8 check functions
+6. `kind-to-ir.ts`: thêm 8 IR adapters (dùng `forall` over group members)
+7. `rule-parse-confidence.ts`: HIGH confidence cho 8 kinds
+8. Tests: +30 unit tests
+
+### Phase 5: Concurrent teachers & priorities (60 cases)
+
+**Mục tiêu:** Nhóm 3 + Nhóm 4 → 30 + 30 = 60 cases
+
+**Constraint kinds mới cần thêm (5 kinds):**
+
+| Kind | Mô tả | Cases cover | IR complexity |
+|---|---|---|---|
+| `global_min_teachers_per_period` | Tối thiểu N GV/tiết (global) | Nhóm 3: #61, #63 (2) | LOW (count per period) |
+| `global_max_teachers_per_period` | Tối đa N GV/tiết (global) | Nhóm 3: #62 (1) | LOW |
+| `global_exact_teachers_per_period` | Đúng N GV/tiết (global) | Nhóm 3: #64 (1) | LOW |
+| `teacher_priority_day` | GV ưu tiên ngày X (soft constraint marker) | Nhóm 4: #91, #92 (2) | HIGH (soft) |
+| `teacher_priority_session` | GV ưu tiên buổi X (soft constraint marker) | Nhóm 4: #93, #94 (2) | HIGH (soft) |
+
+**Ước lượng:**
+- Số case có thể chuyển sang PASS: **30-40/60** (50-67%)
+- Số case vẫn PARTIAL: **20-30/60** (concepts soft constraint / priority optimization chưa có trong solver)
+- Effort: **1.5 tuần**
+- Risk: **CAO** (soft constraints cần solver extension)
+
+**Lưu ý:** Nhóm 4 (priority) có thể cần defer một số case sang custom_dsl vì CP-SAT không có built-in soft constraint. Có thể dùng penalty variable hoặc custom objective.
+
+### Phase 6: Unavailability & workload balance (60 cases)
+
+**Mục tiêu:** Nhóm 5 + Nhóm 6 → 30 + 30 = 60 cases
+
+**Constraint kinds mới cần thêm (4 kinds):**
+
+| Kind | Mô tả | Cases cover | IR complexity |
+|---|---|---|---|
+| `teacher_unavailable_holiday` | GV nghỉ lễ/ngày cụ thể (marker) | Nhóm 5: #121, #122 (2) | LOW (no-op if date not in fixture) |
+| `teacher_unavailable_sudden` | GV nghỉ đột xuất (cần người thay) | Nhóm 5: #123 (1) | HIGH (reassignment logic) |
+| `teacher_break_time_minutes` | GV cần N phút nghỉ giữa buổi | Nhóm 5: #124 (1) | HIGH (time arithmetic) |
+| `global_max_workload_diff` | Chênh lệch số tiết giữa GV ≤ N | Nhóm 6: #151 (1) | MEDIUM (pairwise compare) |
+
+**Ước lượng:**
+- Số case có thể chuyển sang PASS: **40-50/60** (67-83%)
+- Số case vẫn PARTIAL: **10-20/60** (concepts reassignment / time arithmetic chưa có)
+- Effort: **1.5 tuần**
+- Risk: **TRUNG BÌNH**
+
+### Phase 7: Subject order & spacing (60 cases)
+
+**Mục tiêu:** Nhóm 7 + Nhóm 8 → 30 + 30 = 60 cases
+
+**Constraint kinds mới cần thêm (6 kinds):**
+
+| Kind | Mô tả | Cases cover | IR complexity |
+|---|---|---|---|
+| `subject_after_subject_week` | Môn A sau môn B trong tuần | Nhóm 7: #181 (1) | HIGH (subject-to-subject order) |
+| `subject_before_subject_week` | Môn A trước môn B trong tuần | Nhóm 7: #182 (1) | HIGH |
+| `subject_same_week` | Môn A và B cùng tuần | Nhóm 7: #183 (1) | MEDIUM |
+| `subject_gap_weeks` | Môn A cách B N tuần | Nhóm 7: #184 (1) | HIGH (week-level) |
+| `subject_min_gap_hours` | Môn A cách B ít nhất N giờ | Nhóm 8: #211 (1) | MEDIUM (hour arithmetic) |
+| `subject_after_break` | Môn A sau giờ nghỉ X | Nhóm 8: #212 (1) | MEDIUM |
+
+**Ước lượng:**
+- Số case có thể chuyển sang PASS: **30-40/60** (50-67%)
+- Số case vẫn PARTIAL: **20-30/60** (concepts subject-to-subject order phức tạp, chưa có trong IR)
+- Effort: **2 tuần**
+- Risk: **CAO** (subject-level order cần IR extension lớn)
+
+### Phase 8: Rest time & relationships (60 cases)
+
+**Mục tiêu:** Nhóm 9 + Nhóm 10 → 30 + 30 = 60 cases
+
+**Constraint kinds mới cần thêm (5 kinds):**
+
+| Kind | Mô tả | Cases cover | IR complexity |
+|---|---|---|---|
+| `teacher_min_rest_between_days` | GV cần ít nhất N ngày nghỉ giữa 2 lần dạy | Nhóm 9: #241 (1) | MEDIUM |
+| `teacher_max_hours_per_day` | GV không dạy quá N giờ/ngày | Nhóm 9: #242 (1) | LOW |
+| `teacher_lunch_break_required` | GV cần nghỉ trưa (block period) | Nhóm 9: #243 (1) | MEDIUM |
+| `teacher_mentorship` | GV A giám sát GV B (same day/period) | Nhóm 10: #271 (1) | HIGH (implies co-teaching) |
+| `teacher_conflict` | GV A và B không dạy cùng lớp | Nhóm 10: #272 (1) | MEDIUM (class-level) |
+
+**Ước lượng:**
+- Số case có thể chuyển sang PASS: **30-40/60** (50-67%)
+- Số case vẫn PARTIAL: **20-30/60** (concepts mentorship / conflict logic phức tạp)
+- Effort: **1.5 tuần**
+- Risk: **CAO**
+
+## Tổng kết roadmap
+
+| Phase | Effort | Cases target | Cumulative pass | Cumulative pass rate |
+|---|---|---|---|---|
+| Hiện tại (Phase 3 done) | - | 36/301 | 36 | 12.0% |
+| Phase 4 (groups + subjects) | 2 tuần | +40-50 | 76-86 | 25-29% |
+| Phase 5 (concurrent + priority) | 1.5 tuần | +30-40 | 106-126 | 35-42% |
+| Phase 6 (unavail + balance) | 1.5 tuần | +40-50 | 146-176 | 49-58% |
+| Phase 7 (subject order + spacing) | 2 tuần | +30-40 | 176-216 | 58-72% |
+| Phase 8 (rest + relationships) | 1.5 tuần | +30-40 | 206-256 | 68-85% |
+| **Tổng** | **8.5 tuần** | **170-220** | **206-256/301** | **68-85%** |
+
+**Target cuối cùng:** **≥ 80% pass rate** (240+/301)
+
+**Lưu ý:**
+- Một số concepts trong 300 constraints mới quá phức tạp (mentorship, soft constraints, reassignment) → có thể vẫn PARTIAL
+- Priority: Phase 4 > Phase 6 > Phase 5 > Phase 8 > Phase 7 (theo độ khả thi + impact)
+- Có thể bỏ qua một số phase nếu user không cần
+
+## Quyết định tiếp theo
+
+**Câu hỏi cho user:**
+1. Có muốn tiếp tục mở rộng rule parser (Phương án A) hay chỉ cải thiện LLM prompt (Phương án B)?
+2. Nếu chọn A, bắt đầu từ Phase nào? (đề xuất: Phase 4 - teacher groups)
+3. Target pass rate mong muốn? (80%, 90%, hay best effort?)
+4. Budget thời gian? (8 tuần cho full roadmap, hoặc 2-4 tuần cho quick wins)

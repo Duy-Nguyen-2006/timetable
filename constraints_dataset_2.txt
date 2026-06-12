@@ -1,0 +1,645 @@
+"# 300 CONSTRAINTS MỚI - CÁC LOẠI KHÁC BIỆT ĐỂ TEST HỆ THỐNG
+# Mỗi dòng là 1 constraint với các pattern hoàn toàn mới
+
+# NHÓM 1: CONSTRAINTS VỀ NHÓM/TỔ GIÁO VIÊN (1-30)
+Tổ Toán có Hiếu, Long, Dung không dạy cùng ngày
+Nhóm A gồm Mai, Tuấn, Lan phải có ít nhất 1 người dạy mỗi ngày
+Tổ Văn có Hoa, Minh không dạy cùng tiết
+Nhóm trưởng Quân dạy nhiều hơn tất cả thành viên trong nhóm của mình
+Tổ Anh có Nam, Phương, Trang phải dạy đều các ngày trong tuần
+Nhóm B không có quá 2 người dạy cùng lúc
+Tổ Lý có Bình, Cường dạy xen kẽ nhau
+Nhóm senior gồm Đạt, Khánh dạy các tiết khó
+Tổ Hóa có Thảo, Nhung không dạy liên tiếp 2 ngày
+Nhóm C có đúng 3 người dạy mỗi ngày
+Tổ Sinh có Toàn, Vân dạy cùng ngày nhưng khác tiết
+Nhóm junior gồm Hiếu, Long cần giám sát từ senior
+Tổ Sử có ít nhất 2 người dạy mỗi tiết buổi sáng
+Nhóm D không dạy thứ 7
+Tổ Địa có tối đa 1 người dạy mỗi tiết
+Nhóm đặc biệt gồm Mai, Hoa, Quân dạy các lớp khó
+Tổ Tin có Lan, Minh dạy cách nhau ít nhất 2 tiết
+Nhóm E phải có trưởng nhóm dạy đầu tiên
+Tổ GDCD có Nam, Bình dạy các tiết cuối
+Nhóm thực hành gồm Phương, Cường cần phòng đặc biệt
+Tổ Thể dục có Trang, Đạt dạy buổi sáng
+Nhóm F có tổng số tiết bằng nhóm G
+Tổ Âm nhạc có Khánh, Thảo dạy các tiết lẻ
+Nhóm H không dạy cùng ngày với nhóm I
+Tổ Mỹ thuật có Nhung, Toàn dạy buổi chiều
+Nhóm trẻ không dạy tiết 1 và tiết 5
+Tổ Công nghệ có Vân dạy sau khi Hiếu dạy xong
+Nhóm kiêm nhiệm không dạy quá 8 tiết/tuần
+Tổ chủ nhiệm có mỗi người dạy đúng 1 ngày
+Nhóm hợp đồng phải dạy tối thiểu 5 tiết/tuần
+
+# NHÓM 2: CONSTRAINTS VỀ MÔN HỌC (31-60)
+Toán không dạy tiết cuối cùng
+Văn phải dạy vào buổi sáng
+Anh Văn dạy cách Toán ít nhất 1 tiết
+Lý và Hóa không dạy liên tiếp
+Sinh học chỉ dạy thứ 2, 4, 6
+Sử dạy trước Địa trong tuần
+GDCD dạy tiết đầu hoặc tiết cuối
+Tin học cần 2 tiết liên tiếp
+Thể dục không dạy ngay sau bữa trưa
+Âm nhạc dạy 1 tuần/2 tuần
+Mỹ thuật dạy cùng ngày với Công nghệ
+Toán có 5 tiết/tuần đều các ngày
+Văn có 4 tiết/tuần không cùng ngày
+Anh Văn dạy vào thứ 2, 3, 5
+Lý có 3 tiết/tuần cách đều
+Hóa dạy sau Lý ít nhất 1 ngày
+Sinh học và Địa không dạy cùng ngày
+Sử có 2 tiết/tuần vào giữa tuần
+Tin học dạy thứ 4 và thứ 6
+Thể dục có 3 tiết/tuần vào buổi sáng
+GDCD chỉ 1 tiết/tuần vào thứ 2
+Công nghệ cần thiết bị đặc biệt tiết 3, 4
+Toán nâng cao chỉ dạy cho học sinh giỏi
+Văn bồi dưỡng dạy buổi chiều
+Anh giao tiếp dạy nhóm nhỏ
+Lý thí nghiệm cần 2 tiết liền
+Hóa thực hành dạy 1 tuần 1 lần
+Sinh thực hành không dạy thứ 7
+Âm nhạc lý thuyết và thực hành cách nhau 2 ngày
+Mỹ thuật sáng tạo cần thời gian dài
+
+# NHÓM 3: CONSTRAINTS VỀ SỐ LƯỢNG GIÁO VIÊN ĐỒNG THỜI (61-90)
+Không quá 5 giáo viên dạy cùng lúc
+Ít nhất 2 giáo viên dạy mỗi tiết
+Đúng 8 giáo viên dạy tiết 2
+Tối đa 3 giáo viên dạy thứ 7
+Từ 4 đến 6 giáo viên dạy tiết buổi sáng
+Không ít hơn 1 giáo viên mỗi tiết
+Chẵn số giáo viên dạy tiết 3
+Lẻ số giáo viên dạy thứ 5
+Nhiều giáo viên nhất dạy tiết 4
+Ít giáo viên nhất dạy tiết 1
+Số giáo viên tiết 2 gấp đôi tiết 5
+Tổng giáo viên buổi sáng bằng buổi chiều
+Hiếu và Long không đồng thời dạy với Dung
+Mai dạy một mình tiết 5 thứ 3
+Tuấn dạy cùng ít nhất 2 người khác
+Lan không dạy khi có quá 4 người
+Hoa chỉ dạy khi có đúng 3 người
+Minh dạy cùng với Quân hoặc Nam
+Phương không dạy một mình
+Trang dạy khi có chẵn số người
+Bình chỉ dạy khi có Cường
+Đạt không dạy cùng với Khánh và Thảo
+Nhung dạy một mình thứ 2 tiết 1
+Toàn dạy cùng tối đa 1 người khác
+Vân không dạy khi có quá 6 người
+Số người dạy tăng dần từ tiết 1 đến tiết 3
+Số người dạy giảm dần từ tiết 4 đến tiết 5
+Thứ 2 có nhiều người dạy nhất tuần
+Thứ 7 có ít người dạy nhất tuần
+Mỗi ngày phải có từ 5-8 giáo viên
+
+# NHÓM 4: CONSTRAINTS VỀ ĐỘ ƯU TIÊN VÀ PHÂN CẤP (91-120)
+Giáo viên cấp cao dạy trước giáo viên cấp thấp
+Hiếu ưu tiên cao hơn Long trong chọn tiết
+Dung có độ ưu tiên 1 không bị xung đột
+Mai ưu tiên thứ 2 chỉ sau Tuấn
+Lan có độ ưu tiên thấp nhất trong tổ
+Hoa ưu tiên dạy buổi sáng hơn buổi chiều
+Minh ưu tiên tiết 3 cao nhất
+Quân là ưu tiên tuyệt đối thứ 2
+Nam có quyền chọn tiết trước Phương
+Trang ưu tiên không dạy thứ 7
+Bình bị ưu tiên thấp vào thứ 5
+Cường có thể ghi đè lịch của người khác
+Đạt không được ưu tiên vào buổi chiều
+Khánh ưu tiên cao khi dạy Toán
+Thảo có độ ưu tiên trung bình
+Nhung ưu tiên thấp nhất toàn trường
+Toàn có quyền từ chối tiết không phù hợp
+Vân bị hạn chế ưu tiên do mới vào
+Giáo viên thâm niên trên 10 năm ưu tiên cao
+Giáo viên mới ưu tiên thấp 2 tháng đầu
+Trưởng tổ có ưu tiên cao nhất tổ
+Phó hiệu trưởng không bị xung đột lịch
+Giáo viên xuất sắc được ưu tiên chọn trước
+Giáo viên thử việc ưu tiên cuối cùng
+Giáo viên kiêm nhiệm có ưu tiên đặc biệt
+Giáo viên có con nhỏ ưu tiên không tiết cuối
+Giáo viên xa nhà ưu tiên dạy liền khối
+Giáo viên khuyết tật ưu tiên tiết thuận lợi
+Giáo viên bán trú ưu tiên buổi sáng
+Giáo viên hợp đồng ưu tiên cuối
+
+# NHÓM 5: CONSTRAINTS VỀ NGHỈ VÀ KHÔNG KHẢ DỤNG (121-150)
+Hiếu nghỉ thứ 7 hàng tuần
+Long không khả dụng tiết 1 thứ 2
+Dung nghỉ phép thứ 4 tuần này
+Mai có lịch khám bệnh thứ 5 tiết 3
+Tuấn không dạy được khi trời mưa
+Lan nghỉ thai sản từ tuần 3
+Hoa nghỉ ốm không xác định được ngày
+Minh vắng mặt các buổi họp phụ huynh
+Quân không thể dạy trong giờ hành chính
+Nam nghỉ luân phiên 1 tuần/tháng
+Phương đi công tác thứ 6
+Trang nghỉ bù sau làm thêm
+Bình không khả dụng các ngày lễ
+Cường nghỉ đột xuất cần người thay
+Đạt có lịch đào tạo mỗi tháng 2 ngày
+Khánh không dạy khi đi thi nâng ngạch
+Thảo nghỉ dưỡng thai từ tháng 7
+Nhung vắng mặt các kỳ thi học kỳ
+Toàn không thể dạy tiết trống đột xuất
+Vân nghỉ theo lịch luân phiên
+Giáo viên có tang nghỉ 3 ngày
+Giáo viên đi học nghỉ theo lịch cố định
+Giáo viên mang thai không dạy tiết cuối
+Giáo viên bệnh mãn tính nghỉ không định kỳ
+Giáo viên đi hội thảo nghỉ 1-2 ngày
+Giáo viên trực nghỉ dạy ngày hôm sau
+Giáo viên làm nhiệm vụ khác nghỉ dạy
+Giáo viên chấm thi nghỉ dạy các ngày chấm
+Giáo viên coi thi không dạy tiết thi
+Giáo viên có việc gia đình đột xuất xin nghỉ
+
+# NHÓM 6: CONSTRAINTS VỀ CÂN BẰNG KHỐI LƯỢNG CÔNG VIỆC (151-180)
+Tất cả giáo viên dạy đều số tiết trong tuần
+Chênh lệch số tiết giữa giáo viên không quá 3 tiết
+Hiếu và Long dạy số tiết như nhau
+Dung dạy nhiều hơn trung bình 2 tiết
+Mai không được dạy quá 15 tiết/tuần
+Tuấn phải dạy ít nhất 10 tiết/tuần
+Lan dạy từ 12-14 tiết mỗi tuần
+Hoa dạy bằng 80% số tiết của Minh
+Quân dạy nhiều nhất không quá 20 tiết
+Nam dạy tối thiểu 6 tiết/tuần do kiêm nhiệm
+Phương dạy đúng bằng mức trung bình
+Trang không dạy ít hơn giáo viên cùng tổ
+Bình dạy nhiều hơn Cường 1 tiết mỗi tuần
+Đạt dạy đều mỗi ngày 2 tiết
+Khánh dạy không đều giữa các ngày
+Thảo dạy tập trung vào 3 ngày
+Nhung phân bổ đều buổi sáng và chiều
+Toàn dạy nhiều buổi sáng hơn buổi chiều
+Vân dạy cân bằng giữa các ngày lẻ chẵn
+Tổng tiết của tổ A bằng tổ B
+Khối lượng công việc tăng dần theo thâm niên
+Giáo viên mới dạy ít hơn 20% so với cũ
+Giáo viên kiêm nhiệm giảm 30% khối lượng
+Giáo viên trên 50 tuổi giảm 10% tiết dạy
+Giáo viên có con nhỏ giảm 15% khối lượng
+Giáo viên chủ nhiệm tăng 2 tiết trách nhiệm
+Giáo viên tổ trưởng giảm 3 tiết để quản lý
+Giáo viên dạy 2 môn cân bằng giữa 2 môn
+Giáo viên dạy nhiều lớp phân bổ đều
+Giáo viên dạy khối khó tăng hệ số 1.2
+
+# NHÓM 7: CONSTRAINTS VỀ THỨ TỰ VÀ LOGIC MÔN HỌC (181-210)
+Toán dạy trước Lý trong cùng ngày
+Lý dạy sau Toán ít nhất 1 tiết
+Hóa không dạy trước Toán
+Văn dạy đầu tiên trong ngày
+Anh Văn dạy sau khi nghỉ giải lao
+Thể dục không dạy liền trước Toán
+Âm nhạc dạy sau các môn chính
+Tin học dạy khi đã học xong lý thuyết
+GDCD dạy vào đầu hoặc cuối tuần
+Địa lý dạy cùng tuần với Lịch sử
+Sinh học dạy trước thực hành 1 ngày
+Hóa lý thuyết trước thực hành 2 tiết
+Toán nâng cao sau Toán cơ bản
+Văn đọc hiểu trước Văn làm văn
+Anh nghe sau Anh nói trong tuần
+Lý điện học sau Toán hàm số
+Hóa hữu cơ sau Hóa vô cơ
+Sinh di truyền sau Sinh tế bào
+Sử Việt Nam sau Sử thế giới
+Địa Việt Nam trước Địa khu vực
+Công nghệ thực hành sau lý thuyết 1 tuần
+Thể dục lý thuyết trước thực hành
+Tin đại cương trước Tin chuyên ngành
+Mỹ thuật lý thuyết và thực hành xen kẽ
+Âm nhạc thanh nhạc và khí nhạc riêng biệt
+Toán hình học và Toán đại số cách ngày
+Văn thơ và Văn xuôi không cùng ngày
+Anh giao tiếp trước Anh văn học
+Lý lực học trước Lý nhiệt học
+Hóa kim loại sau Hóa phi kim
+
+# NHÓM 8: CONSTRAINTS VỀ KHOẢNG CÁCH GIỮA CÁC BUỔI HỌC (211-240)
+Toán cách nhau đúng 1 ngày giữa các buổi
+Văn không dạy 2 buổi liên tiếp
+Anh Văn cách đều trong tuần
+Lý cần nghỉ ít nhất 2 ngày giữa các buổi
+Hóa dạy cách nhau tối đa 3 ngày
+Sinh học dạy mỗi 2 ngày 1 lần
+Thể dục cách nhau đúng 2 ngày
+Âm nhạc dạy 1 tuần 1 lần cố định
+Tin học không dạy 2 ngày liên tiếp
+GDCD dạy 1 tuần 1 lần
+Địa lý cách nhau ít nhất 1 ngày
+Lịch sử dạy xen kẽ với Địa
+Toán lớp A và lớp B cách nhau 1 tiết
+Văn các lớp không dạy cùng lúc
+Anh Văn mỗi lớp cách đều 2 ngày
+Lý thực hành cách lý thuyết đúng 3 ngày
+Hóa bài mới và bài cũ cách nhau 1 tuần
+Sinh học lý thuyết và thực hành cách 4 ngày
+Thể dục mỗi lớp dạy cố định các ngày 2, 4, 6
+Công nghệ dạy cách đều mỗi tuần
+Mỹ thuật không dạy 2 tuần liên tiếp cho cùng lớp
+Âm nhạc lớp khác cùng ngày khác tiết
+Toán học thêm cách học chính 1 ngày
+Văn bồi dưỡng cách bài chính 2 ngày
+Anh giao tiếp không trùng Anh văn
+Các môn tự chọn cách nhau tối thiểu 1 ngày
+Môn chính cách môn phụ ít nhất 2 tiết
+Bài kiểm tra cách bài học 1 tuần
+Ôn tập cách kiểm tra 2 ngày
+Học bù cách học chính tối đa 3 ngày
+
+# NHÓM 9: CONSTRAINTS VỀ THỜI GIAN NGHỈ NGƠI (241-270)
+Giáo viên có ít nhất 15 phút nghỉ giữa các tiết
+Hiếu cần 30 phút nghỉ sau 2 tiết liên tiếp
+Long không dạy quá 3 tiết liên tục
+Dung có 1 tiết nghỉ giữa buổi
+Mai nghỉ trưa từ 11h30 đến 13h30
+Tuấn cần nghỉ ít nhất 1 tiết mỗi buổi
+Lan không dạy liền 4 tiết
+Hoa có giờ nghỉ cố định tiết 3
+Minh nghỉ sau mỗi 2 tiết dạy
+Quân có 2 tiết nghỉ mỗi ngày
+Nam nghỉ giữa các môn khác nhau
+Phương cần nghỉ trước tiết khó
+Trang nghỉ sau tiết thực hành
+Bình có thời gian ăn sáng 20 phút
+Cường nghỉ tiết 4 hàng ngày
+Đạt không dạy qua giờ nghỉ trưa
+Khánh có 10 phút chuẩn bị giữa các tiết
+Thảo nghỉ sau dạy lớp đông
+Nhung cần 5 phút chuyển đổi lớp
+Toàn có giờ nghỉ linh hoạt
+Vân nghỉ 1 ngày giữa tuần
+Giáo viên trên 50 tuổi nghỉ nhiều hơn
+Giáo viên dạy thực hành nghỉ sau mỗi buổi
+Giáo viên dạy lớp khó nghỉ thêm 10 phút
+Giáo viên dạy 2 ca nghỉ giữa 2 ca
+Giáo viên có bệnh mãn tính nghỉ nhiều
+Giáo viên mang thai nghỉ mỗi 2 tiết
+Giáo viên cho con bú nghỉ 2 lần/ngày 30 phút
+Giáo viên xa trường nghỉ trưa đủ thời gian
+Giáo viên đi xe buýt có thời gian di chuyển
+
+# NHÓM 10: CONSTRAINTS VỀ MỐI QUAN HỆ VÀ TƯƠNG TÁC (271-300)
+Hiếu và Long hợp tác dạy cùng lớp
+Dung không dạy chung với Mai do mâu thuẫn
+Tuấn hỗ trợ Lan khi Lan dạy lớp khó
+Hoa và Minh là cặp đôi dạy tốt cùng nhau
+Quân là mentor của Nam phải dạy kề nhau
+Phương tránh dạy cùng khung giờ với Trang
+Bình và Cường cạnh tranh không dạy cùng lớp
+Đạt giám sát Khánh do Khánh mới
+Thảo và Nhung là bạn thân dạy gần nhau
+Toàn không hòa hợp với Vân tránh gặp nhau
+Hiếu dạy thay Long khi Long nghỉ
+Dung học hỏi kinh nghiệm từ Mai
+Tuấn và Lan cùng dự giờ của nhau
+Hoa truyền đạt kỹ năng cho Minh
+Quân đánh giá năng lực Nam định kỳ
+Phương và Trang chia sẻ tài liệu
+Bình chỉ đạo Cường về phương pháp
+Đạt phản hồi cho Khánh sau mỗi buổi
+Thảo động viên Nhung khi Nhung gặp khó
+Toàn xin lỗi Vân để cải thiện quan hệ
+Giáo viên cùng tổ họp mỗi tuần 1 lần
+Giáo viên cùng khối trao đổi liên tục
+Giáo viên trẻ học hỏi giáo viên lão thành
+Giáo viên giỏi hướng dẫn giáo viên yếu
+Giáo viên cùng môn dự giờ nhau tối thiểu 2 lần/tháng
+Giáo viên có xung đột được sắp xếp tránh gặp
+Giáo viên là vợ chồng ưu tiên lịch phù hợp
+Giáo viên là anh chị em không dạy cùng lớp
+Giáo viên thân thiết được dạy gần nhau
+Giáo viên mới được ghép với giáo viên kỳ cựu
+""# 300 CONSTRAINTS MỚI - CÁC LOẠI KHÁC BIỆT ĐỂ TEST HỆ THỐNG
+# Mỗi dòng là 1 constraint với các pattern hoàn toàn mới
+
+# NHÓM 1: CONSTRAINTS VỀ NHÓM/TỔ GIÁO VIÊN (1-30)
+Tổ Toán có Hiếu, Long, Dung không dạy cùng ngày
+Nhóm A gồm Mai, Tuấn, Lan phải có ít nhất 1 người dạy mỗi ngày
+Tổ Văn có Hoa, Minh không dạy cùng tiết
+Nhóm trưởng Quân dạy nhiều hơn tất cả thành viên trong nhóm của mình
+Tổ Anh có Nam, Phương, Trang phải dạy đều các ngày trong tuần
+Nhóm B không có quá 2 người dạy cùng lúc
+Tổ Lý có Bình, Cường dạy xen kẽ nhau
+Nhóm senior gồm Đạt, Khánh dạy các tiết khó
+Tổ Hóa có Thảo, Nhung không dạy liên tiếp 2 ngày
+Nhóm C có đúng 3 người dạy mỗi ngày
+Tổ Sinh có Toàn, Vân dạy cùng ngày nhưng khác tiết
+Nhóm junior gồm Hiếu, Long cần giám sát từ senior
+Tổ Sử có ít nhất 2 người dạy mỗi tiết buổi sáng
+Nhóm D không dạy thứ 7
+Tổ Địa có tối đa 1 người dạy mỗi tiết
+Nhóm đặc biệt gồm Mai, Hoa, Quân dạy các lớp khó
+Tổ Tin có Lan, Minh dạy cách nhau ít nhất 2 tiết
+Nhóm E phải có trưởng nhóm dạy đầu tiên
+Tổ GDCD có Nam, Bình dạy các tiết cuối
+Nhóm thực hành gồm Phương, Cường cần phòng đặc biệt
+Tổ Thể dục có Trang, Đạt dạy buổi sáng
+Nhóm F có tổng số tiết bằng nhóm G
+Tổ Âm nhạc có Khánh, Thảo dạy các tiết lẻ
+Nhóm H không dạy cùng ngày với nhóm I
+Tổ Mỹ thuật có Nhung, Toàn dạy buổi chiều
+Nhóm trẻ không dạy tiết 1 và tiết 5
+Tổ Công nghệ có Vân dạy sau khi Hiếu dạy xong
+Nhóm kiêm nhiệm không dạy quá 8 tiết/tuần
+Tổ chủ nhiệm có mỗi người dạy đúng 1 ngày
+Nhóm hợp đồng phải dạy tối thiểu 5 tiết/tuần
+
+# NHÓM 2: CONSTRAINTS VỀ MÔN HỌC (31-60)
+Toán không dạy tiết cuối cùng
+Văn phải dạy vào buổi sáng
+Anh Văn dạy cách Toán ít nhất 1 tiết
+Lý và Hóa không dạy liên tiếp
+Sinh học chỉ dạy thứ 2, 4, 6
+Sử dạy trước Địa trong tuần
+GDCD dạy tiết đầu hoặc tiết cuối
+Tin học cần 2 tiết liên tiếp
+Thể dục không dạy ngay sau bữa trưa
+Âm nhạc dạy 1 tuần/2 tuần
+Mỹ thuật dạy cùng ngày với Công nghệ
+Toán có 5 tiết/tuần đều các ngày
+Văn có 4 tiết/tuần không cùng ngày
+Anh Văn dạy vào thứ 2, 3, 5
+Lý có 3 tiết/tuần cách đều
+Hóa dạy sau Lý ít nhất 1 ngày
+Sinh học và Địa không dạy cùng ngày
+Sử có 2 tiết/tuần vào giữa tuần
+Tin học dạy thứ 4 và thứ 6
+Thể dục có 3 tiết/tuần vào buổi sáng
+GDCD chỉ 1 tiết/tuần vào thứ 2
+Công nghệ cần thiết bị đặc biệt tiết 3, 4
+Toán nâng cao chỉ dạy cho học sinh giỏi
+Văn bồi dưỡng dạy buổi chiều
+Anh giao tiếp dạy nhóm nhỏ
+Lý thí nghiệm cần 2 tiết liền
+Hóa thực hành dạy 1 tuần 1 lần
+Sinh thực hành không dạy thứ 7
+Âm nhạc lý thuyết và thực hành cách nhau 2 ngày
+Mỹ thuật sáng tạo cần thời gian dài
+
+# NHÓM 3: CONSTRAINTS VỀ SỐ LƯỢNG GIÁO VIÊN ĐỒNG THỜI (61-90)
+Không quá 5 giáo viên dạy cùng lúc
+Ít nhất 2 giáo viên dạy mỗi tiết
+Đúng 8 giáo viên dạy tiết 2
+Tối đa 3 giáo viên dạy thứ 7
+Từ 4 đến 6 giáo viên dạy tiết buổi sáng
+Không ít hơn 1 giáo viên mỗi tiết
+Chẵn số giáo viên dạy tiết 3
+Lẻ số giáo viên dạy thứ 5
+Nhiều giáo viên nhất dạy tiết 4
+Ít giáo viên nhất dạy tiết 1
+Số giáo viên tiết 2 gấp đôi tiết 5
+Tổng giáo viên buổi sáng bằng buổi chiều
+Hiếu và Long không đồng thời dạy với Dung
+Mai dạy một mình tiết 5 thứ 3
+Tuấn dạy cùng ít nhất 2 người khác
+Lan không dạy khi có quá 4 người
+Hoa chỉ dạy khi có đúng 3 người
+Minh dạy cùng với Quân hoặc Nam
+Phương không dạy một mình
+Trang dạy khi có chẵn số người
+Bình chỉ dạy khi có Cường
+Đạt không dạy cùng với Khánh và Thảo
+Nhung dạy một mình thứ 2 tiết 1
+Toàn dạy cùng tối đa 1 người khác
+Vân không dạy khi có quá 6 người
+Số người dạy tăng dần từ tiết 1 đến tiết 3
+Số người dạy giảm dần từ tiết 4 đến tiết 5
+Thứ 2 có nhiều người dạy nhất tuần
+Thứ 7 có ít người dạy nhất tuần
+Mỗi ngày phải có từ 5-8 giáo viên
+
+# NHÓM 4: CONSTRAINTS VỀ ĐỘ ƯU TIÊN VÀ PHÂN CẤP (91-120)
+Giáo viên cấp cao dạy trước giáo viên cấp thấp
+Hiếu ưu tiên cao hơn Long trong chọn tiết
+Dung có độ ưu tiên 1 không bị xung đột
+Mai ưu tiên thứ 2 chỉ sau Tuấn
+Lan có độ ưu tiên thấp nhất trong tổ
+Hoa ưu tiên dạy buổi sáng hơn buổi chiều
+Minh ưu tiên tiết 3 cao nhất
+Quân là ưu tiên tuyệt đối thứ 2
+Nam có quyền chọn tiết trước Phương
+Trang ưu tiên không dạy thứ 7
+Bình bị ưu tiên thấp vào thứ 5
+Cường có thể ghi đè lịch của người khác
+Đạt không được ưu tiên vào buổi chiều
+Khánh ưu tiên cao khi dạy Toán
+Thảo có độ ưu tiên trung bình
+Nhung ưu tiên thấp nhất toàn trường
+Toàn có quyền từ chối tiết không phù hợp
+Vân bị hạn chế ưu tiên do mới vào
+Giáo viên thâm niên trên 10 năm ưu tiên cao
+Giáo viên mới ưu tiên thấp 2 tháng đầu
+Trưởng tổ có ưu tiên cao nhất tổ
+Phó hiệu trưởng không bị xung đột lịch
+Giáo viên xuất sắc được ưu tiên chọn trước
+Giáo viên thử việc ưu tiên cuối cùng
+Giáo viên kiêm nhiệm có ưu tiên đặc biệt
+Giáo viên có con nhỏ ưu tiên không tiết cuối
+Giáo viên xa nhà ưu tiên dạy liền khối
+Giáo viên khuyết tật ưu tiên tiết thuận lợi
+Giáo viên bán trú ưu tiên buổi sáng
+Giáo viên hợp đồng ưu tiên cuối
+
+# NHÓM 5: CONSTRAINTS VỀ NGHỈ VÀ KHÔNG KHẢ DỤNG (121-150)
+Hiếu nghỉ thứ 7 hàng tuần
+Long không khả dụng tiết 1 thứ 2
+Dung nghỉ phép thứ 4 tuần này
+Mai có lịch khám bệnh thứ 5 tiết 3
+Tuấn không dạy được khi trời mưa
+Lan nghỉ thai sản từ tuần 3
+Hoa nghỉ ốm không xác định được ngày
+Minh vắng mặt các buổi họp phụ huynh
+Quân không thể dạy trong giờ hành chính
+Nam nghỉ luân phiên 1 tuần/tháng
+Phương đi công tác thứ 6
+Trang nghỉ bù sau làm thêm
+Bình không khả dụng các ngày lễ
+Cường nghỉ đột xuất cần người thay
+Đạt có lịch đào tạo mỗi tháng 2 ngày
+Khánh không dạy khi đi thi nâng ngạch
+Thảo nghỉ dưỡng thai từ tháng 7
+Nhung vắng mặt các kỳ thi học kỳ
+Toàn không thể dạy tiết trống đột xuất
+Vân nghỉ theo lịch luân phiên
+Giáo viên có tang nghỉ 3 ngày
+Giáo viên đi học nghỉ theo lịch cố định
+Giáo viên mang thai không dạy tiết cuối
+Giáo viên bệnh mãn tính nghỉ không định kỳ
+Giáo viên đi hội thảo nghỉ 1-2 ngày
+Giáo viên trực nghỉ dạy ngày hôm sau
+Giáo viên làm nhiệm vụ khác nghỉ dạy
+Giáo viên chấm thi nghỉ dạy các ngày chấm
+Giáo viên coi thi không dạy tiết thi
+Giáo viên có việc gia đình đột xuất xin nghỉ
+
+# NHÓM 6: CONSTRAINTS VỀ CÂN BẰNG KHỐI LƯỢNG CÔNG VIỆC (151-180)
+Tất cả giáo viên dạy đều số tiết trong tuần
+Chênh lệch số tiết giữa giáo viên không quá 3 tiết
+Hiếu và Long dạy số tiết như nhau
+Dung dạy nhiều hơn trung bình 2 tiết
+Mai không được dạy quá 15 tiết/tuần
+Tuấn phải dạy ít nhất 10 tiết/tuần
+Lan dạy từ 12-14 tiết mỗi tuần
+Hoa dạy bằng 80% số tiết của Minh
+Quân dạy nhiều nhất không quá 20 tiết
+Nam dạy tối thiểu 6 tiết/tuần do kiêm nhiệm
+Phương dạy đúng bằng mức trung bình
+Trang không dạy ít hơn giáo viên cùng tổ
+Bình dạy nhiều hơn Cường 1 tiết mỗi tuần
+Đạt dạy đều mỗi ngày 2 tiết
+Khánh dạy không đều giữa các ngày
+Thảo dạy tập trung vào 3 ngày
+Nhung phân bổ đều buổi sáng và chiều
+Toàn dạy nhiều buổi sáng hơn buổi chiều
+Vân dạy cân bằng giữa các ngày lẻ chẵn
+Tổng tiết của tổ A bằng tổ B
+Khối lượng công việc tăng dần theo thâm niên
+Giáo viên mới dạy ít hơn 20% so với cũ
+Giáo viên kiêm nhiệm giảm 30% khối lượng
+Giáo viên trên 50 tuổi giảm 10% tiết dạy
+Giáo viên có con nhỏ giảm 15% khối lượng
+Giáo viên chủ nhiệm tăng 2 tiết trách nhiệm
+Giáo viên tổ trưởng giảm 3 tiết để quản lý
+Giáo viên dạy 2 môn cân bằng giữa 2 môn
+Giáo viên dạy nhiều lớp phân bổ đều
+Giáo viên dạy khối khó tăng hệ số 1.2
+
+# NHÓM 7: CONSTRAINTS VỀ THỨ TỰ VÀ LOGIC MÔN HỌC (181-210)
+Toán dạy trước Lý trong cùng ngày
+Lý dạy sau Toán ít nhất 1 tiết
+Hóa không dạy trước Toán
+Văn dạy đầu tiên trong ngày
+Anh Văn dạy sau khi nghỉ giải lao
+Thể dục không dạy liền trước Toán
+Âm nhạc dạy sau các môn chính
+Tin học dạy khi đã học xong lý thuyết
+GDCD dạy vào đầu hoặc cuối tuần
+Địa lý dạy cùng tuần với Lịch sử
+Sinh học dạy trước thực hành 1 ngày
+Hóa lý thuyết trước thực hành 2 tiết
+Toán nâng cao sau Toán cơ bản
+Văn đọc hiểu trước Văn làm văn
+Anh nghe sau Anh nói trong tuần
+Lý điện học sau Toán hàm số
+Hóa hữu cơ sau Hóa vô cơ
+Sinh di truyền sau Sinh tế bào
+Sử Việt Nam sau Sử thế giới
+Địa Việt Nam trước Địa khu vực
+Công nghệ thực hành sau lý thuyết 1 tuần
+Thể dục lý thuyết trước thực hành
+Tin đại cương trước Tin chuyên ngành
+Mỹ thuật lý thuyết và thực hành xen kẽ
+Âm nhạc thanh nhạc và khí nhạc riêng biệt
+Toán hình học và Toán đại số cách ngày
+Văn thơ và Văn xuôi không cùng ngày
+Anh giao tiếp trước Anh văn học
+Lý lực học trước Lý nhiệt học
+Hóa kim loại sau Hóa phi kim
+
+# NHÓM 8: CONSTRAINTS VỀ KHOẢNG CÁCH GIỮA CÁC BUỔI HỌC (211-240)
+Toán cách nhau đúng 1 ngày giữa các buổi
+Văn không dạy 2 buổi liên tiếp
+Anh Văn cách đều trong tuần
+Lý cần nghỉ ít nhất 2 ngày giữa các buổi
+Hóa dạy cách nhau tối đa 3 ngày
+Sinh học dạy mỗi 2 ngày 1 lần
+Thể dục cách nhau đúng 2 ngày
+Âm nhạc dạy 1 tuần 1 lần cố định
+Tin học không dạy 2 ngày liên tiếp
+GDCD dạy 1 tuần 1 lần
+Địa lý cách nhau ít nhất 1 ngày
+Lịch sử dạy xen kẽ với Địa
+Toán lớp A và lớp B cách nhau 1 tiết
+Văn các lớp không dạy cùng lúc
+Anh Văn mỗi lớp cách đều 2 ngày
+Lý thực hành cách lý thuyết đúng 3 ngày
+Hóa bài mới và bài cũ cách nhau 1 tuần
+Sinh học lý thuyết và thực hành cách 4 ngày
+Thể dục mỗi lớp dạy cố định các ngày 2, 4, 6
+Công nghệ dạy cách đều mỗi tuần
+Mỹ thuật không dạy 2 tuần liên tiếp cho cùng lớp
+Âm nhạc lớp khác cùng ngày khác tiết
+Toán học thêm cách học chính 1 ngày
+Văn bồi dưỡng cách bài chính 2 ngày
+Anh giao tiếp không trùng Anh văn
+Các môn tự chọn cách nhau tối thiểu 1 ngày
+Môn chính cách môn phụ ít nhất 2 tiết
+Bài kiểm tra cách bài học 1 tuần
+Ôn tập cách kiểm tra 2 ngày
+Học bù cách học chính tối đa 3 ngày
+
+# NHÓM 9: CONSTRAINTS VỀ THỜI GIAN NGHỈ NGƠI (241-270)
+Giáo viên có ít nhất 15 phút nghỉ giữa các tiết
+Hiếu cần 30 phút nghỉ sau 2 tiết liên tiếp
+Long không dạy quá 3 tiết liên tục
+Dung có 1 tiết nghỉ giữa buổi
+Mai nghỉ trưa từ 11h30 đến 13h30
+Tuấn cần nghỉ ít nhất 1 tiết mỗi buổi
+Lan không dạy liền 4 tiết
+Hoa có giờ nghỉ cố định tiết 3
+Minh nghỉ sau mỗi 2 tiết dạy
+Quân có 2 tiết nghỉ mỗi ngày
+Nam nghỉ giữa các môn khác nhau
+Phương cần nghỉ trước tiết khó
+Trang nghỉ sau tiết thực hành
+Bình có thời gian ăn sáng 20 phút
+Cường nghỉ tiết 4 hàng ngày
+Đạt không dạy qua giờ nghỉ trưa
+Khánh có 10 phút chuẩn bị giữa các tiết
+Thảo nghỉ sau dạy lớp đông
+Nhung cần 5 phút chuyển đổi lớp
+Toàn có giờ nghỉ linh hoạt
+Vân nghỉ 1 ngày giữa tuần
+Giáo viên trên 50 tuổi nghỉ nhiều hơn
+Giáo viên dạy thực hành nghỉ sau mỗi buổi
+Giáo viên dạy lớp khó nghỉ thêm 10 phút
+Giáo viên dạy 2 ca nghỉ giữa 2 ca
+Giáo viên có bệnh mãn tính nghỉ nhiều
+Giáo viên mang thai nghỉ mỗi 2 tiết
+Giáo viên cho con bú nghỉ 2 lần/ngày 30 phút
+Giáo viên xa trường nghỉ trưa đủ thời gian
+Giáo viên đi xe buýt có thời gian di chuyển
+
+# NHÓM 10: CONSTRAINTS VỀ MỐI QUAN HỆ VÀ TƯƠNG TÁC (271-300)
+Hiếu và Long hợp tác dạy cùng lớp
+Dung không dạy chung với Mai do mâu thuẫn
+Tuấn hỗ trợ Lan khi Lan dạy lớp khó
+Hoa và Minh là cặp đôi dạy tốt cùng nhau
+Quân là mentor của Nam phải dạy kề nhau
+Phương tránh dạy cùng khung giờ với Trang
+Bình và Cường cạnh tranh không dạy cùng lớp
+Đạt giám sát Khánh do Khánh mới
+Thảo và Nhung là bạn thân dạy gần nhau
+Toàn không hòa hợp với Vân tránh gặp nhau
+Hiếu dạy thay Long khi Long nghỉ
+Dung học hỏi kinh nghiệm từ Mai
+Tuấn và Lan cùng dự giờ của nhau
+Hoa truyền đạt kỹ năng cho Minh
+Quân đánh giá năng lực Nam định kỳ
+Phương và Trang chia sẻ tài liệu
+Bình chỉ đạo Cường về phương pháp
+Đạt phản hồi cho Khánh sau mỗi buổi
+Thảo động viên Nhung khi Nhung gặp khó
+Toàn xin lỗi Vân để cải thiện quan hệ
+Giáo viên cùng tổ họp mỗi tuần 1 lần
+Giáo viên cùng khối trao đổi liên tục
+Giáo viên trẻ học hỏi giáo viên lão thành
+Giáo viên giỏi hướng dẫn giáo viên yếu
+Giáo viên cùng môn dự giờ nhau tối thiểu 2 lần/tháng
+Giáo viên có xung đột được sắp xếp tránh gặp
+Giáo viên là vợ chồng ưu tiên lịch phù hợp
+Giáo viên là anh chị em không dạy cùng lớp
+Giáo viên thân thiết được dạy gần nhau
+Giáo viên mới được ghép với giáo viên kỳ cựu
+"
