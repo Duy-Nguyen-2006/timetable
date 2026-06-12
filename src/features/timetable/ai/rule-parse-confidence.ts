@@ -147,6 +147,21 @@ export function inferRuleParseConfidence(
         return { specs, confidence: 'high', issues };
       }
     }
+    // Phase 1 quick wins: no-op marker is high-confidence because we explicitly
+    // detected "all days in week" or "all days except day-not-in-fixture".
+    if (kind === 'teacher_no_constraint') {
+      return { specs, confidence: 'high', issues };
+    }
+  }
+
+  // Phase 1 quick wins: working-days count + max-per-day are deterministic.
+  // Both single-spec and multi-spec outputs are unambiguous.
+  if (specs.every((s) =>
+    s.kind === 'teacher_min_working_days' ||
+    s.kind === 'teacher_max_working_days' ||
+    s.kind === 'teacher_max_per_day'
+  )) {
+    return { specs, confidence: 'high', issues };
   }
 
   if (specs.every((s) => s.kind === 'subject_max_consecutive')) {

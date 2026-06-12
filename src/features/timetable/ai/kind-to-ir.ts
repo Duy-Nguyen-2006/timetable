@@ -336,6 +336,17 @@ export function specToIR(spec: ConstraintSpec): ConstraintIR | null {
         },
       };
     }
+    // ─── No-op kind (Phase 1 quick wins) ────────────────────────────────
+    // teacher_no_constraint encodes "constraint is vacuous in current fixture" —
+    // e.g. "Trang dạy tất cả các ngày trong tuần" on a 5-day dataset, where the
+    // user's intent covers every available day. We emit `const true` so the IR
+    // solver treats it as always satisfied.
+    case 'teacher_no_constraint': {
+      return {
+        ...base,
+        expr: { const: true },
+      };
+    }
     // ─── Allowed kinds (positive, set-restricting) ────────────────────────
     case 'teacher_allowed_periods': {
       const teacher = String(p.teacher ?? '');

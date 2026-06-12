@@ -1492,6 +1492,14 @@ const checkTeacherRequiredDay: CheckFn = (spec, schedule) => {
   return [];
 };
 
+/**
+ * teacher_no_constraint: no-op marker. The constraint resolves to "all days" / "all teachers"
+ * in the current fixture and adds nothing to enforce. Always passes.
+ */
+const checkTeacherNoConstraint: CheckFn = (spec) => {
+  return [];
+};
+
 const checkTeacherRequiredSlot: CheckFn = (spec, schedule) => {
   const teacher = String(spec.params.teacher ?? '');
   const day = String(spec.params.day ?? '');
@@ -1914,6 +1922,7 @@ const checkerByKind: Partial<Record<ConstraintSpec['kind'], CheckFn>> = {
   teacher_required_period: checkTeacherRequiredPeriod,
   class_required_period: checkClassRequiredPeriod,
   subject_required_period: checkSubjectRequiredPeriod,
+  teacher_no_constraint: checkTeacherNoConstraint,
 };
 
 export function validateSchedule(

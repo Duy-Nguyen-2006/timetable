@@ -27,8 +27,8 @@ const REGISTRY_KINDS = new Set(CONSTRAINT_REGISTRY.map((m) => m.kind));
 
 describe('ConstraintKind Contract Tests', () => {
   describe('Registry Completeness', () => {
-    it('CONSTRAINT_REGISTRY should contain all 83 expected constraint kinds', () => {
-      assert.equal(CONSTRAINT_REGISTRY.length, 83);
+    it('CONSTRAINT_REGISTRY should contain all 84 expected constraint kinds', () => {
+      assert.equal(CONSTRAINT_REGISTRY.length, 84);
     });
 
     it('CONSTRAINT_REGISTRY should have no duplicate kinds', () => {

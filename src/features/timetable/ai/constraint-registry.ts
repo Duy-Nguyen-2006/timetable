@@ -111,6 +111,7 @@ export const CONSTRAINT_REGISTRY: ConstraintMeta[] = [
   { kind: 'teacher_required_period', label: 'Teacher required period', group: 'teacher', hasChecker: true, requiredParams: ['teacher', 'period', 'minCount'] },
   { kind: 'class_required_period', label: 'Class required period', group: 'class', hasChecker: true, requiredParams: ['class', 'period', 'minCount'] },
   { kind: 'subject_required_period', label: 'Subject required period', group: 'subject', hasChecker: true, requiredParams: ['subject', 'period', 'minCount'] },
+  { kind: 'teacher_no_constraint', label: 'Teacher no-op constraint', group: 'teacher', hasChecker: true, requiredParams: [] },
   { kind: 'custom_dsl', label: 'Custom DSL', group: 'global', hasChecker: false, requiredParams: [] },
 ];
 
@@ -253,6 +254,8 @@ export const SOLVER_ENCODABLE_KIND_LIST = [
   'teacher_required_period',
   'class_required_period',
   'subject_required_period',
+  // Phase 1 quick wins: no-op marker (e.g. "all days in week" on a 5-day fixture).
+  'teacher_no_constraint',
 ] as const satisfies readonly ConstraintKind[];
 
 export const SOLVER_ENCODABLE_KINDS = new Set<ConstraintKind>(SOLVER_ENCODABLE_KIND_LIST);

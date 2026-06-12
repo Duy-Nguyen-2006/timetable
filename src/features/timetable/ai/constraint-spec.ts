@@ -84,6 +84,10 @@ export type ConstraintKind =
   | 'teacher_required_period'
   | 'class_required_period'
   | 'subject_required_period'
+  // Phase 1 quick wins: no-op marker for constraints that resolve to "all days" in the
+  // current fixture (e.g. "Trang dạy tất cả các ngày trong tuần" on a 5-day fixture).
+  // Validators and solver encoders must treat this as a no-op.
+  | 'teacher_no_constraint'
   | 'custom_dsl';
 
 export type ConditionExpr =

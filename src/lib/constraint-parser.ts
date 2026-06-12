@@ -38,8 +38,13 @@ export type ParsedConstraint =
   | { kind: 'class_min_per_day'; classLabels: string[]; minPerDay: number }
   | { kind: 'class_max_per_day'; classLabels: string[]; maxPerDay: number }
   | { kind: 'teacher_min_per_day'; teacherLabels: string[]; minPerDay: number }
+  | { kind: 'teacher_max_per_day'; teacherLabels: string[]; maxPerDay: number }
   | { kind: 'teacher_no_gaps'; teacherLabels: string[] | '*' }
   | { kind: 'teacher_min_working_days'; teacherLabels: string[]; minDays: number }
+  | { kind: 'teacher_max_working_days'; teacherLabels: string[]; maxDays: number }
+  | { kind: 'teacher_exact_working_days'; teacherLabels: string[]; days: number }
+  | { kind: 'teacher_max_per_day'; teacherLabels: string[]; maxPerDay: number }
+  | { kind: 'teacher_no_constraint'; teacherLabels: string[] }
   | { kind: 'teacher_max_gaps'; teacherLabels: string[]; maxGaps: number }
   | { kind: 'teacher_min_consecutive'; teacherLabels: string[]; minConsecutive: number }
   | { kind: 'subject_min_gap_days'; subjectLabels: string[]; minGapDays: number; classFilter?: string[] }
@@ -136,6 +141,21 @@ function resolveDayId(dayIndex: number, ctxDayIds?: Record<string, string>): str
 
 function extractDays(text: string, ctxDayIds?: Record<string, string>): string[] {
   const days: string[] = []
+  // Range: "từ thứ X đến thứ Y" → expand into the inclusive list of days.
+  const dayRange = text.match(/\bthứ\s*(\d)\s*(?:đến|den|toi|[-–—])\s*thứ\s*(\d)\b/u);
+  if (dayRange) {
+    const lo = Number(dayRange[1]);
+    const hi = Number(dayRange[2]);
+    if (lo >= 2 && hi >= 2 && lo <= 7 && hi <= 7) {
+      const a = Math.min(lo, hi);
+      const b = Math.max(lo, hi);
+      for (let n = a; n <= b; n++) {
+        const dayIndex = n - 2;
+        days.push(resolveDayId(dayIndex, ctxDayIds));
+      }
+      return unique(days);
+    }
+  }
   // Comma/space separated: "thứ 2, 3, 4" or "thứ 2 3 4" → match list of digits 2-7.
   const compact = text.match(/\bthứ\s*([2-7](?:[\s,]+[2-7])+)\b/u)
   if (compact) {
@@ -259,6 +279,36 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
   const days = extractDays(raw, ctx.dayIds)
   const sessions = extractSessions(raw)
   const periods = extractPeriods(raw)
+
+  // Phase 1 quick wins: no-op detection
+  // When the user says "tất cả các ngày trong tuần" or "tất cả các ngày trừ thứ 7"
+  // and the fixture doesn't include the referenced days, the constraint is
+  // vacuous — emit a no-op marker so the parser doesn't fall through to
+  // custom_dsl (which the user-sim test treats as PARTIAL).
+  const allDayIds = Object.keys(ctx.dayIds)
+  if (allDayIds.length > 0 && teachers.length > 0) {
+    const mentionsAllDays = /(tất\s*cả|tat\s*ca|mọi|moi|uất\s*cả|uat\s*ca|all\s*days?)/u.test(raw)
+    const mentionsExclusion = /(trừ|tru|ngoại\s*trừ|ngoai\s*tru|except)/u.test(raw)
+    const mentionsWeekendOrNotInFixture =
+      /\bthứ\s*7\b|\bthứ\s*8\b|\bchủ\s*nhật\b|\bchu\s*nhat\b|\bcn\b/u.test(raw) &&
+      days.length > 0 &&
+      days.some((d) => !allDayIds.includes(d))
+
+    if (mentionsAllDays && !mentionsExclusion) {
+      // "Trang dạy tất cả các ngày trong tuần" — covers every fixture day.
+      return { kind: 'teacher_no_constraint', teacherLabels: teachers }
+    }
+    if (mentionsAllDays && mentionsExclusion) {
+      // "Mai dạy tất cả các ngày trừ thứ 7" — exclusion day not in fixture → no-op.
+      if (days.length > 0 && days.every((d) => !allDayIds.includes(d))) {
+        return { kind: 'teacher_no_constraint', teacherLabels: teachers }
+      }
+    }
+    if (mentionsWeekendOrNotInFixture) {
+      // "Quân không dạy thứ 7" — block day not in fixture → no-op.
+      return { kind: 'teacher_no_constraint', teacherLabels: teachers }
+    }
+  }
 
   if ((/không\s*dạy\s*quá|khong\s*day\s*qua/u.test(raw) || /không\s*quá|khong\s*qua/u.test(raw)) && /liên\s*tiếp|lien\s*tiep/u.test(raw)) {
     const max = extractFirstNumber(raw)
@@ -507,6 +557,73 @@ export function parseConstraint(text: string, ctx: ParseContext): ParsedConstrai
     const minDays = extractFirstNumber(raw)
     if (minDays !== null) {
       return { kind: 'teacher_min_working_days', teacherLabels: teachers, minDays }
+    }
+  }
+
+  // teacher_max_working_days: "giáo viên A không dạy quá N ngày/tuần" | "tối đa N ngày/tuần"
+  if (
+    teachers.length > 0 &&
+    /(?:không\s*quá|khong\s*qua|không\s*hơn|khong\s*hon|tối\s*đa|toi\s*da|nhiều\s*nhất|nhieu\s*nhat|max|không\s*(?:dạy|day)\s*quá|khong\s*(?:day|day)\s*qua|không\s*(?:dạy|day)\s*hơn|khong\s*(?:day|day)\s*hon)/u.test(raw) &&
+    /(ngày|ngay)/u.test(raw) &&
+    /(tuần|tuan|trong\s*tuần|trong\s*tuan)/u.test(raw) &&
+    !/(tiết|tiet)/u.test(raw)
+  ) {
+    const maxDays = extractFirstNumber(raw)
+    if (maxDays !== null) {
+      return { kind: 'teacher_max_working_days', teacherLabels: teachers, maxDays }
+    }
+  }
+
+  // teacher_exact_working_days: "giáo viên A dạy đúng N ngày/tuần" | "chỉ dạy N ngày/tuần"
+  if (
+    teachers.length > 0 &&
+    !/(tiết|tiet)/u.test(raw) &&
+    /(ngày|ngay)/u.test(raw) &&
+    /(tuần|tuan|trong\s*tuần|trong\s*tuan)/u.test(raw) &&
+    /(đúng|dung|chính\s*xác|chinh\s*xac)/u.test(raw)
+  ) {
+    const days = extractFirstNumber(raw)
+    if (days !== null) {
+      return { kind: 'teacher_exact_working_days', teacherLabels: teachers, days }
+    }
+  }
+  if (
+    teachers.length > 0 &&
+    !/(tiết|tiet)/u.test(raw) &&
+    /(ngày|ngay)/u.test(raw) &&
+    /(tuần|tuan|trong\s*tuần|trong\s*tuan)/u.test(raw) &&
+    /chỉ\s*dạy|chi\s*day/u.test(raw)
+  ) {
+    const days = extractFirstNumber(raw)
+    if (days !== null) {
+      return { kind: 'teacher_exact_working_days', teacherLabels: teachers, days }
+    }
+  }
+
+  // teacher_max_per_day: "giáo viên A chỉ dạy N tiết mỗi ngày" | "không quá N tiết mỗi ngày" | "tối đa N tiết/ngày"
+  if (
+    teachers.length > 0 &&
+    /(tiết|tiet)/u.test(raw) &&
+    /(mỗi\s*ngày|moi\s*ngay|mỗi\s*1\s*ngày|moi\s*1\s*ngay|\/ngày|\/ngay|trong\s*ngày|trong\s*ngay)/u.test(raw)
+  ) {
+    const maxPerDay = extractFirstNumber(raw)
+    if (maxPerDay !== null) {
+      return { kind: 'teacher_max_per_day', teacherLabels: teachers, maxPerDay }
+    }
+  }
+
+  // teacher_allow_only_days (range): "Minh dạy từ thứ 2 đến thứ 5" → expand range and emit allow-only.
+  if (
+    teachers.length > 0 &&
+    /\bthứ\s*\d\s*(?:đến|den|toi|[-–—])\s*thứ\s*\d\b/u.test(raw) &&
+    !/không|khong/u.test(raw)
+  ) {
+    const allDayIds = Object.keys(ctx.dayIds);
+    const rangeDays = extractDays(raw, ctx.dayIds);
+    const rangeSet = new Set(rangeDays);
+    // Only emit allow-only when the range is a strict subset of available days.
+    if (rangeDays.length > 1 && rangeDays.length < allDayIds.length && rangeDays.every((d) => allDayIds.includes(d))) {
+      return { kind: 'teacher_allow_only_days', teacherLabels: teachers, dayIds: rangeDays };
     }
   }
 

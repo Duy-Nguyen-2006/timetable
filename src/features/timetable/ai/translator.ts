@@ -120,6 +120,7 @@ const constraintSpecSchema = z.object({
     'teacher_required_slot',
     'teacher_pair_required_same_day',
     'teacher_pair_required_same_slot',
+    'teacher_no_constraint',
     'custom_dsl',
   ]),
   params: z.record(z.string(), z.unknown()),
@@ -973,6 +974,58 @@ function fallbackFromRuleParser(input: AgentInputPayload): ConstraintSpec[] {
         severity,
         kind: 'teacher_min_working_days',
         params: { teacher: parsed.teacherLabels[0], minDays: parsed.minDays },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_exact_working_days' && parsed.teacherLabels[0]) {
+      const teacher = parsed.teacherLabels[0];
+      return [
+        {
+          id: `${id}_min`,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_min_working_days',
+          params: { teacher, minDays: parsed.days },
+        } satisfies ConstraintSpec,
+        {
+          id: `${id}_max`,
+          original: constraint.text,
+          severity,
+          kind: 'teacher_max_working_days',
+          params: { teacher, maxDays: parsed.days },
+        } satisfies ConstraintSpec,
+      ];
+    }
+
+    if (parsed.kind === 'teacher_max_working_days' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_max_working_days',
+        params: { teacher: parsed.teacherLabels[0], maxDays: parsed.maxDays },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_max_per_day' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity,
+        kind: 'teacher_max_per_day',
+        params: { teacher: parsed.teacherLabels[0], maxPerDay: parsed.maxPerDay },
+      } satisfies ConstraintSpec;
+    }
+
+    if (parsed.kind === 'teacher_no_constraint' && parsed.teacherLabels[0]) {
+      return {
+        id,
+        original: constraint.text,
+        severity: 'info',
+        kind: 'teacher_no_constraint',
+        params: { teacher: parsed.teacherLabels[0] },
+        tags: ['auto_base'],
+        notes: 'no_op:constraint_resolves_to_all_days',
       } satisfies ConstraintSpec;
     }
 
